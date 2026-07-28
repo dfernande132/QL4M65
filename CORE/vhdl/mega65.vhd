@@ -239,22 +239,6 @@ signal main_rst               : std_logic;
 -- qnice_clk
 ---------------------------------------------------------------------------------------------
 
----------------------------------------------------------------------------------------------
--- Democore & example stuff: Delete before starting to port your own core
----------------------------------------------------------------------------------------------
-
--- Democore menu items
-constant C_MENU_HDMI_16_9_50   : natural := 12;
-constant C_MENU_HDMI_16_9_60   : natural := 13;
-constant C_MENU_HDMI_4_3_50    : natural := 14;
-constant C_MENU_HDMI_5_4_50    : natural := 15;
-constant C_MENU_HDMI_640_60    : natural := 16;
-constant C_MENU_HDMI_720_5994  : natural := 17;
-constant C_MENU_SVGA_800_60    : natural := 18;
-constant C_MENU_CRT_EMULATION  : natural := 30;
-constant C_MENU_HDMI_ZOOM      : natural := 31;
-constant C_MENU_IMPROVE_AUDIO  : natural := 32;
-
 begin
 
    hr_core_write_o      <= '0';
@@ -389,49 +373,30 @@ begin
    -- Audio and video settings (QNICE clock domain)
    ---------------------------------------------------------------------------------------------
 
-   -- Due to a discussion on the MEGA65 discord (https://discord.com/channels/719326990221574164/794775503818588200/1039457688020586507)
-   -- we decided to choose a naming convention for the PAL modes that might be more intuitive for the end users than it is
-   -- for the programmers: "4:3" means "meant to be run on a 4:3 monitor", "5:4 on a 5:4 monitor".
-   -- The technical reality is though, that in our "5:4" mode we are actually doing a 4/3 aspect ratio adjustment
-   -- while in the 4:3 mode we are outputting a 5:4 image. This is kind of odd, but it seemed that our 4/3 aspect ratio
-   -- adjusted image looks best on a 5:4 monitor and the other way round.
-   -- Not sure if this will stay forever or if we will come up with a better naming convention.
-   qnice_video_mode_o <= C_VIDEO_SVGA_800_60   when qnice_osm_control_i(C_MENU_SVGA_800_60)    = '1' else
-                         C_VIDEO_HDMI_720_5994 when qnice_osm_control_i(C_MENU_HDMI_720_5994)  = '1' else
-                         C_VIDEO_HDMI_640_60   when qnice_osm_control_i(C_MENU_HDMI_640_60)    = '1' else
-                         C_VIDEO_HDMI_5_4_50   when qnice_osm_control_i(C_MENU_HDMI_5_4_50)    = '1' else
-                         C_VIDEO_HDMI_4_3_50   when qnice_osm_control_i(C_MENU_HDMI_4_3_50)    = '1' else
-                         C_VIDEO_HDMI_16_9_60  when qnice_osm_control_i(C_MENU_HDMI_16_9_60)   = '1' else
-                         C_VIDEO_HDMI_16_9_50;
+   -- QL4M65: milestone 1's Options menu has no HDMI-resolution submenu and no
+   -- CRT/zoom/audio toggles (see CONF_STR table in PORTING-PLAN.md - only ROM
+   -- load and Close are real menu items), so every signal here is a fixed
+   -- value rather than a qnice_osm_control_i bit lookup. C_VIDEO_HDMI_4_3_50
+   -- (PAL 576p, 4:3) matches the QL's PAL/50Hz native timing, same family of
+   -- choice as C64MEGA65's default.
+   qnice_video_mode_o         <= C_VIDEO_HDMI_4_3_50;
 
-   -- Use On-Screen-Menu selections to configure several audio and video settings
-   -- Video and audio mode control
-   qnice_dvi_o                <= '0';                                         -- 0=HDMI (with sound), 1=DVI (no sound)
-   qnice_scandoubler_o        <= '0';                                         -- no scandoubler
-   qnice_audio_mute_o         <= '0';                                         -- audio is not muted
-   qnice_audio_filter_o       <= qnice_osm_control_i(C_MENU_IMPROVE_AUDIO);   -- 0 = raw audio, 1 = use filters from globals.vhd
-   qnice_zoom_crop_o          <= qnice_osm_control_i(C_MENU_HDMI_ZOOM);       -- 0 = no zoom/crop
-   
+   qnice_dvi_o                <= '0';                    -- 0=HDMI (with sound), 1=DVI (no sound)
+   qnice_scandoubler_o        <= '0';                    -- no scandoubler
+   qnice_audio_mute_o         <= '0';                    -- audio is not muted
+   qnice_audio_filter_o       <= '0';                     -- raw audio, no filters
+   qnice_zoom_crop_o          <= '0';                    -- no zoom/crop
+
    -- These two signals are often used as a pair (i.e. both '1'), particularly when
    -- you want to run old analog cathode ray tube monitors or TVs (via SCART)
-   -- If you want to provide your users a choice, then a good choice is:
-   --    "Standard VGA":                     qnice_retro15kHz_o=0 and qnice_csync_o=0
-   --    "Retro 15 kHz with HSync and VSync" qnice_retro15kHz_o=1 and qnice_csync_o=0
-   --    "Retro 15 kHz with CSync"           qnice_retro15kHz_o=1 and qnice_csync_o=1
    qnice_retro15kHz_o         <= '0';
    qnice_csync_o              <= '0';
    qnice_osm_cfg_scaling_o    <= (others => '1');
 
    -- ascal filters that are applied while processing the input
-   -- 00 : Nearest Neighbour
-   -- 01 : Bilinear
-   -- 10 : Sharp Bilinear
-   -- 11 : Bicubic
+   -- 00 : Nearest Neighbour / 01 : Bilinear / 10 : Sharp Bilinear / 11 : Bicubic
    qnice_ascal_mode_o         <= "00";
-
-   -- If polyphase is '1' then the ascal filter mode is ignored and polyphase filters are used instead
-   -- @TODO: Right now, the filters are hardcoded in the M2M framework, we need to make them changeable inside m2m-rom.asm
-   qnice_ascal_polyphase_o    <= qnice_osm_control_i(C_MENU_CRT_EMULATION);
+   qnice_ascal_polyphase_o    <= '0';
 
    -- ascal triple-buffering
    -- @TODO: Right now, the M2M framework only supports OFF, so do not touch until the framework is upgraded
