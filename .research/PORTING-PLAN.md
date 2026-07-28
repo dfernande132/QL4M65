@@ -14,28 +14,26 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-07-28)
+## 0. Estado actual del proyecto (actualizado: 2026-07-28, sesión M1001)
 
-**A dónde apuntamos ahora mismo:** primera compilación con RTL real del QL
-en `main.vhd` (CPU `fx68k` + chipset `zx8301`/`zx8302` en vez del demo core
-de la plantilla). Esa compilación, cuando se logre, es la que se etiqueta
-`M1001` (ver convención de nombres en `DECISIONES.md`). Todavía no se ha
-conseguido — es la tarea en curso.
+**`M1001` conseguido.** `main.vhd` ya instancia el core QL real: `fx68k`
+(CPU) + `zx8301` (vídeo) + `zx8302` (E/S, modificado para exponer el enlace
+IPC) + `ql_timing` (wait-states) + RAM principal (128k, BRAM por ahora) +
+VRAM (64k) + `keyboard.vhd` cableado de verdad. Síntesis + implementación +
+bitstream sin errores (WNS=+0.130 ns, WHS=+0.051 ns, 0 nets sin rutar).
+Detalle completo en `DECISIONES.md`, sección "M1001 conseguido".
 
-**Qué falta exactamente para llegar a `M1001`:**
-- Instanciar `fx68k` (CPU 68000, Verilog/SystemVerilog original, sin portar —
-  se instancia tal cual desde `main.vhd` en un proyecto Vivado mixed-language),
-  `zx8301` (vídeo) y `zx8302` (E/S), y traducir/cablear la lógica de bus de
-  `QL.sv` (~740 líneas: decodificación de direcciones, `DTACK`/wait-states vía
-  `ql_timing.sv`, arbitraje).
-- Instanciar `vram` (la segunda RAM dual-puerto pendiente, ver Anexo A de
-  `DECISIONES.md` — `ql_rom` ya está resuelta).
-- Añadir `fx68k`/`zx8301`/`zx8302`/`ql_timing.sv` (y el resto de la lista IN de
-  la sección 6) a la lista de fuentes de los cuatro `.xpr` (R3/R4/R5/R6) —
-  todavía no se ha tocado ningún proyecto Vivado para esto.
-- Conectar `keyboard.vhd` de verdad al `zx8302` instanciado (su FSM ya está
-  escrita y corregida con el desensamblado real del 8049 — ver Anexo B de
-  `DECISIONES.md` — pero pendiente de validar contra hardware/simulación).
+**Pendiente ahora:**
+- Prueba en hardware real de `QL4M65-CoreQL-M1001_r6.cor` (ver tabla de
+  pruebas abajo).
+- Validar el protocolo IPC del teclado (`keyboard.vhd`) contra
+  hardware/simulación real — sigue basado en un desensamblado propio no
+  contrastado externamente (Anexo B de `DECISIONES.md`).
+- Pasar la RAM principal de BRAM a HyperRAM de verdad (decisión explícita de
+  esta sesión: BRAM primero para bajar el riesgo de esta compilación,
+  HyperRAM después si `M1001` funciona en hardware).
+- Añadir los ficheros del core a los otros tres `.xpr` (R3/R4/R5) — solo se
+  ha tocado `CORE-R6.xpr` hasta ahora.
 
 **Fases del Milestone 1 cubiertas y pendientes:** ver la sección 9 (actualizada
 fase a fase con el estado real, ya no todo "Pendiente").
@@ -47,7 +45,7 @@ fase a fase con el estado real, ya no todo "Pendiente").
 | `demo_r6` | Demo core M2M sin modificar (Fase 1, S25-S30) | Arranca correctamente |
 | `DFSmega65_r6` | Prueba equivalente hecha por el usuario directamente en Vivado | Arranca correctamente |
 | `QL4M65-CoreQL-batch1_r6` | `clk.vhd`+`mega65.vhd`+`config.vhd`+`globals.vhd`+`keyboard.vhd`, demo core aún dentro | Arranca; imagen con rayas y resolución aumentada (esperado, el demo sigue calculado para 54MHz con reloj ya a 84MHz); menú OSD vivo (Espacio/Help lo abren/cierran); sonido funciona |
-| `M1001` | *(pendiente)* | *(pendiente)* |
+| `QL4M65-CoreQL-M1001_r6` | Core QL real (`fx68k`+`zx8301`+`zx8302`+`ql_timing`+RAM/VRAM+teclado) | *(pendiente de probar)* |
 
 Detalle completo de cada prueba en `DECISIONES.md` (registro cronológico) y
 sus Anexos A/B (memoria y teclado).
@@ -374,32 +372,34 @@ actualizado el 2026-07-28 (ver sección 0 para el snapshot rápido y
   Clock-enables internos (`ce_bus_p/n`, `ce_131k`, `ce_vid`, `ce_sd`, `ce_11m`)
   también hechos, portados literalmente del generador de `QL.sv` (commit
   `ce97f0c`).
-- **Fase 5 — Cablear `main.vhd`. EN CURSO — es el bloqueante actual de `M1001`.**
-  Decisión de teclado (pendiente #2) ya implementada: `keyboard.vhd`
-  MEGA65-nativo completo (matriz + FSM del protocolo IPC), corregido con
-  desensamblado real del 8049 (ver Anexo B de `DECISIONES.md`), pendiente de
-  validar contra hardware/simulación. Todavía sin instanciar: `fx68k + zx8301
-  + zx8302 + ql_timing` y la lógica de bus/decodificación de direcciones de
-  `QL.sv` (~740 líneas). Ver sección 0 para el detalle de lo que falta.
-- **Fase 6 — Memorias (BRAM/QNICE/HyperRAM). EN CURSO.** `ql_rom` (64KB,
-  sistema Minerva) cableado entre `mega65.vhd` y `main.vhd`, con carga manual
-  vía QNICE (commit `44142fa`, detalle en Anexo A de `DECISIONES.md`). `vram`
-  (64KB) todavía sin instanciar (vive entera en `main.vhd`, se hará junto con
-  el chipset en Fase 5). HyperRAM para la RAM principal del QL: sin empezar
-  (el maestro Avalon `hr_core_*` sigue atado a cero en `mega65.vhd`).
+- **Fase 5 — Cablear `main.vhd`. HECHA (M1001 conseguido).** `fx68k` + `zx8301`
+  + `zx8302` (modificado para exponer el enlace IPC, ver Anexo B de
+  `DECISIONES.md`) + `ql_timing` instanciados, con la lógica de bus/decodificación
+  de direcciones de `QL.sv` traducida (simplificada al alcance de M1: sin
+  GoldCard/QL-SD/microdrive/ratón). `keyboard.vhd` cableado de verdad al enlace
+  IPC. Commit `389c8f0`. Pendiente: validar el protocolo IPC contra
+  hardware/simulación real (sigue basado en desensamblado propio no
+  contrastado externamente).
+- **Fase 6 — Memorias (BRAM/QNICE/HyperRAM). CASI HECHA (BRAM, no HyperRAM
+  todavía).** `ql_rom` (64KB, Minerva) y `vram` (64KB) instanciados y
+  funcionando; RAM principal (128KB) también en BRAM por decisión explícita
+  de esta sesión (bajar el riesgo de `M1001`, ver Anexo A de `DECISIONES.md`).
+  HyperRAM de verdad para la RAM principal: pendiente, siguiente paso tras
+  confirmar `M1001` en hardware (el maestro Avalon `hr_core_*` sigue atado a
+  cero en `mega65.vhd`).
 - **Fase 7 — Sustituir los servicios HPS. EN CURSO.** Carga de ROM (F4)
-  parcialmente resuelta vía el mecanismo de carga manual de QNICE (mismo
-  trabajo que Fase 6, `C_DEV_QL_MINERVA`). RTC y vdrives (QL-SD/MDV, milestone
-  3) siguen sin diseñar.
-- **Fase 8 — Ficheros de proyecto Vivado. PENDIENTE.** Añadir la lista IN de la
-  sección 6 (`fx68k`, `zx8301`, `zx8302`, `ql_timing.sv`, etc.) a los cuatro
-  `.xpr` (R3/R4/R5/R6) — todavía no se ha tocado ningún proyecto Vivado para
-  esto, solo se ha sintetizado con el demo core + el andamiaje ya descrito.
-- **Fase 9-12 — Síntesis, timing, bring-up en hardware, release. PENDIENTES**,
-  posteriores a tener el core real sintetizando (`M1001`). El bring-up de
-  milestone 1 se hace con la config de RAM más pequeña (128k) para simplificar
-  la primera vuelta; milestone 2 añade las configs de 640k/4096k y los modos
-  de velocidad; milestone 3 añade microdrive y QL-SD.
+  resuelta vía el mecanismo de carga manual de QNICE (`C_DEV_QL_MINERVA`).
+  RTC atado a cero por ahora (sin fuente de tiempo real todavía, no bloquea
+  el arranque - ver sección 0). vdrives (QL-SD/MDV, milestone 3) sigue sin
+  diseñar.
+- **Fase 8 — Ficheros de proyecto Vivado. PARCIAL.** `fx68k`/`zx8301`/`zx8302`/
+  `ql_timing.sv` añadidos a `CORE-R6.xpr` únicamente — los otros tres
+  (R3/R4/R5) siguen sin tocar.
+- **Fase 9-12 — Síntesis, timing, bring-up en hardware, release. EN CURSO.**
+  Síntesis limpia conseguida (`M1001`: 0 errores, WNS=+0.130 ns, WHS=+0.051 ns).
+  Falta el bring-up real en hardware (pendiente de que el usuario pruebe
+  `QL4M65-CoreQL-M1001_r6.cor`). Milestone 2 añadirá las configs de
+  640k/4096k y los modos de velocidad; milestone 3 añade microdrive y QL-SD.
 
 ---
 
