@@ -122,20 +122,30 @@ begin
    -- might need small high-active keyboard memories, etc. This is why the MiSTer2MEGA65 framework
    -- lets you define literally everything and only provides a minimal abstraction layer to the keyboard.
    -- You need to adjust keyboard.vhd to your needs
+   -- QL4M65: keyboard.vhd's entity was already rewritten for the real QL IPC
+   -- link (comdata/comctrl), ahead of main.vhd itself, so this instantiation
+   -- only matches the new port list mechanically - it is not wired to a real
+   -- ZX8302 yet (that happens when the QL core replaces i_democore below, at
+   -- milestone 1's M1001 step). keyboard_n (still read by i_democore above)
+   -- no longer has anything driving it via example_n_o, so it is tied to
+   -- "nothing pressed" just below instead.
+   keyboard_n <= (others => '1');
+
    i_keyboard : entity work.keyboard
       port map (
          clk_main_i           => clk_main_i,
+         reset_i              => reset_soft_i or reset_hard_i,
 
          -- Interface to the MEGA65 keyboard
          key_num_i            => kb_key_num_i,
          key_pressed_n_i      => kb_key_pressed_n_i,
 
-         -- @TODO: Create the kind of keyboard output that your core needs
-         -- "example_n_o" is a low active register and used by the demo core:
-         --    bit 0: Space
-         --    bit 1: Return
-         --    bit 2: Run/Stop
-         example_n_o          => keyboard_n
+         -- Not connected to a real ZX8302 yet, see comment above
+         comctrl_o            => open,
+         comdata_i            => '1',
+         comdata_o            => open,
+         audio_o              => open,
+         ipl_o                => open
       ); -- i_keyboard
 
 end architecture synthesis;
