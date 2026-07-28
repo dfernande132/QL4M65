@@ -57,6 +57,28 @@ full reasoning and the AExp reference pattern this follows).
 itself is implemented (not part of any of the three defined milestones
 yet).
 
+### Removed the embedded "mdv" (microdrive) instance from `rtl/zx8302.v`
+
+Same problem as `ipc`, found the hard way: `zx8302.v` instantiates `mdv`
+(`rtl/mdv.v`) directly, and `mdv.v` itself instantiates `dpram` (see above)
+for its own internal buffer - so even though milestone 1 doesn't use
+microdrive at all, leaving the `mdv` instance in place would pull the
+unsynthesizable `dpram` into the Vivado build transitively, just to sit
+unused.
+
+Tied `mdv_gap`/`mdv_tx_empty`/`mdv_rx_ready`/`mdv_byte` to a "no drive
+present" state (`0`/`1`/`0`/`0x00`) instead of instantiating `mdv`.
+`mdv_sel` (drive selection from `mctrl`) and `led` are untouched - harmless
+without a real drive behind them.
+
+When milestone 3 (microdrive) is implemented: re-instantiate `mdv`, and
+give it a Vivado-clean `dpram` (same treatment `ql_rom`/`vram` already
+got - see `DECISIONES.md` Anexo A) rather than trying to synthesize the
+original `dpram.v`.
+
+Files that stay in the repository but are excluded from the Vivado
+compile list because of this (not deleted): `rtl/mdv.v`.
+
 MiSTer2MEGA65
 -------------
 
