@@ -79,7 +79,115 @@ architecture synthesis of main is
 -- @TODO: Remove these demo core signals
 signal keyboard_n          : std_logic_vector(79 downto 0);
 
+---------------------------------------------------------------------------
+-- QL4M65: internal clock enables, derived from clk_main_i (84.000000 MHz)
+--
+-- Ported directly from the original core's QL.sv (its fractional-
+-- accumulator clock generator, "always @(negedge clk_sys)" block): a
+-- single 84 MHz clock, with every other clock in the system derived as a
+-- clock-enable rather than a separate PLL output - see PORTING-PLAN.md
+-- section 3 for the full table. Runs on the FALLING edge of clk_main_i,
+-- matching QL.sv exactly (same physical clock, opposite phase - not a real
+-- CDC hazard).
+--
+-- Milestone 1 fixes the CPU to native QL speed (fract_bus = FRACT_BUS_QL);
+-- milestone 2 will need to multiplex fract_bus between
+-- QL/16MHz/24MHz/Full based on the (not yet existing) speed menu option -
+-- the accumulator structure below doesn't change, only fract_bus's source
+-- would.
+---------------------------------------------------------------------------
+
+constant FRACT_BUS_QL : unsigned(16 downto 0) := to_unsigned(11702, 17); -- 84MHz*11702/65536 = 14.999MHz (QL native)
+constant FRACT_SD     : unsigned(16 downto 0) := to_unsigned(19505, 17); -- ~25MHz effective SD-card SPI clock
+constant FRACT_11M    : unsigned(16 downto 0) := to_unsigned(8582, 17);  -- 10.999MHz IPC clock
+constant DIV_131K     : natural := 640;                                  -- 84MHz/640 = 131250Hz (SDRAM refresh / RTC tick)
+constant DIV_VID      : natural := 8;                                    -- 84MHz/8 = 10.5MHz pixel clock
+
+signal cnt_bus  : unsigned(15 downto 0) := (others => '0');
+signal bus_tick : std_logic := '0';
+signal bus_pol  : std_logic := '0';
+signal ce_bus_p : std_logic := '0';
+signal ce_bus_n : std_logic := '0';
+
+signal cnt_sd   : unsigned(15 downto 0) := (others => '0');
+signal ce_sd    : std_logic := '0';
+
+signal cnt_11m  : unsigned(15 downto 0) := (others => '0');
+signal ce_11m   : std_logic := '0';
+
+signal div131k  : unsigned(9 downto 0) := (others => '0');
+signal ce_131k  : std_logic := '0';
+
+signal divvid   : unsigned(3 downto 0) := (others => '0');
+signal ce_vid   : std_logic := '0';
+
 begin
+
+   ---------------------------------------------------------------------------
+   -- QL4M65 clock enables (see declarations above for provenance/constants).
+   -- Signal reads below intentionally see each other's PRE-this-edge values
+   -- (no variables used, mirroring Verilog's non-blocking-assignment
+   -- semantics in the original QL.sv block exactly, including its one-cycle
+   -- relationship between bus_tick/cnt_bus and ce_bus_p/ce_bus_n/bus_pol).
+   ---------------------------------------------------------------------------
+   clock_enables : process (clk_main_i)
+      variable v_bus_sum : unsigned(16 downto 0);
+      variable v_sd_sum  : unsigned(16 downto 0);
+      variable v_11m_sum : unsigned(16 downto 0);
+   begin
+      if falling_edge(clk_main_i) then
+         if reset_soft_i = '1' or reset_hard_i = '1' then
+            bus_pol <= '0';
+            cnt_bus <= (others => '0');
+            div131k <= (others => '0');
+            divvid  <= (others => '0');
+         else
+            if div131k = to_unsigned(DIV_131K - 1, div131k'length) then
+               div131k <= (others => '0');
+            else
+               div131k <= div131k + 1;
+            end if;
+
+            if divvid = to_unsigned(DIV_VID - 1, divvid'length) then
+               divvid <= (others => '0');
+            else
+               divvid <= divvid + 1;
+            end if;
+         end if;
+
+         -- CPU clock: two-phase, non-overlapping (fx68k needs both cep/cen)
+         v_bus_sum := ('0' & cnt_bus) + FRACT_BUS_QL;
+         cnt_bus   <= v_bus_sum(15 downto 0);
+         bus_tick  <= v_bus_sum(16);
+         ce_bus_p  <= bus_tick and not bus_pol;
+         ce_bus_n  <= bus_tick and bus_pol;
+         bus_pol   <= bus_tick xor bus_pol;
+
+         -- SDRAM refresh / RTC tick
+         if div131k = 0 then
+            ce_131k <= '1';
+         else
+            ce_131k <= '0';
+         end if;
+
+         -- 10.5 MHz pixel clock
+         if divvid = 0 then
+            ce_vid <= '1';
+         else
+            ce_vid <= '0';
+         end if;
+
+         -- QL-SD clock
+         v_sd_sum := ('0' & cnt_sd) + FRACT_SD;
+         cnt_sd   <= v_sd_sum(15 downto 0);
+         ce_sd    <= v_sd_sum(16);
+
+         -- 11 MHz IPC clock
+         v_11m_sum := ('0' & cnt_11m) + FRACT_11M;
+         cnt_11m   <= v_11m_sum(15 downto 0);
+         ce_11m    <= v_11m_sum(16);
+      end if;
+   end process clock_enables;
 
    -- @TODO: Add the actual MiSTer core here
    -- The demo core's purpose is to show a test image and to make sure, that the MiSTer2MEGA65 framework
