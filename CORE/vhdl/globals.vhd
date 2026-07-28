@@ -1,9 +1,13 @@
 ----------------------------------------------------------------------------------
--- MiSTer2MEGA65 Framework
+-- Sinclair QL for MEGA65 (QL4M65)
 --
 -- Global constants
 --
+-- Powered by MiSTer2MEGA65
 -- MiSTer2MEGA65 done by sy2002 and MJoergen in 2022 and licensed under GPL v3
+-- QL4M65 port: core clock speed, video canvas, virtual-drive count, manual
+-- ROM loading (Minerva) and audio IIR filter coefficients (from the QL's own
+-- sys_top.v) adapted for the QL; HyperRAM map slot renamed
 ----------------------------------------------------------------------------------
 
 library IEEE;
@@ -40,8 +44,9 @@ constant QNICE_FIRMWARE           : string  := QNICE_FIRMWARE_M2M;
 -- then add all the clocks speeds here by adding more constants.
 ----------------------------------------------------------------------------------------------------------
 
--- @TODO: Your core's clock speed
-constant CORE_CLK_SPEED       : natural := 54_000_000;   -- @TODO YOURCORE expects 54 MHz
+-- MiSTer's QL core runs everything off a single 84.000000 MHz clock (see clk.vhd);
+-- CPU/video/SD/IPC sub-clocks are fractional clock-enables derived from this one clock.
+constant CORE_CLK_SPEED       : natural := 84_000_000;
 
 -- System clock speed (crystal that is driving the FPGA) and QNICE clock speed
 -- !!! Do not touch !!!
@@ -56,8 +61,10 @@ constant QNICE_CLK_SPEED      : natural := 50_000_000;   -- a change here has de
 --    VGA_*   size of the core's target output post scandoubler
 --    If in doubt, use twice the values found in this link:
 --    https://mister-devel.github.io/MkDocs_MiSTer/advanced/nativeres/#arcade-core-default-native-resolutions
-constant VGA_DX               : natural := 720;
-constant VGA_DY               : natural := 576;
+-- QL native visible area is 512x256 (rtl/zx8301.v); using 2x for the post-scandoubler
+-- canvas. Approximate - revisit once real video is on screen (Fase 6/9).
+constant VGA_DX               : natural := 1024;
+constant VGA_DY               : natural := 512;
 
 --    FONT_*  size of one OSM character
 constant FONT_FILE            : string  := "../font/Anikki-16x16-m2m.rom";
@@ -75,31 +82,18 @@ constant VRAM_ADDR_WIDTH      : natural := f_log2(CHAR_MEM_SIZE);
 ----------------------------------------------------------------------------------------------------------
 
 constant C_HMAP_M2M           : std_logic_vector(15 downto 0) := x"0000";     -- Reserved for the M2M framework
-constant C_HMAP_DEMO          : std_logic_vector(15 downto 0) := x"0200";     -- Start address reserved for core
+constant C_HMAP_QL            : std_logic_vector(15 downto 0) := x"0200";     -- Start address reserved for the QL core
 
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System
 ----------------------------------------------------------------------------------------------------------
 
--- example virtual drive handler, which is connected to nothing and only here to demo
--- the file- and directory browsing capabilities of the firmware
-constant C_DEV_DEMO_VD        : std_logic_vector(15 downto 0) := x"0101";
-constant C_DEV_DEMO_NOBUFFER  : std_logic_vector(15 downto 0) := x"AAAA";
-
--- Virtual drive management system (handled by vdrives.vhd and the firmware)
--- If you are not using virtual drives, make sure that:
---    C_VDNUM        is 0
---    C_VD_DEVICE    is x"EEEE"
---    C_VD_BUFFER    is (x"EEEE", x"EEEE")
--- Otherwise make sure that you wire C_VD_DEVICE in the qnice_ramrom_devices process and that you
--- have as many appropriately sized RAM buffers for disk images as you have drives
+-- QL4M65: no virtual drives in milestone 1 (microdrive .MDV / QL-SD QXL.WIN are
+-- milestone 3). Per the framework's own convention for not using virtual drives:
 type vd_buf_array is array(natural range <>) of std_logic_vector;
-constant C_VDNUM              : natural := 3;                                          -- amount of virtual drives; maximum is 15
-constant C_VD_DEVICE          : std_logic_vector(15 downto 0) := C_DEV_DEMO_VD;        -- device number of vdrives.vhd device
-constant C_VD_BUFFER          : vd_buf_array := (  C_DEV_DEMO_NOBUFFER,
-                                                   C_DEV_DEMO_NOBUFFER,
-                                                   C_DEV_DEMO_NOBUFFER,
-                                                   x"EEEE");                           -- Always finish the array using x"EEEE"
+constant C_VDNUM              : natural := 0;
+constant C_VD_DEVICE          : std_logic_vector(15 downto 0) := x"EEEE";
+constant C_VD_BUFFER          : vd_buf_array := (x"EEEE", x"EEEE");
 
 ----------------------------------------------------------------------------------------------------------
 -- System for handling simulated cartridges and ROM loaders
@@ -129,8 +123,15 @@ constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 --       else it is a 4k window in HyperRAM or in SDRAM
 -- In case we are loading to a QNICE device, then the control and status register is located at the 4k window 0xFFFF.
 -- @TODO: See @TODO for more details about the control and status register
-constant C_CRTROMS_MAN_NUM       : natural := 0;                                       -- amount of manually loadable ROMs and carts; maximum is 16
-constant C_CRTROMS_MAN           : crtrom_buf_array := ( x"EEEE", x"EEEE",
+-- QL4M65: one manually loadable ROM (Minerva), routed to a dedicated QNICE device
+-- (not directly to HyperRAM - see AExp's globals.vhd for why: the HyperRAM CRTROM
+-- type's CSR handshake has no responder for manual loads). The device-side RAM
+-- buffer that actually receives these bytes is wired in mega65.vhd (Dual Clocks
+-- section) - pending, see DECISIONES.md for the batching plan.
+constant C_DEV_QL_MINERVA        : std_logic_vector(15 downto 0) := x"0101";
+
+constant C_CRTROMS_MAN_NUM       : natural := 1;                                       -- amount of manually loadable ROMs and carts; maximum is 16
+constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_DEV_QL_MINERVA,
                                                          x"EEEE");                     -- Always finish the array using x"EEEE"
 
 -- Automatically loaded ROMs: These ROMs are loaded before the core starts
@@ -164,11 +165,13 @@ constant C_CRTROMS_AUTO          : crtrom_buf_array := ( x"EEEE", x"EEEE", x"EEE
 -- that you are porting: sys/sys_top.v
 ----------------------------------------------------------------------------------------------------------
 
--- Sample values from the C64: @TODO: Adjust to your needs
+-- Values taken directly from the QL core's own rtl/../sys/sys_top.v (aflt_rate,
+-- acx0..2, acy0..2 reset defaults) - these are the QL's real IIR filter coefficients,
+-- not the C64's (acx1 differs: the QL uses 3, not 2).
 constant audio_flt_rate : std_logic_vector(31 downto 0) := std_logic_vector(to_signed(7056000, 32));
 constant audio_cx       : std_logic_vector(39 downto 0) := std_logic_vector(to_signed(4258969, 40));
 constant audio_cx0      : std_logic_vector( 7 downto 0) := std_logic_vector(to_signed(3, 8));
-constant audio_cx1      : std_logic_vector( 7 downto 0) := std_logic_vector(to_signed(2, 8));
+constant audio_cx1      : std_logic_vector( 7 downto 0) := std_logic_vector(to_signed(3, 8));
 constant audio_cx2      : std_logic_vector( 7 downto 0) := std_logic_vector(to_signed(1, 8));
 constant audio_cy0      : std_logic_vector(23 downto 0) := std_logic_vector(to_signed(-6216759, 24));
 constant audio_cy1      : std_logic_vector(23 downto 0) := std_logic_vector(to_signed( 6143386, 24));
