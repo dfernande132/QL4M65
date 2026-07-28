@@ -29,7 +29,8 @@
 --
 -- Powered by MiSTer2MEGA65
 -- MiSTer2MEGA65 done by sy2002 and MJoergen in 2022 and licensed under GPL v3
--- QL4M65 port: clock retargeted to 84 MHz for the Sinclair QL core, 2026
+-- QL4M65 port done by Jose Daniel Fernandez Santos (dfsantos) in 2026 and
+-- licensed under GPL v3: clock retargeted to 84 MHz for the Sinclair QL core
 -------------------------------------------------------------------------------------------------------------
 
 library ieee;

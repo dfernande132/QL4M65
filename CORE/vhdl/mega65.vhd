@@ -5,9 +5,12 @@
 --
 -- Powered by MiSTer2MEGA65
 -- MiSTer2MEGA65 done by sy2002 and MJoergen in 2022 and licensed under GPL v3
--- QL4M65 port: removed demo device handling and the demo's virtual-drive
--- instance (not needed until milestone 3); i_main port map and menu/video
--- wiring still pending (come with main.vhd and config.vhd respectively)
+-- QL4M65 port done by Jose Daniel Fernandez Santos (dfsantos) in 2026 and
+-- licensed under GPL v3: removed demo device handling and the demo's
+-- virtual-drive instance (not needed until milestone 3), fixed menu/video
+-- wiring to milestone 1's scope, and wired the ql_rom (Minerva) memory path
+-- to main.vhd. i_main's port map still points at the M2M demo core -
+-- replacing it with the real QL core is milestone 1's M1001 step
 ----------------------------------------------------------------------------------
 
 library ieee;

@@ -5,10 +5,11 @@
 --
 -- Powered by MiSTer2MEGA65
 -- MiSTer2MEGA65 done by sy2002 and MJoergen in 2023 and licensed under GPL v3
--- QL4M65 port: welcome screen, corename, folder/config paths and the Options
--- menu simplified to milestone 1's scope (Reset + manual ROM load only - see
--- PORTING-PLAN.md's CONF_STR table). Address decoding below is unmodified
--- framework code.
+-- QL4M65 port done by Jose Daniel Fernandez Santos (dfsantos) in 2026 and
+-- licensed under GPL v3: welcome screen, corename, folder/config paths and
+-- the Options menu simplified to milestone 1's scope (Reset + manual ROM
+-- load only - see PORTING-PLAN.md's CONF_STR table). Address decoding below
+-- is unmodified framework code.
 ----------------------------------------------------------------------------------
 
 library ieee;

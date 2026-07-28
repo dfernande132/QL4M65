@@ -5,9 +5,10 @@
 --
 -- Powered by MiSTer2MEGA65
 -- MiSTer2MEGA65 done by sy2002 and MJoergen in 2022 and licensed under GPL v3
--- QL4M65 port: core clock speed, video canvas, virtual-drive count, manual
--- ROM loading (Minerva) and audio IIR filter coefficients (from the QL's own
--- sys_top.v) adapted for the QL; HyperRAM map slot renamed
+-- QL4M65 port done by Jose Daniel Fernandez Santos (dfsantos) in 2026 and
+-- licensed under GPL v3: core clock speed, video canvas, virtual-drive count,
+-- manual ROM loading (Minerva) and audio IIR filter coefficients (from the
+-- QL's own sys_top.v) adapted for the QL; HyperRAM map slot renamed
 ----------------------------------------------------------------------------------
 
 library IEEE;

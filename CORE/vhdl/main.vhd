@@ -1,9 +1,15 @@
 ----------------------------------------------------------------------------------
--- MiSTer2MEGA65 Framework
+-- Sinclair QL for MEGA65 (QL4M65)
 --
--- Wrapper for the MiSTer core that runs exclusively in the core's clock domanin
+-- Wrapper for the MiSTer core that runs exclusively in the core's clock domain
 --
+-- Powered by MiSTer2MEGA65
 -- MiSTer2MEGA65 done by sy2002 and MJoergen in 2022 and licensed under GPL v3
+-- QL4M65 port done by Jose Daniel Fernandez Santos (dfsantos) in 2026 and
+-- licensed under GPL v3: added the QL's internal clock enables, the
+-- ql_rom (Minerva) memory port, and matched keyboard.vhd's new IPC port
+-- list; i_democore is still the M2M demo core - replacing it with the real
+-- QL core (fx68k/zx8301/zx8302 + bus glue) is milestone 1's M1001 step
 ----------------------------------------------------------------------------------
 
 library ieee;

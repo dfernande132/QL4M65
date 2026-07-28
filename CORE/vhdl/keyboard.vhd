@@ -81,7 +81,8 @@
 --     rtl/keyboard.v documents for its own combo keys).
 --
 -- Powered by MiSTer2MEGA65
--- QL4M65 port, 2026
+-- QL4M65 port done by Jose Daniel Fernandez Santos (dfsantos) in 2026 and
+-- licensed under GPL v3
 ---------------------------------------------------------------------------------------------------------
 
 library ieee;
