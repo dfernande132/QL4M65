@@ -24,8 +24,9 @@ bitstream sin errores (WNS=+0.130 ns, WHS=+0.051 ns, 0 nets sin rutar).
 Detalle completo en `DECISIONES.md`, sección "M1001 conseguido".
 
 **Pendiente ahora:**
-- Prueba en hardware real de `QL4M65-CoreQL-M1002_r6.cor` (arreglo de
-  encuadre del OSD sobre `M1001` — ver tabla de pruebas abajo).
+- Prueba en hardware real de `QL4M65-CoreQL-M1003_r6.cor` (diagnóstico de
+  resolución HDMI para aislar la causa del recorte del OSD que persiste tras
+  `M1002` — ver tabla de pruebas abajo).
 - Diagnosticar el cuelgue visto en `M1001`: arranca, se ve el patrón de
   comprobación de RAM, pero se cuelga de forma reproducible más adelante en
   el arranque de Minerva — candidato principal: interacción con el enlace
@@ -57,7 +58,8 @@ razonamiento completo.
 | `DFSmega65_r6` | Prueba equivalente hecha por el usuario directamente en Vivado | Arranca correctamente |
 | `QL4M65-CoreQL-batch1_r6` | `clk.vhd`+`mega65.vhd`+`config.vhd`+`globals.vhd`+`keyboard.vhd`, demo core aún dentro | Arranca; imagen con rayas y resolución aumentada (esperado, el demo sigue calculado para 54MHz con reloj ya a 84MHz); menú OSD vivo (Espacio/Help lo abren/cierran); sonido funciona |
 | `M1001` | Core QL real (`fx68k`+`zx8301`+`zx8302`+`ql_timing`+RAM/VRAM+teclado) | Arranca; ruido de comprobación de RAM (¡CPU ejecutando Minerva de verdad!); menú de bienvenida M2M mal encuadrado (ver M1002); pantalla se pone en negro sólido (con señal) y se cuelga de forma reproducible; reset físico no recupera pero relanza el patrón - cuelgue determinista, no fallo de timing |
-| `M1002` | Igual que M1001 + arreglo de `VGA_DX`/`VGA_DY` (512×256, sin duplicar) | *(pendiente de probar)* |
+| `M1002` | Igual que M1001 + arreglo de `VGA_DX`/`VGA_DY` (512×256, sin duplicar) | Mejora parcial: el menú OSD se ve algo mejor pero sigue saliéndose por arriba y por la izquierda (TV reporta 720×576@50Hz, sin borde superior visible en el recuadro — recorte real, no solo overscan); mismo punto de cuelgue que M1001 |
+| `M1003` | Igual que M1002 + `qnice_video_mode_o` forzado a `C_VIDEO_HDMI_640_60` (diagnóstico temporal, ver `DECISIONES.md`) | *(pendiente de probar)* — objetivo: aislar si el recorte del OSD depende de la resolución de salida HDMI (apuntaría a `ascal`) o es idéntico (apuntaría al cálculo nativo de posición en `vga_recover_counters`/`zx8301.v`) |
 
 Detalle completo de cada prueba en `DECISIONES.md` (registro cronológico) y
 sus Anexos A/B (memoria y teclado).
