@@ -62,7 +62,15 @@ entity main is
       pot1_x_i                : in  std_logic_vector(7 downto 0);
       pot1_y_i                : in  std_logic_vector(7 downto 0);
       pot2_x_i                : in  std_logic_vector(7 downto 0);
-      pot2_y_i                : in  std_logic_vector(7 downto 0)
+      pot2_y_i                : in  std_logic_vector(7 downto 0);
+
+      -- QL4M65: system ROM (Minerva), 32K x 16-bit words, loaded by the
+      -- QNICE Shell via mega65.vhd's ql_rom_u/l (C_DEV_QL_MINERVA). Not used
+      -- yet - i_democore below has no ROM of its own - but the port exists
+      -- already so mega65.vhd's RAM instance has somewhere real to connect
+      -- to. Wired for real once the QL core replaces i_democore (M1001).
+      ql_rom_addr_o           : out std_logic_vector(14 downto 0);
+      ql_rom_data_i           : in  std_logic_vector(15 downto 0)
    );
 end entity main;
 
@@ -130,6 +138,10 @@ begin
    -- no longer has anything driving it via example_n_o, so it is tied to
    -- "nothing pressed" just below instead.
    keyboard_n <= (others => '1');
+
+   -- QL4M65: no ROM consumer yet (see entity port comment above); ql_rom_data_i
+   -- is simply unused for now.
+   ql_rom_addr_o <= (others => '0');
 
    i_keyboard : entity work.keyboard
       port map (

@@ -232,6 +232,19 @@ signal main_clk               : std_logic;               -- Core main clock
 signal main_rst               : std_logic;
 
 ---------------------------------------------------------------------------------------------
+-- QL4M65: system ROM (Minerva) - QNICE write (manual load), core read-only
+---------------------------------------------------------------------------------------------
+
+signal qnice_rom_we_u         : std_logic;
+signal qnice_rom_we_l         : std_logic;
+signal qnice_rom_q_u          : std_logic_vector(7 downto 0);
+signal qnice_rom_q_l          : std_logic_vector(7 downto 0);
+
+signal main_rom_addr          : std_logic_vector(14 downto 0);
+signal main_rom_q_u           : std_logic_vector(7 downto 0);
+signal main_rom_q_l           : std_logic_vector(7 downto 0);
+
+---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
 ---------------------------------------------------------------------------------------------
 
@@ -366,7 +379,11 @@ begin
          pot1_x_i             => main_pot1_x_i,
          pot1_y_i             => main_pot1_y_i,
          pot2_x_i             => main_pot2_x_i,
-         pot2_y_i             => main_pot2_y_i
+         pot2_y_i             => main_pot2_y_i,
+
+         -- QL4M65: system ROM (Minerva), see the "Dual Clocks" section below
+         ql_rom_addr_o        => main_rom_addr,
+         ql_rom_data_i        => main_rom_q_u & main_rom_q_l
       ); -- i_main
 
    ---------------------------------------------------------------------------------------------
@@ -415,10 +432,24 @@ begin
       qnice_dev_data_o     <= x"EEEE";
       qnice_dev_wait_o     <= '0';
 
+      qnice_rom_we_u       <= '0';
+      qnice_rom_we_l       <= '0';
+
       case qnice_dev_id_i is
 
-         -- QL4M65: no core-specific devices yet (microdrive/QL-SD are milestone 3)
-         -- Device numbers need to be >= 0x0100
+         -- QL4M65: manual loading of the system ROM (Minerva), reserved in
+         -- globals.vhd as C_CRTROMS_MAN's one entry. qnice_dev_addr_i is a
+         -- byte address into the 64KB ROM image; bit 0 selects the byte lane
+         -- (even=high byte, odd=low byte), same pattern as AExp's
+         -- kick_rom_u/l for its Kickstart ROM.
+         when C_DEV_QL_MINERVA =>
+            qnice_rom_we_u <= qnice_dev_ce_i and qnice_dev_we_i and not qnice_dev_addr_i(0);
+            qnice_rom_we_l <= qnice_dev_ce_i and qnice_dev_we_i and     qnice_dev_addr_i(0);
+            if qnice_dev_addr_i(0) = '0' then
+               qnice_dev_data_o <= x"00" & qnice_rom_q_u;
+            else
+               qnice_dev_data_o <= x"00" & qnice_rom_q_l;
+            end if;
 
          when others => null;
       end case;
@@ -428,11 +459,52 @@ begin
    -- Dual Clocks
    ---------------------------------------------------------------------------------------------
 
-   -- Put your dual-clock devices such as RAMs and ROMs here
-   --
-   -- Use the M2M framework's official RAM/ROM: dualport_2clk_ram
-   -- and make sure that the you configure the port that works with QNICE as a falling edge
-   -- by setting G_FALLING_A or G_FALLING_B (depending on which port you use) to true.
+   -- QL4M65: system ROM (Minerva, 64KB = 32K words x 16 bit, matching the
+   -- original core's "dpram #(15) ql_rom" in QL.sv - QL.sv itself isn't
+   -- ported, but the RAM shape is the same). Read-only from the core side
+   -- (wren_a fixed '0'); written only by the QNICE Shell during the manual
+   -- "ROM:%s" load (config.vhd/globals.vhd). Split into two 8-bit lanes,
+   -- same pattern as AExp's kick_rom_u/l, since the QNICE ROM loader writes
+   -- one byte at a time.
+   ql_rom_u : entity work.dualport_2clk_ram
+      generic map (
+         ADDR_WIDTH => 15,
+         DATA_WIDTH => 8,
+         FALLING_B  => true
+      )
+      port map (
+         clock_a   => main_clk,
+         address_a => main_rom_addr,
+         data_a    => (others => '0'),
+         wren_a    => '0',
+         q_a       => main_rom_q_u,
+
+         clock_b   => qnice_clk_i,
+         address_b => qnice_dev_addr_i(15 downto 1),
+         data_b    => qnice_dev_data_i(7 downto 0),
+         wren_b    => qnice_rom_we_u,
+         q_b       => qnice_rom_q_u
+      ); -- ql_rom_u
+
+   ql_rom_l : entity work.dualport_2clk_ram
+      generic map (
+         ADDR_WIDTH => 15,
+         DATA_WIDTH => 8,
+         FALLING_B  => true
+      )
+      port map (
+         clock_a   => main_clk,
+         address_a => main_rom_addr,
+         data_a    => (others => '0'),
+         wren_a    => '0',
+         q_a       => main_rom_q_l,
+
+         clock_b   => qnice_clk_i,
+         address_b => qnice_dev_addr_i(15 downto 1),
+         data_b    => qnice_dev_data_i(7 downto 0),
+         wren_b    => qnice_rom_we_l,
+         q_b       => qnice_rom_q_l
+      ); -- ql_rom_l
 
    ---------------------------------------------------------------------------------------
    -- Virtual drive handler
