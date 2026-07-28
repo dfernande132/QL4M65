@@ -10,22 +10,28 @@
 -- PS/2) and AExp (synthesizes the CIA-A protocol directly instead of
 -- emulating the Amiga's keyboard MCU).
 --
--- This file is being built in two commits:
---   1) MEGA65 key -> QL 8x8 keyboard matrix (THIS COMMIT). Reuses the exact
---      byte/bit layout of the original rtl/keyboard.v's "matrix" output, just
---      fed from M2M's key_num_i/key_pressed_n_i instead of ps2_key, so that
---      whatever later serves this matrix over comdata/comctrl can do so
---      exactly as rtl/ipc.v's P1-select/data-bus-read logic expected it.
---   2) The comdata/comctrl IPC protocol FSM that serves this matrix to the
---      ZX8302 in place of the 8049 (NOT YET DONE - see the stubbed outputs
---      at the bottom of this architecture). The bit-level framing is
---      verified against rtl/zx8302.v (comctrl is a strobe driven BY the IPC
---      side, comdata is wired-AND, latched on comctrl's falling edge); the
---      byte/command-level meaning of the link (which nibble means "read
---      keyboard", etc.) is reconstructed from public QL community
---      documentation of the real 8049 ROM, NOT verified against this repo's
---      RTL or real hardware yet - PENDING VALIDATION before main.vhd wires
---      this entity in for real (milestone 1's M1001 build).
+-- This file was built in two commits:
+--   1) MEGA65 key -> QL 8x8 keyboard matrix. Reuses the exact byte/bit layout
+--      of the original rtl/keyboard.v's "matrix" output, just fed from M2M's
+--      key_num_i/key_pressed_n_i instead of ps2_key, so the IPC protocol
+--      logic below can serve it exactly as rtl/ipc.v's P1-select/data-bus-
+--      read logic expected from the real 8049.
+--   2) The comdata/comctrl IPC protocol logic (THIS COMMIT) that serves this
+--      matrix to the ZX8302 in place of the 8049. Bit-level framing is HIGH
+--      confidence, verified against rtl/zx8302.v: comctrl is a free-running
+--      strobe WE generate (the ZX8302 is a passive clock slave to it), and
+--      each 1-bit transfer takes exactly 2 of our falling edges (1st just
+--      consumes the CPU's Start bit, 2nd is the real bidirectional
+--      exchange). Byte/command-level semantics are LOW confidence,
+--      reconstructed from public QL community documentation of the real
+--      8049 ROM, NOT verified against this repo's RTL or real hardware:
+--      only commands 0x8/0x9 (keyboard read) are implemented for real,
+--      everything else degrades to a harmless passive ACK that never
+--      deadlocks the link but may misinterpret a parameter byte of an
+--      unimplemented command as a bogus new command (harmless today, since
+--      unimplemented commands do nothing either way). PENDING VALIDATION
+--      (ideally simulating the existing QL_MiSTer core, see chat) before
+--      main.vhd wires this entity in for real (milestone 1's M1001 build).
 --
 -- Key mapping notes (decided together with the user in chat, flagging the
 -- non-obvious ones so they are easy to find and revisit):
@@ -73,11 +79,11 @@ entity keyboard is
 
       -- ZX8302 IPC serial link (replaces rtl/ipc.v's ports of the same
       -- name/direction, see rtl/zx8302.v for the framing this must match)
-      comctrl_o        : out std_logic;                    -- TODO (next commit): strobe toward the ZX8302
-      comdata_i        : in  std_logic;                    -- wired-AND read-back from the ZX8302 side
-      comdata_o        : out std_logic;                    -- TODO (next commit): '1' = released, '0' = driven low
-      audio_o          : out std_logic;                    -- TODO (next commit): IPC-generated audio, unused in milestone 1
-      ipl_o            : out std_logic_vector(1 downto 0)  -- TODO (next commit): IPC interrupt-priority lines
+      comctrl_o        : out std_logic;                    -- strobe toward the ZX8302, free-running
+      comdata_i        : in  std_logic;                    -- the ZX8302's own raw outgoing bit (rtl/zx8302.v's ipc_comdata_in)
+      comdata_o        : out std_logic;                    -- '1' = released, '0' = driven low
+      audio_o          : out std_logic;                    -- IPC-generated audio: not implemented, unused in milestone 1
+      ipl_o            : out std_logic_vector(1 downto 0)  -- IPC interrupt-priority lines: not implemented, tied to "no IRQ"
    );
 end entity keyboard;
 
@@ -193,6 +199,19 @@ architecture beh of keyboard is
    -- rtl/ipc.v's one-hot P1 byte-select into this 64-bit value
    signal ql_matrix : std_logic_vector(63 downto 0);
 
+   -- IPC comdata/comctrl link (see architecture-level comment above)
+   type t_cmd_state is (CMD, ROWSEL, RESPOND);
+
+   signal comctrl_r  : std_logic := '1';
+   signal phase_cnt  : unsigned(5 downto 0) := (others => '0');
+   signal edge_pulse : std_logic := '0';
+   signal edge_phase : std_logic := '0';   -- '0' before edge 1, '1' before edge 2
+
+   signal bit_pos    : unsigned(2 downto 0) := (others => '0');
+   signal shift_in   : std_logic_vector(7 downto 0) := (others => '0');
+   signal resp_byte  : std_logic_vector(7 downto 0) := (others => '1');
+   signal cmd_state  : t_cmd_state := CMD;
+
 begin
 
    ---------------------------------------------------------------------------
@@ -260,7 +279,7 @@ begin
    -- MEGA65 key -> QL keyboard matrix
    --
    -- Byte/bit layout copied from rtl/keyboard.v's "matrix" output, unchanged
-   -- so the (not yet written) IPC FSM can serve it exactly as rtl/ipc.v's
+   -- so the IPC protocol logic below can serve it exactly as rtl/ipc.v's
    -- P1-select/data-bus-read logic expected from the real 8049.
    ---------------------------------------------------------------------------
 
@@ -345,18 +364,107 @@ begin
    ql_matrix(8*7+7) <= not key_pressed_n(m65_comma);
 
    ---------------------------------------------------------------------------
-   -- IPC comdata/comctrl protocol FSM - NOT YET IMPLEMENTED (next commit)
-   --
-   -- ql_matrix above is ready to be served; what's missing is the state
-   -- machine that answers the ZX8302's comctrl-clocked requests (P1-style
-   -- byte select + command nibbles, see rtl/ipc.v/rtl/zx8302.v and the
-   -- protocol research notes in the project chat) with bits from ql_matrix.
-   -- Until that exists, drive safe/inactive defaults so this entity could
-   -- sit in the design unreferenced without doing anything wrong:
+   -- IPC comdata/comctrl protocol (see architecture-level comment above for
+   -- the confidence level of each part of this)
    ---------------------------------------------------------------------------
-   comctrl_o <= '0';
-   comdata_o <= '1';   -- released (open-drain idle level)
-   audio_o   <= '0';
-   ipl_o     <= "00";  -- no IRQ
+
+   -- Free-running comctrl strobe: toggle level every 64 main_clk cycles
+   -- (84 MHz/128 =~ 656 kHz full pulse rate - arbitrary but comfortably fast
+   -- with clean margins; rtl/zx8302.v only needs clean edges, not a specific
+   -- rate, since it has no baud-rate concept of its own, see header comment).
+   comctrl_gen : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if reset_i = '1' then
+            phase_cnt  <= (others => '0');
+            comctrl_r  <= '1';
+            edge_pulse <= '0';
+         else
+            edge_pulse <= '0';
+            phase_cnt  <= phase_cnt + 1;
+            if phase_cnt = 0 then
+               if comctrl_r = '1' then
+                  edge_pulse <= '1';   -- about to fall: this IS the falling edge
+               end if;
+               comctrl_r <= not comctrl_r;
+            end if;
+         end if;
+      end if;
+   end process comctrl_gen;
+
+   comctrl_o <= comctrl_r;
+
+   -- Bit/byte/command tracking, advanced once per edge_pulse that lands on
+   -- "edge 2" (the real bidirectional data exchange; edge 1 only consumes
+   -- the CPU's Start bit and carries no information, see rtl/zx8302.v).
+   ipc_fsm : process (clk_main_i)
+      variable v_shift : std_logic_vector(7 downto 0);
+   begin
+      if rising_edge(clk_main_i) then
+         if reset_i = '1' then
+            edge_phase <= '0';
+            bit_pos    <= (others => '0');
+            shift_in   <= (others => '0');
+            resp_byte  <= (others => '1');
+            cmd_state  <= CMD;
+         elsif edge_pulse = '1' then
+            edge_phase <= not edge_phase;
+
+            if edge_phase = '1' then   -- this pulse is edge 2: the real exchange
+               v_shift := shift_in;
+               v_shift(to_integer(bit_pos)) := comdata_i;
+               shift_in <= v_shift;
+
+               if bit_pos = 7 then
+                  bit_pos <= (others => '0');
+
+                  case cmd_state is
+                     -- command nibble assumed in the byte's low 4 bits,
+                     -- assumed LSB-first - see header comment
+                     when CMD =>
+                        if v_shift(3 downto 0) = x"9" then       -- "keyrow"
+                           cmd_state <= ROWSEL;
+                        elsif v_shift(3 downto 0) = x"8" then     -- "read keyboard"
+                           resp_byte <= x"00";                    -- real encoding unknown, safe stub
+                           cmd_state <= RESPOND;
+                        else                                      -- any other command: passive ACK
+                           cmd_state <= CMD;
+                        end if;
+
+                     -- row-select parameter byte: its low 3 bits choose
+                     -- which of the 8 ql_matrix bytes to answer with next
+                     when ROWSEL =>
+                        case to_integer(unsigned(v_shift(2 downto 0))) is
+                           when 0 => resp_byte <= ql_matrix( 7 downto  0);
+                           when 1 => resp_byte <= ql_matrix(15 downto  8);
+                           when 2 => resp_byte <= ql_matrix(23 downto 16);
+                           when 3 => resp_byte <= ql_matrix(31 downto 24);
+                           when 4 => resp_byte <= ql_matrix(39 downto 32);
+                           when 5 => resp_byte <= ql_matrix(47 downto 40);
+                           when 6 => resp_byte <= ql_matrix(55 downto 48);
+                           when others => resp_byte <= ql_matrix(63 downto 56);
+                        end case;
+                        cmd_state <= RESPOND;
+
+                     when RESPOND =>
+                        cmd_state <= CMD;
+                  end case;
+               else
+                  bit_pos <= bit_pos + 1;
+               end if;
+            end if;
+         end if;
+      end if;
+   end process ipc_fsm;
+
+   -- Drive our answer bit only while actually responding; passive
+   -- (released) otherwise, so we never interfere with a command/parameter
+   -- byte we don't recognise.
+   comdata_o <= resp_byte(to_integer(bit_pos)) when cmd_state = RESPOND else '1';
+
+   -- Not implemented (see entity port comments): no IPC-driven audio or
+   -- interrupt-priority lines in milestone 1.
+   audio_o <= '0';
+   ipl_o   <= "00";
 
 end architecture beh;
