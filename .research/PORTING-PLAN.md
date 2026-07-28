@@ -14,6 +14,46 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
+## 0. Estado actual del proyecto (actualizado: 2026-07-28)
+
+**A dónde apuntamos ahora mismo:** primera compilación con RTL real del QL
+en `main.vhd` (CPU `fx68k` + chipset `zx8301`/`zx8302` en vez del demo core
+de la plantilla). Esa compilación, cuando se logre, es la que se etiqueta
+`M1001` (ver convención de nombres en `DECISIONES.md`). Todavía no se ha
+conseguido — es la tarea en curso.
+
+**Qué falta exactamente para llegar a `M1001`:**
+- Instanciar `fx68k` (CPU 68000, Verilog/SystemVerilog original, sin portar —
+  se instancia tal cual desde `main.vhd` en un proyecto Vivado mixed-language),
+  `zx8301` (vídeo) y `zx8302` (E/S), y traducir/cablear la lógica de bus de
+  `QL.sv` (~740 líneas: decodificación de direcciones, `DTACK`/wait-states vía
+  `ql_timing.sv`, arbitraje).
+- Instanciar `vram` (la segunda RAM dual-puerto pendiente, ver Anexo A de
+  `DECISIONES.md` — `ql_rom` ya está resuelta).
+- Añadir `fx68k`/`zx8301`/`zx8302`/`ql_timing.sv` (y el resto de la lista IN de
+  la sección 6) a la lista de fuentes de los cuatro `.xpr` (R3/R4/R5/R6) —
+  todavía no se ha tocado ningún proyecto Vivado para esto.
+- Conectar `keyboard.vhd` de verdad al `zx8302` instanciado (su FSM ya está
+  escrita y corregida con el desensamblado real del 8049 — ver Anexo B de
+  `DECISIONES.md` — pero pendiente de validar contra hardware/simulación).
+
+**Fases del Milestone 1 cubiertas y pendientes:** ver la sección 9 (actualizada
+fase a fase con el estado real, ya no todo "Pendiente").
+
+**Registro de pruebas en hardware (MEGA65 R6 físico):**
+
+| Build | Contenido | Resultado |
+|---|---|---|
+| `demo_r6` | Demo core M2M sin modificar (Fase 1, S25-S30) | Arranca correctamente |
+| `DFSmega65_r6` | Prueba equivalente hecha por el usuario directamente en Vivado | Arranca correctamente |
+| `QL4M65-CoreQL-batch1_r6` | `clk.vhd`+`mega65.vhd`+`config.vhd`+`globals.vhd`+`keyboard.vhd`, demo core aún dentro | Arranca; imagen con rayas y resolución aumentada (esperado, el demo sigue calculado para 54MHz con reloj ya a 84MHz); menú OSD vivo (Espacio/Help lo abren/cierran); sonido funciona |
+| `M1001` | *(pendiente)* | *(pendiente)* |
+
+Detalle completo de cada prueba en `DECISIONES.md` (registro cronológico) y
+sus Anexos A/B (memoria y teclado).
+
+---
+
 ## 1. Núcleo MiSTer de referencia
 
 - Repositorio elegido: **MiSTer-devel/QL_MiSTer** (oficial) — https://github.com/MiSTer-devel/QL_MiSTer
@@ -246,6 +286,12 @@ opciones de menú que reset y carga de ROM (F4). Se necesita elegir una ROM de
 sistema operativo concreta para las pruebas (candidatas: JS-ROM, Minerva) —
 pendiente de decisión (ver más abajo).
 
+**Estado de las fases de Milestone 1 (actualizado 2026-07-28):** ver sección 0
+(snapshot) y sección 9 (detalle fase a fase) — resumen: Fases 0-2 y 4 hechas,
+Fase 3 parcial, Fases 5-7 en curso (bloqueante actual: instanciar
+`fx68k`/`zx8301`/`zx8302` y la lógica de bus en `main.vhd`, la compilación
+`M1001`), Fases 8-12 pendientes.
+
 ### Milestone 2 — Ampliación de memoria y velocidad
 
 Los tres tamaños de RAM del requisito inicial (128k/640k/4096k, todos sobre
@@ -299,43 +345,61 @@ cuando los tres milestones anteriores estén cerrados.)
 
 ## 9. Fases de la Porting Guide aplicadas a QL4M65 (resumen ejecutivo)
 
-Basado en la Parte II de `The-Ultimate-MiSTer2MEGA65-Porting-Guide.md`:
+Basado en la Parte II de `The-Ultimate-MiSTer2MEGA65-Porting-Guide.md`. Estado
+actualizado el 2026-07-28 (ver sección 0 para el snapshot rápido y
+`DECISIONES.md` para el detalle cronológico completo):
 
-- **Fase 0 — Estudiar el core (HECHA en este hilo).** Este mismo documento es el
-  entregable. Catálogo de features, CONF_STR, reloj, memoria, periféricos y
-  milestone 1 ya están definidos arriba.
-- **Fase 1 — Proyecto desde la plantilla.** Ya se probó en la Fase 0 (bitstream
-  del demo core de M2M sin modificar, sintetizado y empaquetado en `.cor`).
-  En `CoreQL/` ya está la plantilla copiada; falta re-verificar que el proyecto
-  Vivado sintetiza el demo core sin cambios *dentro de esta carpeta concreta*
-  antes de tocar nada (el `template-baseline` de la guía, S25-S30).
-- **Fase 2 — Fork del core y curación de la lista de ficheros (HECHA en parte
-  en este hilo).** El core está copiado en `CORE/QL_MiSTer/`. La tabla IN/OUT
-  preliminar está en la sección 6 de este documento; falta decidir fork real
-  (decisión pendiente #1).
-- **Fase 3 — Dejar el RTL "Vivado-clean".** Pendiente. Aplicará sobre todo a
-  `rtl/dpram.v` y `rtl/mgc_rom/mgc_rom.v` (megafunciones `altsyncram`), y habrá
-  que barrer el resto de ficheros IN en busca de Quartus-ismos (patrones
-  documentados en la Parte III de la guía).
-- **Fase 4 — Relojes (`clk.vhd`).** Pendiente. Rehacer la aritmética MMCM a
-  partir de 100 MHz (placa MEGA65) para reproducir los 84 MHz / clock-enables
-  de la sección 3 de este documento.
-- **Fase 5 — Cablear `main.vhd`.** Pendiente. Aquí se decide la arquitectura
-  del teclado (decisión pendiente #2) y se instancia el conjunto
-  `fx68k + zx8301 + zx8302 + T48/keyboard + ql_timing + memorias`.
-- **Fase 6 — Memorias (BRAM/QNICE/HyperRAM).** Pendiente. Ver sección 4 (revisada):
-  RAM principal sobre HyperRAM desde milestone 1 (aunque solo se use la config
-  de 128k al principio); ROM de sistema y VRAM en BRAM interna.
-- **Fase 7 — Sustituir los servicios HPS.** Pendiente. RTC, carga de ROM (F4)
-  para milestone 1; vdrives para QL-SD/MDV en milestone 3 (a diseñar desde
-  ahora para no bloquear el futuro, aunque no se implemente todavía).
-- **Fase 8 — Ficheros de proyecto Vivado.** Pendiente. Añadir la lista IN de la
-  sección 6 a los cuatro `.xpr` (R3/R4/R5/R6).
-- **Fase 9-12 — Síntesis, timing, bring-up en hardware, release.** Pendientes,
-  posteriores a tener algo que sintetice. El bring-up de milestone 1 se hace
-  con la config de RAM más pequeña (128k) para simplificar la primera vuelta;
-  milestone 2 añade las configs de 640k/4096k y los modos de velocidad;
-  milestone 3 añade microdrive y QL-SD.
+- **Fase 0 — Estudiar el core. HECHA.** Este mismo documento es el entregable.
+  Catálogo de features, CONF_STR, reloj, memoria, periféricos y milestone 1
+  ya están definidos arriba.
+- **Fase 1 — Proyecto desde la plantilla. HECHA.** Bitstream del demo core de
+  M2M sin modificar, sintetizado *dentro de `CoreQL/` concretamente* (no
+  reutilizado de otra carpeta) y probado en hardware real (MEGA65 R6): arranca
+  correctamente. Ver registro de pruebas en la sección 0.
+- **Fase 2 — Fork del core y curación de la lista de ficheros. HECHA en parte.**
+  El core está copiado en `CORE/QL_MiSTer/`, con su propio repo git local
+  (commit `199bb0d`, snapshot íntegro de upstream sin modificar). La tabla
+  IN/OUT preliminar está en la sección 6 de este documento. Sigue pendiente el
+  fork público en GitHub (decisión pendiente #1, sin fecha todavía).
+- **Fase 3 — Dejar el RTL "Vivado-clean". PARCIAL.** `rtl/dpram.v` no se ha
+  reescrito línea a línea (no hace falta: `ql_rom`/`vram` no viven ahí, viven
+  en `QL.sv`, que no se porta) — en su lugar, `ql_rom` ya está resuelto con el
+  módulo `dualport_2clk_ram` del propio framework M2M (ver Anexo A de
+  `DECISIONES.md`). `rtl/mgc_rom/mgc_rom.v` (GoldCard) sigue sin tocar, fuera
+  de alcance de milestone 1. Falta barrer el resto de ficheros IN de la
+  sección 6 en busca de más Quartus-ismos cuando se instancien de verdad
+  (Fase 5).
+- **Fase 4 — Relojes (`clk.vhd`). HECHA.** MMCM retargeteado a 84.000000 MHz
+  exactos desde los 100 MHz de la placa (0 ppm de error, commit `9f0ba92`).
+  Clock-enables internos (`ce_bus_p/n`, `ce_131k`, `ce_vid`, `ce_sd`, `ce_11m`)
+  también hechos, portados literalmente del generador de `QL.sv` (commit
+  `ce97f0c`).
+- **Fase 5 — Cablear `main.vhd`. EN CURSO — es el bloqueante actual de `M1001`.**
+  Decisión de teclado (pendiente #2) ya implementada: `keyboard.vhd`
+  MEGA65-nativo completo (matriz + FSM del protocolo IPC), corregido con
+  desensamblado real del 8049 (ver Anexo B de `DECISIONES.md`), pendiente de
+  validar contra hardware/simulación. Todavía sin instanciar: `fx68k + zx8301
+  + zx8302 + ql_timing` y la lógica de bus/decodificación de direcciones de
+  `QL.sv` (~740 líneas). Ver sección 0 para el detalle de lo que falta.
+- **Fase 6 — Memorias (BRAM/QNICE/HyperRAM). EN CURSO.** `ql_rom` (64KB,
+  sistema Minerva) cableado entre `mega65.vhd` y `main.vhd`, con carga manual
+  vía QNICE (commit `44142fa`, detalle en Anexo A de `DECISIONES.md`). `vram`
+  (64KB) todavía sin instanciar (vive entera en `main.vhd`, se hará junto con
+  el chipset en Fase 5). HyperRAM para la RAM principal del QL: sin empezar
+  (el maestro Avalon `hr_core_*` sigue atado a cero en `mega65.vhd`).
+- **Fase 7 — Sustituir los servicios HPS. EN CURSO.** Carga de ROM (F4)
+  parcialmente resuelta vía el mecanismo de carga manual de QNICE (mismo
+  trabajo que Fase 6, `C_DEV_QL_MINERVA`). RTC y vdrives (QL-SD/MDV, milestone
+  3) siguen sin diseñar.
+- **Fase 8 — Ficheros de proyecto Vivado. PENDIENTE.** Añadir la lista IN de la
+  sección 6 (`fx68k`, `zx8301`, `zx8302`, `ql_timing.sv`, etc.) a los cuatro
+  `.xpr` (R3/R4/R5/R6) — todavía no se ha tocado ningún proyecto Vivado para
+  esto, solo se ha sintetizado con el demo core + el andamiaje ya descrito.
+- **Fase 9-12 — Síntesis, timing, bring-up en hardware, release. PENDIENTES**,
+  posteriores a tener el core real sintetizando (`M1001`). El bring-up de
+  milestone 1 se hace con la config de RAM más pequeña (128k) para simplificar
+  la primera vuelta; milestone 2 añade las configs de 640k/4096k y los modos
+  de velocidad; milestone 3 añade microdrive y QL-SD.
 
 ---
 
