@@ -399,14 +399,11 @@ begin
    -- value rather than a qnice_osm_control_i bit lookup. C_VIDEO_HDMI_4_3_50
    -- (PAL 576p, 4:3) matches the QL's PAL/50Hz native timing, same family of
    -- choice as C64MEGA65's default.
-   -- QL4M65 M1003 DIAGNOSTIC (temporary, see DECISIONES.md): switched to
-   -- C_VIDEO_HDMI_640_60 to test whether the OSD/Welcome-screen top-left
-   -- clipping seen in M1002 tracks the HDMI output resolution (points at
-   -- ascal's auto-detected input timing) or stays identical (points at the
-   -- native-coordinate OSM position logic in vga_recover_counters/zx8301
-   -- instead). Revert to C_VIDEO_HDMI_4_3_50 once this single-variable test
-   -- is done.
-   qnice_video_mode_o         <= C_VIDEO_HDMI_640_60;
+   -- (M1003 temporarily forced this to C_VIDEO_HDMI_640_60 to test whether
+   -- the OSD clipping tracked the HDMI output resolution - it didn't, ruling
+   -- out ascal's own auto-detection and pointing at the OSM's own coordinate
+   -- rescaling instead, fixed in video_overlay.vhd for M1004. Reverted here.)
+   qnice_video_mode_o         <= C_VIDEO_HDMI_4_3_50;
 
    qnice_dvi_o                <= '0';                    -- 0=HDMI (with sound), 1=DVI (no sound)
    qnice_scandoubler_o        <= '0';                    -- no scandoubler

@@ -189,7 +189,8 @@ begin
          vga_vs_i          => vga_vs,
          vga_de_i          => mix_vga_de,
          vga_cfg_scaling_i => video_osm_cfg_scaling_i,
-         vga_cfg_shift_i   => 0,
+         vga_cfg_hscale_i  => 65536,  -- Q16 "1.0": no rescale, analog path runs pre-ascal in native coords
+         vga_cfg_vscale_i  => 65536,
          vga_cfg_enable_i  => video_osm_cfg_enable_i,
          vga_cfg_r15kHz_i  => video_retro15kHz_i,
          vga_cfg_xy_i      => video_osm_cfg_xy_i,
