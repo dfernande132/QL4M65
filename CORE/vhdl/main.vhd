@@ -71,10 +71,7 @@ entity main is
       pot2_y_i                : in  std_logic_vector(7 downto 0);
 
       -- QL4M65: system ROM (Minerva), 32K x 16-bit words, loaded by the
-      -- QNICE Shell via mega65.vhd's ql_rom_u/l (C_DEV_QL_MINERVA). Not used
-      -- yet - i_democore below has no ROM of its own - but the port exists
-      -- already so mega65.vhd's RAM instance has somewhere real to connect
-      -- to. Wired for real once the QL core replaces i_democore (M1001).
+      -- QNICE Shell via mega65.vhd's ql_rom_u/l (C_DEV_QL_MINERVA).
       ql_rom_addr_o           : out std_logic_vector(14 downto 0);
       ql_rom_data_i           : in  std_logic_vector(15 downto 0)
    );
@@ -82,8 +79,83 @@ end entity main;
 
 architecture synthesis of main is
 
--- @TODO: Remove these demo core signals
-signal keyboard_n          : std_logic_vector(79 downto 0);
+---------------------------------------------------------------------------
+-- QL4M65: reset (unified soft/hard, same convention already used
+-- throughout mega65.vhd/main.vhd)
+---------------------------------------------------------------------------
+
+signal reset : std_logic;
+
+---------------------------------------------------------------------------
+-- QL4M65: CPU (fx68k) signals - address/data bus, decode, DTACK
+---------------------------------------------------------------------------
+
+signal cpu_addr16   : std_logic_vector(23 downto 1);  -- fx68k's eab
+signal cpu_addr     : std_logic_vector(23 downto 0);  -- reconstructed byte address, masked to 256KB (milestone 1: 128k RAM only)
+signal cpu_din      : std_logic_vector(15 downto 0);
+signal cpu_dout     : std_logic_vector(15 downto 0);
+signal cpu_uds_n    : std_logic;
+signal cpu_lds_n    : std_logic;
+signal cpu_uds      : std_logic;
+signal cpu_lds      : std_logic;
+signal cpu_as_n     : std_logic;
+signal cpu_as       : std_logic;
+signal cpu_rw       : std_logic;
+signal cpu_fc       : std_logic_vector(2 downto 0);
+signal cpu_int_ack  : std_logic;
+signal cpu_ipl      : std_logic_vector(1 downto 0);
+
+signal cpu_rd       : std_logic;
+signal cpu_wr       : std_logic;
+signal cpu_io       : std_logic;
+
+-- Address decode (milestone 1 scope only: ROM + internal I/O + 128k RAM -
+-- no GoldCard, no QL-SD, no microdrive, no extended RAM configs)
+signal ql_io        : std_logic;  -- $018000-$01BFFF: ZX8301/ZX8302 internal I/O
+signal cpu_rom      : std_logic;  -- $000000-$00FFFF: system ROM (Minerva)
+signal cpu_ram      : std_logic;  -- $020000-$03FFFF: 128k main RAM
+signal cpu_vram_wr  : std_logic;  -- $020000-$02FFFF: lower half also mirrors into VRAM
+
+signal ram_delay_dtack : std_logic;
+signal cpu_dtack       : std_logic;
+
+signal ram_q_a      : std_logic_vector(15 downto 0);  -- main RAM read data
+signal vram_q_b     : std_logic_vector(15 downto 0);  -- VRAM read data (video side)
+
+signal io_dout      : std_logic_vector(15 downto 0);
+
+---------------------------------------------------------------------------
+-- QL4M65: ZX8301 (video) signals
+---------------------------------------------------------------------------
+
+signal zx8301_ce    : std_logic;                     -- write strobe for mc_stat ($18063)
+signal mc_stat      : std_logic_vector(7 downto 0);
+signal video_addr   : std_logic_vector(14 downto 0);
+signal video_r      : std_logic;
+signal video_g      : std_logic;
+signal video_b      : std_logic;
+signal zx_hs        : std_logic;
+signal zx_vs        : std_logic;
+signal zx_hblank    : std_logic;
+signal zx_vblank    : std_logic;
+signal ce_pix       : std_logic;
+
+---------------------------------------------------------------------------
+-- QL4M65: ZX8302 (internal I/O) signals
+---------------------------------------------------------------------------
+
+signal zx8302_sel   : std_logic;
+signal zx8302_addr  : std_logic_vector(1 downto 0);
+signal zx8302_dout  : std_logic_vector(15 downto 0);
+signal audio_bit    : std_logic;                      -- ZX8302's single-bit beeper output
+
+-- IPC link to keyboard.vhd (replaces the embedded 8049 emulation - see
+-- rtl/zx8302.v's header note and CoreQL/doc/m2m/exceptions.md)
+signal ipc_comctrl       : std_logic;                    -- keyboard.vhd -> zx8302
+signal ipc_comdata_zx2kb : std_logic;                    -- zx8302's own outgoing bit -> keyboard.vhd
+signal ipc_comdata_kb2zx : std_logic;                    -- keyboard.vhd's own outgoing bit -> zx8302
+signal ipc_ipl           : std_logic_vector(1 downto 0);  -- keyboard.vhd -> zx8302
+signal ipc_audio         : std_logic;                     -- keyboard.vhd -> zx8302
 
 ---------------------------------------------------------------------------
 -- QL4M65: internal clock enables, derived from clk_main_i (84.000000 MHz)
@@ -195,83 +267,287 @@ begin
       end if;
    end process clock_enables;
 
-   -- @TODO: Add the actual MiSTer core here
-   -- The demo core's purpose is to show a test image and to make sure, that the MiSTer2MEGA65 framework
-   -- can be synthesized and run stand-alone without an actual MiSTer core being there, yet
-   i_democore : entity work.democore
+   reset <= reset_soft_i or reset_hard_i;
+
+   ---------------------------------------------------------------------------
+   -- QL4M65: address decode (milestone 1 scope - see PORTING-PLAN.md
+   -- section 4/CONF_STR table: fixed 128k RAM, no GoldCard/QL-SD/microdrive)
+   ---------------------------------------------------------------------------
+
+   cpu_addr <= (cpu_addr16 & ((not cpu_uds) and cpu_lds)) and x"03FFFF";
+
+   cpu_rd <= cpu_as and cpu_rw and (cpu_uds or cpu_lds);
+   cpu_wr <= cpu_as and (not cpu_rw) and (cpu_uds or cpu_lds);
+   cpu_io <= cpu_rd or cpu_wr;
+
+   ql_io       <= '1' when unsigned(cpu_addr) >= x"018000" and unsigned(cpu_addr) <= x"01BFFF" else '0';
+   cpu_rom     <= '1' when unsigned(cpu_addr) <= x"00FFFF" else '0';
+   cpu_ram     <= '1' when unsigned(cpu_addr) >= x"020000" and unsigned(cpu_addr) <= x"03FFFF" else '0';
+   cpu_vram_wr <= '1' when unsigned(cpu_addr) >= x"020000" and unsigned(cpu_addr) <= x"02FFFF" else '0';
+
+   -- The ZX8301 has only one write-only register, at $18063
+   zx8301_ce <= '1' when (ql_io = '1' and cpu_addr(6) = '1' and cpu_addr(5) = '1'
+                          and cpu_addr(1) = '1' and cpu_wr = '1' and cpu_lds = '1') else '0';
+
+   zx8302_sel  <= cpu_io and ql_io and (not cpu_addr(6));
+   zx8302_addr <= cpu_addr(5) & cpu_addr(1);
+
+   io_dout <= zx8302_dout when zx8302_sel = '1' else x"0000";
+
+   cpu_din <= io_dout       when ql_io   = '1' else
+              ql_rom_data_i when cpu_rom = '1' else
+              ram_q_a       when cpu_ram = '1' else
+              x"FFFF";
+
+   -- ql_timing's wait-states apply uniformly (matches QL.sv's own default
+   -- case - even ROM/IO reads share the contended-memory timing window);
+   -- no extra RAM-controller dtack needed since main RAM is BRAM here, not
+   -- SDRAM (see DECISIONES.md: BRAM now, HyperRAM later)
+   cpu_dtack <= not ram_delay_dtack;
+
+   ql_rom_addr_o <= cpu_addr(15 downto 1);
+
+   ---------------------------------------------------------------------------
+   -- QL4M65: CPU (fx68k) - Verilog/SystemVerilog original, instantiated
+   -- as-is (mixed-language Vivado project), not ported
+   ---------------------------------------------------------------------------
+
+   i_fx68k : entity work.fx68k
       port map (
-         clk_main_i           => clk_main_i,
+         clk      => clk_main_i,
+         HALTn    => '1',
+         extReset => reset,
+         pwrUp    => reset,
+         enPhi1   => ce_bus_p,
+         enPhi2   => ce_bus_n,
 
-         reset_i              => reset_soft_i or reset_hard_i,       -- long and short press of reset button mean the same
-         pause_i              => pause_i,
+         eRWn     => cpu_rw,
+         ASn      => cpu_as_n,
+         UDSn     => cpu_uds_n,
+         LDSn     => cpu_lds_n,
 
-         ball_col_rgb_i       => x"EE4020",                          -- ball color (RGB): orange
-         paddle_speed_i       => x"1",                               -- paddle speed is about 50 pixels / sec (due to 50 Hz)
+         E        => open,
+         VMAn     => open,
+         FC0      => cpu_fc(0),
+         FC1      => cpu_fc(1),
+         FC2      => cpu_fc(2),
 
-         keyboard_n_i         => keyboard_n,                         -- move the paddle with the cursor left/right keys...
-         joy_up_n_i           => joy_1_up_n_i,                       -- ... or move the paddle with a joystick in port #1
-         joy_down_n_i         => joy_1_down_n_i,
-         joy_left_n_i         => joy_1_left_n_i,
-         joy_right_n_i        => joy_1_right_n_i,
-         joy_fire_n_i         => joy_1_fire_n_i,
+         BGn        => open,
+         oRESETn    => open,
+         oHALTEDn   => open,
+         DTACKn     => not cpu_dtack,
+         VPAn       => not cpu_int_ack,
+         BERRn      => '1',
+         BRn        => '1',
+         BGACKn     => '1',
+         IPL0n      => cpu_ipl(0),
+         IPL1n      => cpu_ipl(1),
+         IPL2n      => cpu_ipl(0),  -- IPL0/IPL2 are tied together on the 68008, matches QL.sv
+         iEdb       => cpu_din,
+         oEdb       => cpu_dout,
+         eab        => cpu_addr16
+      ); -- i_fx68k
 
-         vga_ce_o             => video_ce_o,
-         vga_red_o            => video_red_o,
-         vga_green_o          => video_green_o,
-         vga_blue_o           => video_blue_o,
-         vga_vs_o             => video_vs_o,
-         vga_hs_o             => video_hs_o,
-         vga_hblank_o         => video_hblank_o,
-         vga_vblank_o         => video_vblank_o,
+   cpu_as  <= not cpu_as_n;
+   cpu_uds <= not cpu_uds_n;
+   cpu_lds <= not cpu_lds_n;
+   cpu_int_ack <= '1' when cpu_fc = "111" else '0';
 
-         audio_left_o         => audio_left_o,
-         audio_right_o        => audio_right_o
-      ); -- i_democore
+   ---------------------------------------------------------------------------
+   -- QL4M65: memory - main RAM (128k, BRAM for now) and VRAM (64k)
+   --
+   -- Both use the M2M framework's dualport_2clk_ram_byteenable; only one
+   -- port is actually needed for main RAM (only the CPU touches it), the
+   -- other side is tied off, same pattern as AExp's chip_ram_u/l. VRAM
+   -- genuinely needs both ports (CPU writes, ZX8301 reads) - see
+   -- DECISIONES.md Anexo A for why the CPU's own reads of the VRAM address
+   -- range still come from main RAM, not from this VRAM instance (VRAM
+   -- mirrors CPU writes for the video controller's exclusive use).
+   ---------------------------------------------------------------------------
 
-   -- On video_ce_o and video_ce_ovl_o: You have an important @TODO when porting a core:
-   -- video_ce_o: You need to make sure that video_ce_o divides clk_main_i such that it transforms clk_main_i
-   --             into the pixelclock of the core (means: the core's native output resolution pre-scandoubler)
-   -- video_ce_ovl_o: Clock enable for the OSM overlay and for sampling the core's (retro) output in a way that
-   --             it is displayed correctly on a "modern" analog input device: Make sure that video_ce_ovl_o
-   --             transforms clk_main_o into the post-scandoubler pixelclock that is valid for the target
-   --             resolution specified by VGA_DX/VGA_DY (globals.vhd)
-   -- video_retro15kHz_o: '1', if the output from the core (post-scandoubler) in the retro 15 kHz analog RGB mode.
-   --             Hint: Scandoubler off does not automatically mean retro 15 kHz on.
+   i_main_ram : entity work.dualport_2clk_ram_byteenable
+      generic map (
+         G_ADDR_WIDTH => 16,
+         G_DATA_WIDTH => 16
+      )
+      port map (
+         a_clk_i        => clk_main_i,
+         a_address_i    => cpu_addr(16 downto 1),
+         a_data_i       => cpu_dout,
+         a_byteenable_i => cpu_uds & cpu_lds,
+         a_wren_i       => cpu_wr and cpu_ram,
+         a_q_o          => ram_q_a,
+
+         b_clk_i        => clk_main_i,
+         b_address_i    => (others => '0'),
+         b_data_i       => (others => '0'),
+         b_byteenable_i => (others => '0'),
+         b_wren_i       => '0',
+         b_q_o          => open
+      ); -- i_main_ram
+
+   i_vram : entity work.dualport_2clk_ram_byteenable
+      generic map (
+         G_ADDR_WIDTH => 15,
+         G_DATA_WIDTH => 16
+      )
+      port map (
+         a_clk_i        => clk_main_i,
+         a_address_i    => cpu_addr(15 downto 1),
+         a_data_i       => cpu_dout,
+         a_byteenable_i => cpu_uds & cpu_lds,
+         a_wren_i       => cpu_wr and cpu_vram_wr,
+         a_q_o          => open,
+
+         b_clk_i        => clk_main_i,
+         b_address_i    => video_addr,
+         b_data_i       => (others => '0'),
+         b_byteenable_i => (others => '0'),
+         b_wren_i       => '0',
+         b_q_o          => vram_q_b
+      ); -- i_vram
+
+   ---------------------------------------------------------------------------
+   -- QL4M65: contended-memory wait states, ported unmodified (independent of
+   -- which memory technology sits behind cpu_ram - see DECISIONES.md Anexo A)
+   ---------------------------------------------------------------------------
+
+   i_ql_timing : entity work.ql_timing
+      port map (
+         clk_sys         => clk_main_i,
+         reset           => reset,
+         enable          => '1',  -- QL-native speed fixed for milestone 1
+         ce_bus_p        => ce_bus_p,
+         VBlank          => zx_vblank,
+         cpu_uds         => cpu_uds,
+         cpu_lds         => cpu_lds,
+         cpu_rw          => cpu_rw,
+         cpu_rom         => cpu_rom,
+         ram_delay_dtack => ram_delay_dtack
+      ); -- i_ql_timing
+
+   ---------------------------------------------------------------------------
+   -- QL4M65: ZX8301 (video) - Verilog original, instantiated as-is
+   ---------------------------------------------------------------------------
+
+   mc_stat_reg : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if reset = '1' then
+            mc_stat <= x"00";
+         elsif zx8301_ce = '1' then
+            mc_stat <= cpu_dout(7 downto 0);
+         end if;
+      end if;
+   end process mc_stat_reg;
+
+   i_zx8301 : entity work.zx8301
+      port map (
+         reset   => reset,
+         clk     => clk_main_i,
+         ce      => ce_vid,
+         ce_out  => ce_pix,
+         ntsc    => '0',            -- PAL only for milestone 1
+         mc_stat => mc_stat,
+         addr    => video_addr,
+         din     => vram_q_b,
+         r       => video_r,
+         g       => video_g,
+         b       => video_b,
+         hs      => zx_hs,
+         vs      => zx_vs,
+         HBlank  => zx_hblank,
+         VBlank  => zx_vblank
+      ); -- i_zx8301
+
+   -- video_ce_o: divides clk_main_i into the core's native pre-scandoubler
+   -- pixel clock; video_ce_ovl_o: same rate for milestone 1 (no separate
+   -- scandoubler clock enable yet - see globals.vhd's VGA_DX/DY note, may
+   -- need revisiting once real video is on screen, Fase 6/9).
+   video_ce_o     <= ce_pix;
    video_ce_ovl_o <= video_ce_o;
 
-   -- @TODO: Keyboard mapping and keyboard behavior
-   -- Each core is treating the keyboard in a different way: Some need low-active "matrices", some
-   -- might need small high-active keyboard memories, etc. This is why the MiSTer2MEGA65 framework
-   -- lets you define literally everything and only provides a minimal abstraction layer to the keyboard.
-   -- You need to adjust keyboard.vhd to your needs
-   -- QL4M65: keyboard.vhd's entity was already rewritten for the real QL IPC
-   -- link (comdata/comctrl), ahead of main.vhd itself, so this instantiation
-   -- only matches the new port list mechanically - it is not wired to a real
-   -- ZX8302 yet (that happens when the QL core replaces i_democore below, at
-   -- milestone 1's M1001 step). keyboard_n (still read by i_democore above)
-   -- no longer has anything driving it via example_n_o, so it is tied to
-   -- "nothing pressed" just below instead.
-   keyboard_n <= (others => '1');
+   video_red_o    <= (others => video_r);
+   video_green_o  <= (others => video_g);
+   video_blue_o   <= (others => video_b);
+   video_vs_o     <= zx_vs;
+   video_hs_o     <= zx_hs;
+   video_hblank_o <= zx_hblank;
+   video_vblank_o <= zx_vblank;
 
-   -- QL4M65: no ROM consumer yet (see entity port comment above); ql_rom_data_i
-   -- is simply unused for now.
-   ql_rom_addr_o <= (others => '0');
+   ---------------------------------------------------------------------------
+   -- QL4M65: ZX8302 (internal I/O) - Verilog original, modified to expose
+   -- the IPC link as top-level ports instead of embedding the 8049
+   -- emulation (see rtl/zx8302.v's header note and doc/m2m/exceptions.md)
+   ---------------------------------------------------------------------------
+
+   i_zx8302 : entity work.zx8302
+      port map (
+         clk           => clk_main_i,
+         ce_11m        => ce_11m,
+         reset         => reset,
+         reset_mdv     => reset,
+
+         ipl           => cpu_ipl,
+         xint          => '0',  -- no mouse in milestone 1
+
+         -- microdrive: not in milestone 1 (milestone 3)
+         mdv_dl_addr   => (others => '0'),
+         mdv_dl_data   => (others => '0'),
+         mdv_download  => '0',
+         mdv_dl_wr     => '0',
+         mdv_reverse   => '0',
+         led           => open,
+
+         audio         => audio_bit,
+
+         vs            => zx_vs,
+
+         -- IPC link (see keyboard.vhd)
+         ipc_comctrl_i => ipc_comctrl,
+         ipc_comdata_o => ipc_comdata_zx2kb,
+         ipc_comdata_i => ipc_comdata_kb2zx,
+         ipc_ipl_i     => ipc_ipl,
+         ipc_audio_i   => ipc_audio,
+
+         cep           => ce_bus_p,
+         cen           => ce_bus_n,
+
+         ce_131k       => ce_131k,
+         rtc_data      => (others => '0'),  -- no real-time source yet, see PORTING-PLAN.md section 0
+
+         cpu_sel       => zx8302_sel,
+         cpu_wr        => cpu_wr,
+         cpu_addr      => zx8302_addr,
+         cpu_uds       => cpu_uds,
+         cpu_lds       => cpu_lds,
+         cpu_din       => cpu_dout,
+         cpu_dout      => zx8302_dout
+      ); -- i_zx8302
+
+   audio_left_o  <= to_signed(16#7FFF#, 16) when audio_bit = '1' else to_signed(0, 16);
+   audio_right_o <= to_signed(16#7FFF#, 16) when audio_bit = '1' else to_signed(0, 16);
+
+   ---------------------------------------------------------------------------
+   -- QL4M65: keyboard - MEGA65-native, wired for real to the ZX8302's IPC
+   -- link (see rtl/zx8302.v's header note and keyboard.vhd's own header for
+   -- the disassembly-verified protocol details, still pending
+   -- hardware/simulation validation)
+   ---------------------------------------------------------------------------
 
    i_keyboard : entity work.keyboard
       port map (
-         clk_main_i           => clk_main_i,
-         reset_i              => reset_soft_i or reset_hard_i,
+         clk_main_i      => clk_main_i,
+         reset_i         => reset,
 
-         -- Interface to the MEGA65 keyboard
-         key_num_i            => kb_key_num_i,
-         key_pressed_n_i      => kb_key_pressed_n_i,
+         key_num_i       => kb_key_num_i,
+         key_pressed_n_i => kb_key_pressed_n_i,
 
-         -- Not connected to a real ZX8302 yet, see comment above
-         comctrl_o            => open,
-         comdata_i            => '1',
-         comdata_o            => open,
-         audio_o              => open,
-         ipl_o                => open
+         comctrl_o       => ipc_comctrl,
+         comdata_i       => ipc_comdata_zx2kb,
+         comdata_o       => ipc_comdata_kb2zx,
+         audio_o         => ipc_audio,
+         ipl_o           => ipc_ipl
       ); -- i_keyboard
 
 end architecture synthesis;
