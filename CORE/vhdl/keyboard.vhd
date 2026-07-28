@@ -22,16 +22,38 @@
 --      strobe WE generate (the ZX8302 is a passive clock slave to it), and
 --      each 1-bit transfer takes exactly 2 of our falling edges (1st just
 --      consumes the CPU's Start bit, 2nd is the real bidirectional
---      exchange). Byte/command-level semantics are LOW confidence,
---      reconstructed from public QL community documentation of the real
---      8049 ROM, NOT verified against this repo's RTL or real hardware:
---      only commands 0x8/0x9 (keyboard read) are implemented for real,
---      everything else degrades to a harmless passive ACK that never
---      deadlocks the link but may misinterpret a parameter byte of an
---      unimplemented command as a bogus new command (harmless today, since
---      unimplemented commands do nothing either way). PENDING VALIDATION
---      (ideally simulating the existing QL_MiSTer core, see chat) before
---      main.vhd wires this entity in for real (milestone 1's M1001 build).
+--      exchange).
+--
+--      Byte/command-level semantics were originally a low-confidence guess
+--      from public QL community documentation, then corrected by actually
+--      disassembling rtl/ipc8049.hex (the real IPC ROM MiSTer's T48 core
+--      executes) with a from-scratch MCS-48 disassembler built from
+--      github.com/jblang/d52's opcode tables. Verified findings:
+--        - The command dispatch (address 0x020B, `jmpp @a`) is a genuine
+--          16-entry jump table keyed by a 4-BIT NIBBLE, not a byte - the
+--          command value is received by a single call to the nibble-receive
+--          routine at 0x074F. Commands 2/3, 4/5 and 6/7 share handlers in
+--          pairs (consistent with symmetric "open/close/receive ser1 vs
+--          ser2" commands); 8 and 9 are distinct, consistent with "read
+--          keyboard" and "keyrow".
+--        - Command 9 ("keyrow", address 0x0276): receives ONE MORE NIBBLE
+--          (low 3 bits = row 0-7), builds a one-hot mask, reads the
+--          matching kbd_matrix byte, and answers with a full BYTE (two
+--          nibbles, high nibble first) - confirms the ROWSEL/RESPOND shape
+--          below, but as nibble+nibble+byte, not byte+byte+byte.
+--        - Bit order is MSB-first throughout (nibble reception via
+--          repeated RLC at 0x0750-ish; byte transmission via JB7-then-
+--          rotate at 0x0762), not LSB-first as first assumed.
+--        - Command 8 ("read keyboard") turned out to service an internal
+--          keyboard-event QUEUE (RAM 0x2B/0x2C onward), not a direct matrix
+--          read - replicating it exactly would need reverse-engineering the
+--          scan/interrupt routine that fills that queue, which has not been
+--          done; left as the same safe 0x00 stub as before.
+--      PENDING VALIDATION (real hardware/simulation) before main.vhd wires
+--      this entity in for real (milestone 1's M1001 build) - this is now
+--      grounded in the actual ROM instead of forum summaries, but a
+--      hand-written disassembler is itself unverified until it's been
+--      seen working against real hardware.
 --
 -- Key mapping notes (decided together with the user in chat, flagging the
 -- non-obvious ones so they are easy to find and revisit):
@@ -207,7 +229,7 @@ architecture beh of keyboard is
    signal edge_pulse : std_logic := '0';
    signal edge_phase : std_logic := '0';   -- '0' before edge 1, '1' before edge 2
 
-   signal bit_pos    : unsigned(2 downto 0) := (others => '0');
+   signal bit_cnt    : unsigned(2 downto 0) := (others => '0');
    signal shift_in   : std_logic_vector(7 downto 0) := (others => '0');
    signal resp_byte  : std_logic_vector(7 downto 0) := (others => '1');
    signal cmd_state  : t_cmd_state := CMD;
@@ -394,16 +416,26 @@ begin
 
    comctrl_o <= comctrl_r;
 
-   -- Bit/byte/command tracking, advanced once per edge_pulse that lands on
+   -- Bit/unit/command tracking, advanced once per edge_pulse that lands on
    -- "edge 2" (the real bidirectional data exchange; edge 1 only consumes
    -- the CPU's Start bit and carries no information, see rtl/zx8302.v).
+   --
+   -- Unit length depends on state: CMD and ROWSEL are single 4-bit nibbles
+   -- (verified: rtl/ipc8049.hex receives the command and the keyrow
+   -- row-select each via one call to its 4-bit nibble-receive routine),
+   -- RESPOND is a full 8-bit byte (two nibbles, high nibble first, in the
+   -- real ROM). Bits are MSB-first throughout (verified in the ROM's
+   -- receive/transmit routines), so both directions shift left with the new
+   -- bit entering at the LSB - after N shifts, the first bit received/sent
+   -- ends up as the most significant bit of the N-bit unit.
    ipc_fsm : process (clk_main_i)
-      variable v_shift : std_logic_vector(7 downto 0);
+      variable v_shift  : std_logic_vector(7 downto 0);
+      variable v_unitlen : natural range 4 to 8;
    begin
       if rising_edge(clk_main_i) then
          if reset_i = '1' then
             edge_phase <= '0';
-            bit_pos    <= (others => '0');
+            bit_cnt    <= (others => '0');
             shift_in   <= (others => '0');
             resp_byte  <= (others => '1');
             cmd_state  <= CMD;
@@ -411,28 +443,35 @@ begin
             edge_phase <= not edge_phase;
 
             if edge_phase = '1' then   -- this pulse is edge 2: the real exchange
-               v_shift := shift_in;
-               v_shift(to_integer(bit_pos)) := comdata_i;
-               shift_in <= v_shift;
+               if cmd_state = RESPOND then
+                  v_unitlen := 8;
+               else
+                  v_unitlen := 4;   -- CMD and ROWSEL are both single nibbles
+               end if;
 
-               if bit_pos = 7 then
-                  bit_pos <= (others => '0');
+               if cmd_state /= RESPOND then
+                  -- receiving: MSB-first, shift left, new bit enters at LSB
+                  v_shift := shift_in(6 downto 0) & comdata_i;
+                  shift_in <= v_shift;
+               end if;
+
+               if bit_cnt = v_unitlen - 1 then
+                  bit_cnt <= (others => '0');
 
                   case cmd_state is
-                     -- command nibble assumed in the byte's low 4 bits,
-                     -- assumed LSB-first - see header comment
+                     -- command nibble ends up in shift_in(3 downto 0)
                      when CMD =>
                         if v_shift(3 downto 0) = x"9" then       -- "keyrow"
                            cmd_state <= ROWSEL;
                         elsif v_shift(3 downto 0) = x"8" then     -- "read keyboard"
-                           resp_byte <= x"00";                    -- real encoding unknown, safe stub
+                           resp_byte <= x"00";                    -- real encoding not reverse-engineered, safe stub
                            cmd_state <= RESPOND;
                         else                                      -- any other command: passive ACK
                            cmd_state <= CMD;
                         end if;
 
-                     -- row-select parameter byte: its low 3 bits choose
-                     -- which of the 8 ql_matrix bytes to answer with next
+                     -- row-select nibble: its low 3 bits choose which of
+                     -- the 8 ql_matrix bytes to answer with next
                      when ROWSEL =>
                         case to_integer(unsigned(v_shift(2 downto 0))) is
                            when 0 => resp_byte <= ql_matrix( 7 downto  0);
@@ -450,17 +489,17 @@ begin
                         cmd_state <= CMD;
                   end case;
                else
-                  bit_pos <= bit_pos + 1;
+                  bit_cnt <= bit_cnt + 1;
                end if;
             end if;
          end if;
       end if;
    end process ipc_fsm;
 
-   -- Drive our answer bit only while actually responding; passive
-   -- (released) otherwise, so we never interfere with a command/parameter
-   -- byte we don't recognise.
-   comdata_o <= resp_byte(to_integer(bit_pos)) when cmd_state = RESPOND else '1';
+   -- Drive our answer bit only while actually responding, MSB-first (bit 7
+   -- first); passive (released) otherwise, so we never interfere with a
+   -- command/parameter nibble we don't recognise.
+   comdata_o <= resp_byte(7 - to_integer(bit_cnt)) when cmd_state = RESPOND else '1';
 
    -- Not implemented (see entity port comments): no IPC-driven audio or
    -- interrupt-priority lines in milestone 1.
