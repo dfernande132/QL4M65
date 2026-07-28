@@ -24,19 +24,30 @@ bitstream sin errores (WNS=+0.130 ns, WHS=+0.051 ns, 0 nets sin rutar).
 Detalle completo en `DECISIONES.md`, sección "M1001 conseguido".
 
 **Pendiente ahora:**
-- Prueba en hardware real de `QL4M65-CoreQL-M1001_r6.cor` (ver tabla de
-  pruebas abajo).
+- Prueba en hardware real de `QL4M65-CoreQL-M1002_r6.cor` (arreglo de
+  encuadre del OSD sobre `M1001` — ver tabla de pruebas abajo).
+- Diagnosticar el cuelgue visto en `M1001`: arranca, se ve el patrón de
+  comprobación de RAM, pero se cuelga de forma reproducible más adelante en
+  el arranque de Minerva — candidato principal: interacción con el enlace
+  IPC/teclado (líneas `ipl`, fijas a "sin IRQ" en nuestro stub). Detalle
+  completo en `DECISIONES.md`, sección "Primera prueba de M1001 en hardware".
 - Validar el protocolo IPC del teclado (`keyboard.vhd`) contra
   hardware/simulación real — sigue basado en un desensamblado propio no
   contrastado externamente (Anexo B de `DECISIONES.md`).
 - Pasar la RAM principal de BRAM a HyperRAM de verdad (decisión explícita de
   esta sesión: BRAM primero para bajar el riesgo de esta compilación,
-  HyperRAM después si `M1001` funciona en hardware).
+  HyperRAM después si el core arranca bien en hardware).
 - Añadir los ficheros del core a los otros tres `.xpr` (R3/R4/R5) — solo se
   ha tocado `CORE-R6.xpr` hasta ahora.
 
 **Fases del Milestone 1 cubiertas y pendientes:** ver la sección 9 (actualizada
 fase a fase con el estado real, ya no todo "Pendiente").
+
+**Convención de numeración de builds (corregida 2026-07-28):** a partir de
+`M1001`, cada compilación que se sintetiza y se prueba en hardware
+incrementa la secuencia (`M1002`, `M1003`, ...), sea cual sea el tamaño del
+cambio — no solo los cambios "grandes". Ver `DECISIONES.md` para el
+razonamiento completo.
 
 **Registro de pruebas en hardware (MEGA65 R6 físico):**
 
@@ -45,7 +56,8 @@ fase a fase con el estado real, ya no todo "Pendiente").
 | `demo_r6` | Demo core M2M sin modificar (Fase 1, S25-S30) | Arranca correctamente |
 | `DFSmega65_r6` | Prueba equivalente hecha por el usuario directamente en Vivado | Arranca correctamente |
 | `QL4M65-CoreQL-batch1_r6` | `clk.vhd`+`mega65.vhd`+`config.vhd`+`globals.vhd`+`keyboard.vhd`, demo core aún dentro | Arranca; imagen con rayas y resolución aumentada (esperado, el demo sigue calculado para 54MHz con reloj ya a 84MHz); menú OSD vivo (Espacio/Help lo abren/cierran); sonido funciona |
-| `QL4M65-CoreQL-M1001_r6` | Core QL real (`fx68k`+`zx8301`+`zx8302`+`ql_timing`+RAM/VRAM+teclado) | *(pendiente de probar)* |
+| `M1001` | Core QL real (`fx68k`+`zx8301`+`zx8302`+`ql_timing`+RAM/VRAM+teclado) | Arranca; ruido de comprobación de RAM (¡CPU ejecutando Minerva de verdad!); menú de bienvenida M2M mal encuadrado (ver M1002); pantalla se pone en negro sólido (con señal) y se cuelga de forma reproducible; reset físico no recupera pero relanza el patrón - cuelgue determinista, no fallo de timing |
+| `M1002` | Igual que M1001 + arreglo de `VGA_DX`/`VGA_DY` (512×256, sin duplicar) | *(pendiente de probar)* |
 
 Detalle completo de cada prueba en `DECISIONES.md` (registro cronológico) y
 sus Anexos A/B (memoria y teclado).
