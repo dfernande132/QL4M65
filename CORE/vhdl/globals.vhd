@@ -62,10 +62,16 @@ constant QNICE_CLK_SPEED      : natural := 50_000_000;   -- a change here has de
 --    VGA_*   size of the core's target output post scandoubler
 --    If in doubt, use twice the values found in this link:
 --    https://mister-devel.github.io/MkDocs_MiSTer/advanced/nativeres/#arcade-core-default-native-resolutions
--- QL native visible area is 512x256 (rtl/zx8301.v); using 2x for the post-scandoubler
--- canvas. Approximate - revisit once real video is on screen (Fase 6/9).
-constant VGA_DX               : natural := 1024;
-constant VGA_DY               : natural := 512;
+-- QL native visible area is 512x256 (rtl/zx8301.v). The "use 2x" rule of
+-- thumb only applies when the core has its own internal scandoubler
+-- (doubling lines before this point) - the QL doesn't (CONF_STR fixes
+-- "Scandoubler Fx" to None, mega65.vhd's qnice_scandoubler_o is hardcoded
+-- '0'), so "post scandoubler" here is just the raw native resolution, no
+-- doubling. Confirmed wrong at 2x in M1001's first hardware test (M2M's
+-- own Welcome OSD rendered oversized/misaligned - out of proportion with
+-- video_ce_ovl_o, which runs at the same rate as video_ce_o, i.e. 1x).
+constant VGA_DX               : natural := 512;
+constant VGA_DY               : natural := 256;
 
 --    FONT_*  size of one OSM character
 constant FONT_FILE            : string  := "../font/Anikki-16x16-m2m.rom";
