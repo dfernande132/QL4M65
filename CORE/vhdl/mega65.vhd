@@ -1,9 +1,13 @@
 ----------------------------------------------------------------------------------
--- MiSTer2MEGA65 Framework
+-- Sinclair QL for MEGA65 (QL4M65)
 --
 -- MEGA65 main file that contains the whole machine
 --
+-- Powered by MiSTer2MEGA65
 -- MiSTer2MEGA65 done by sy2002 and MJoergen in 2022 and licensed under GPL v3
+-- QL4M65 port: removed demo device handling and the demo's virtual-drive
+-- instance (not needed until milestone 3); i_main port map and menu/video
+-- wiring still pending (come with main.vhd and config.vhd respectively)
 ----------------------------------------------------------------------------------
 
 library ieee;
@@ -251,11 +255,6 @@ constant C_MENU_CRT_EMULATION  : natural := 30;
 constant C_MENU_HDMI_ZOOM      : natural := 31;
 constant C_MENU_IMPROVE_AUDIO  : natural := 32;
 
--- QNICE clock domain
-signal qnice_demo_vd_data_o   : std_logic_vector(15 downto 0);
-signal qnice_demo_vd_ce       : std_logic;
-signal qnice_demo_vd_we       : std_logic;
-
 begin
 
    hr_core_write_o      <= '0';
@@ -451,19 +450,9 @@ begin
       qnice_dev_data_o     <= x"EEEE";
       qnice_dev_wait_o     <= '0';
 
-      -- Demo core specific: Delete before starting to port your core
-      qnice_demo_vd_ce     <= '0';
-      qnice_demo_vd_we     <= '0';
-
       case qnice_dev_id_i is
 
-         -- Demo core specific stuff: delete before porting your own core
-         when C_DEV_DEMO_VD =>
-            qnice_demo_vd_ce     <= qnice_dev_ce_i;
-            qnice_demo_vd_we     <= qnice_dev_we_i;
-            qnice_dev_data_o     <= qnice_demo_vd_data_o;
-
-         -- @TODO YOUR RAMs or ROMs (e.g. for cartridges) or other devices here
+         -- QL4M65: no core-specific devices yet (microdrive/QL-SD are milestone 3)
          -- Device numbers need to be >= 0x0100
 
          when others => null;
@@ -483,65 +472,14 @@ begin
    ---------------------------------------------------------------------------------------
    -- Virtual drive handler
    --
-   -- Only added for demo-purposes at this place, so that we can demonstrate the
-   -- firmware's ability to browse files and folders. It is very likely, that the
-   -- virtual drive handler needs to be placed somewhere else, for example inside
-   -- main.vhd. We advise to delete this before starting to port a core and re-adding
-   -- it later (and at the right place), if and when needed.
+   -- QL4M65: not needed yet. Milestone 3 (microdrive .MDV / QL-SD QXL.WIN) will need
+   -- vdrives again; when that happens it likely belongs inside main.vhd rather than
+   -- here (per the template's own advice above this comment in earlier revisions), so
+   -- it is deferred rather than stubbed out now.
    ---------------------------------------------------------------------------------------
 
-   -- @TODO:
-   -- a) In case that this is handled in main.vhd, you need to add the appropriate ports to i_main
-   -- b) You might want to change the drive led's color (just like the C64 core does) as long as
-   --    the cache is dirty (i.e. as long as the write process is not finished, yet)
    main_drive_led_o     <= '0';
    main_drive_led_col_o <= x"00FF00";  -- 24-bit RGB value for the led
-
-   i_vdrives : entity work.vdrives
-      generic map (
-         VDNUM       => C_VDNUM
-      )
-      port map
-      (
-         clk_qnice_i       => qnice_clk_i,
-         clk_core_i        => main_clk,
-         reset_core_i      => main_reset_core_i,
-
-         -- Core clock domain
-         img_mounted_o     => open,
-         img_readonly_o    => open,
-         img_size_o        => open,
-         img_type_o        => open,
-         drive_mounted_o   => open,
-
-         -- Cache output signals: The dirty flags can be used to enforce data consistency
-         -- (for example by ignoring/delaying a reset or delaying a drive unmount/mount, etc.)
-         -- The flushing flags can be used to signal the fact that the caches are currently
-         -- flushing to the user, for example using a special color/signal for example
-         -- at the drive led
-         cache_dirty_o     => open,
-         cache_flushing_o  => open,
-
-         -- QNICE clock domain
-         sd_lba_i          => (others => (others => '0')),
-         sd_blk_cnt_i      => (others => (others => '0')),
-         sd_rd_i           => (others => '0'),
-         sd_wr_i           => (others => '0'),
-         sd_ack_o          => open,
-
-         sd_buff_addr_o    => open,
-         sd_buff_dout_o    => open,
-         sd_buff_din_i     => (others => (others => '0')),
-         sd_buff_wr_o      => open,
-
-         -- QNICE interface (MMIO, 4k-segmented)
-         -- qnice_addr is 28-bit because we have a 16-bit window selector and a 4k window: 65536*4096 = 268.435.456 = 2^28
-         qnice_addr_i      => qnice_dev_addr_i,
-         qnice_data_i      => qnice_dev_data_i,
-         qnice_data_o      => qnice_demo_vd_data_o,
-         qnice_ce_i        => qnice_demo_vd_ce,
-         qnice_we_i        => qnice_demo_vd_we
-      ); -- i_vdrives
 
 end architecture synthesis;
 
