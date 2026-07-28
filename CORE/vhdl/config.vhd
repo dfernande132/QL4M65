@@ -107,10 +107,12 @@ constant SCR_WELCOME_START : natural := 0;
 -- Fill the WHS array with page start addresses and the length of each page.
 -- Make sure that array element 0 is always your Welcome page. If you don't use a welcome page, fill everything with zeros.
 constant WHS : WHS_RECORD_ARRAY_TYPE := (
-   --- Welcome Screen
-   (page_count    => 1,
-    page_start    => (0 => SCR_WELCOME_START),
-    page_length   => (0 => SCR_WELCOME'length))
+   --- Welcome Screen (explicit index association: with a single array
+   --- element, positional aggregation is ambiguous between "one-element
+   --- array" and "the record itself")
+   0 => (page_count    => 1,
+         page_start    => (0 => SCR_WELCOME_START),
+         page_length   => (0 => SCR_WELCOME'length))
 );
 
 --------------------------------------------------------------------------------------------------------------------
