@@ -656,10 +656,21 @@ begin
 
          comctrl_o       => ipc_comctrl,
          comdata_i       => ipc_comdata_zx2kb,
-         comdata_o       => ipc_comdata_kb2zx,
+         comdata_o       => open,  -- QL4M65 TEMPORARY TEST (M1009): see override below
          audio_o         => ipc_audio,
          ipl_o           => ipc_ipl
       ); -- i_keyboard
+
+   -- QL4M65 TEMPORARY TEST (M1009): simulate "no IPC/keyboard connected" by
+   -- forcing zx8302's comdata input permanently released ('1'), discarding
+   -- keyboard.vhd's actual response entirely. Testing whether the extreme
+   -- slowness discovered in M1006-M1008 (CPU alive, executing widely across
+   -- Minerva ROM, but taking minutes instead of <1s) tracks the IPC/keyboard
+   -- exchange or is independent of it - user's own reference: the real
+   -- MiSTer QL_MiSTer core reaches Minerva's F1-F4 screen fine even with no
+   -- PS/2 keyboard physically connected. Revert by restoring
+   -- "comdata_o => ipc_comdata_kb2zx" above and deleting this line.
+   ipc_comdata_kb2zx <= '1';
 
 end architecture synthesis;
 
