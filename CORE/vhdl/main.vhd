@@ -141,6 +141,32 @@ signal zx_vblank    : std_logic;
 signal ce_pix       : std_logic;
 
 ---------------------------------------------------------------------------
+-- QL4M65 TEMPORARY DEBUG AID (M1007): on-screen hex readout of cpu_addr,
+-- composited directly onto the video output, independent of whatever
+-- QDOS/Minerva is doing with its own screen - so it stays visible even if
+-- the boot hangs. Remove this whole block (signals, i_dbg_font instance,
+-- the h_cnt_o/v_cnt_o ports on zx8301) once the hang is diagnosed. See
+-- doc/m2m/exceptions.md.
+---------------------------------------------------------------------------
+
+constant DBG_FONT_FILE : string  := "../font/Anikki-16x16-m2m.rom";
+constant DBG_DX        : natural := 8;   -- top-left pixel position
+constant DBG_DY        : natural := 8;
+constant DBG_DIGITS     : natural := 6;   -- cpu_addr is 24 bits = 6 hex digits
+
+signal dbg_h_cnt      : std_logic_vector(9 downto 0);
+signal dbg_v_cnt      : std_logic_vector(9 downto 0);
+signal dbg_active     : std_logic;
+signal dbg_digit_idx  : integer;  -- only meaningful (0..DBG_DIGITS-1) when dbg_active='1'
+signal dbg_x_in_char  : integer;  -- only meaningful (0..15) when dbg_active='1'
+signal dbg_y_in_char  : integer;  -- only meaningful (0..15) when dbg_active='1'
+signal dbg_nibble     : std_logic_vector(3 downto 0);
+signal dbg_ascii      : std_logic_vector(7 downto 0);
+signal dbg_font_addr  : std_logic_vector(11 downto 0);
+signal dbg_font_data  : std_logic_vector(15 downto 0);
+signal dbg_pixel_on   : std_logic;
+
+---------------------------------------------------------------------------
 -- QL4M65: ZX8302 (internal I/O) signals
 ---------------------------------------------------------------------------
 
@@ -457,8 +483,58 @@ begin
          hs      => zx_hs,
          vs      => zx_vs,
          HBlank  => zx_hblank,
-         VBlank  => zx_vblank
+         VBlank  => zx_vblank,
+
+         -- QL4M65 TEMPORARY DEBUG AID (M1007, see signal declarations above)
+         h_cnt_o => dbg_h_cnt,
+         v_cnt_o => dbg_v_cnt
       ); -- i_zx8301
+
+   ---------------------------------------------------------------------------
+   -- QL4M65 TEMPORARY DEBUG AID (M1007): on-screen hex readout of cpu_addr
+   ---------------------------------------------------------------------------
+
+   dbg_active    <= '1' when unsigned(dbg_v_cnt) >= DBG_DY and unsigned(dbg_v_cnt) < DBG_DY + 16 and
+                             unsigned(dbg_h_cnt) >= DBG_DX and unsigned(dbg_h_cnt) < DBG_DX + DBG_DIGITS * 16
+                     else '0';
+
+   dbg_digit_idx <= (to_integer(unsigned(dbg_h_cnt)) - DBG_DX) / 16;
+   dbg_x_in_char <= (to_integer(unsigned(dbg_h_cnt)) - DBG_DX) mod 16;
+   dbg_y_in_char <= to_integer(unsigned(dbg_v_cnt)) - DBG_DY;
+
+   -- cpu_addr is 24 bits = 6 nibbles, most-significant digit first
+   with dbg_digit_idx select dbg_nibble <=
+      cpu_addr(23 downto 20) when 0,
+      cpu_addr(19 downto 16) when 1,
+      cpu_addr(15 downto 12) when 2,
+      cpu_addr(11 downto  8) when 3,
+      cpu_addr( 7 downto  4) when 4,
+      cpu_addr( 3 downto  0) when others;
+
+   dbg_ascii <= x"3" & dbg_nibble when unsigned(dbg_nibble) <= 9 else
+                std_logic_vector(resize(unsigned(dbg_nibble), 8) - 10 + 65); -- 'A'..'F'
+
+   dbg_font_addr <= std_logic_vector(to_unsigned(to_integer(unsigned(dbg_ascii)) * 16 + dbg_y_in_char, 12))
+                       when dbg_active = '1' else (others => '0');
+
+   i_dbg_font : entity work.ram_init
+      generic map (
+         G_ADDR_WIDTH   => 12,
+         G_DATA_WIDTH   => 16,
+         G_ROM_PRELOAD  => true,
+         G_ROM_FILE     => DBG_FONT_FILE,
+         G_ROM_FILE_HEX => false
+      )
+      port map (
+         clock_i   => clk_main_i,
+         clen_i    => '1',
+         address_i => dbg_font_addr,
+         data_i    => (others => '0'),
+         wren_i    => '0',
+         q_o       => dbg_font_data
+      ); -- i_dbg_font
+
+   dbg_pixel_on <= dbg_font_data(15 - dbg_x_in_char) when dbg_active = '1' else '0';
 
    -- video_ce_o: divides clk_main_i into the core's native pre-scandoubler
    -- pixel clock; video_ce_ovl_o: same rate for milestone 1 (no separate
@@ -467,9 +543,18 @@ begin
    video_ce_o     <= ce_pix;
    video_ce_ovl_o <= video_ce_o;
 
-   video_red_o    <= (others => video_r);
-   video_green_o  <= (others => video_g);
-   video_blue_o   <= (others => video_b);
+   -- QL4M65 TEMPORARY DEBUG AID (M1007): yellow hex text on a solid black
+   -- box, composited on top of the QL's own video - see signal declarations
+   -- and i_dbg_font above. Passes normal video through unchanged outside the
+   -- box (dbg_active='0').
+   video_red_o    <= x"FF" when dbg_active = '1' and dbg_pixel_on = '1' else
+                      x"00" when dbg_active = '1' else
+                      (others => video_r);
+   video_green_o  <= x"FF" when dbg_active = '1' and dbg_pixel_on = '1' else
+                      x"00" when dbg_active = '1' else
+                      (others => video_g);
+   video_blue_o   <= x"00" when dbg_active = '1' else
+                      (others => video_b);
    video_vs_o     <= zx_vs;
    video_hs_o     <= zx_hs;
    video_hblank_o <= zx_hblank;

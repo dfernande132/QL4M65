@@ -274,7 +274,7 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 -- PORTING-PLAN.md - almost everything is fixed in code (scandoubler, scale,
 -- CPU speed, RAM size); the only real menu items are loading the system ROM
 -- and closing the menu (Reset is a dedicated M2M key, not an Options item).
-constant OPTM_SIZE         : natural := 3;  -- amount of items including empty lines:
+constant OPTM_SIZE         : natural := 4;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -287,10 +287,14 @@ constant OPTM_SIZE         : natural := 3;  -- amount of items including empty l
 -- longer loaded ROM filename while looking proportioned like AExp/C64MEGA65's
 -- own Options menus (confirmed via M1005 hardware test screenshots).
 constant OPTM_DX           : natural := 18;
-constant OPTM_DY           : natural := 3;
+constant OPTM_DY           : natural := 4;
 
+-- QL4M65 M1006: added a "Sinclair QL" headline (OPTM_G_HEADLINE - shown in a
+-- brighter/yellow color by the framework), same pattern as AExp's "Amiga 500"
+-- and C64MEGA65's own headline.
 constant OPTM_ITEMS        : string :=
 
+   " Sinclair QL\n"         &    -- headline
    " ROM:%s\n"              &    -- load the QL system ROM (Minerva)
    "\n"                     &
    " Close Menu\n";
@@ -308,7 +312,8 @@ type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC-
 -- define your menu groups: which menu items are belonging together to form a group?
 -- where are separator lines? which items should be selected by default?
 -- make sure that you have exactly the same amount of entries here than in OPTM_ITEMS and defined by OPTM_SIZE
-constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_ROM + OPTM_G_LOAD_ROM + OPTM_G_START, -- ROM:%s, cursor start position
+constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_HEADLINE,                          -- Sinclair QL (headline)
+                                             OPTM_G_ROM + OPTM_G_LOAD_ROM + OPTM_G_START, -- ROM:%s, cursor start position
                                              OPTM_G_LINE,                              -- Line
                                              OPTM_G_CLOSE                              -- Close Menu
                                            );

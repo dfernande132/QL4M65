@@ -8,6 +8,22 @@ changes described here.
 MiSTer core QL_MiSTer
 ----------------------
 
+### TEMPORARY: `rtl/zx8301.v` exposes `h_cnt_o`/`v_cnt_o` (M1007 debug aid)
+
+To diagnose the reproducible post-RAM-test hang (M1001-M1006), `main.vhd`
+composites a small on-screen hex readout of the CPU's address bus directly
+onto the video output, independent of whatever QDOS/Minerva is doing with
+its own screen - so it stays visible even if the boot hangs. This needs to
+know the current pixel position, so `zx8301.v`'s internal `h_cnt`/`v_cnt`
+counters were exposed as two new top-level outputs (`h_cnt_o`, `v_cnt_o`),
+purely combinational (`assign h_cnt_o = h_cnt;` etc.), no other change to
+the module's behavior.
+
+**Revert this once the hang is diagnosed**: remove `h_cnt_o`/`v_cnt_o` from
+`zx8301.v`, and remove the whole "QL4M65 TEMPORARY DEBUG AID (M1007)" block
+in `main.vhd` (signal declarations, the `i_dbg_font` instance, and the
+`video_red_o`/`green_o`/`blue_o` overlay logic).
+
 ### Removed the embedded "ipc" instance from `rtl/zx8302.v`
 
 The original `zx8302.v` instantiates `ipc` (an emulation of the QL's real
