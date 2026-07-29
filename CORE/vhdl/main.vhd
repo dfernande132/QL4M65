@@ -166,6 +166,14 @@ signal dbg_font_addr  : std_logic_vector(11 downto 0);
 signal dbg_font_data  : std_logic_vector(15 downto 0);
 signal dbg_pixel_on   : std_logic;
 
+-- QL4M65 TEMPORARY DEBUG AID (M1007b): cpu_addr changes far too fast to
+-- read live (confirmed on M1007 hardware: digits were an unreadable blur).
+-- Latch it once per second instead (counting ~50 vsync pulses), so the
+-- displayed value is stable and readable.
+signal dbg_addr_latched : std_logic_vector(23 downto 0) := (others => '0');
+signal dbg_vs_prev      : std_logic := '0';
+signal dbg_vs_count     : natural range 0 to 63 := 0;
+
 ---------------------------------------------------------------------------
 -- QL4M65: ZX8302 (internal I/O) signals
 ---------------------------------------------------------------------------
@@ -502,14 +510,32 @@ begin
    dbg_x_in_char <= (to_integer(unsigned(dbg_h_cnt)) - DBG_DX) mod 16;
    dbg_y_in_char <= to_integer(unsigned(dbg_v_cnt)) - DBG_DY;
 
-   -- cpu_addr is 24 bits = 6 nibbles, most-significant digit first
+   -- QL4M65 TEMPORARY DEBUG AID (M1007b): latch cpu_addr once per second
+   -- (~50 vsync pulses) instead of showing it live - confirmed on hardware
+   -- that live cpu_addr changes far too fast to read.
+   dbg_latch : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         dbg_vs_prev <= zx_vs;
+         if dbg_vs_prev = '0' and zx_vs = '1' then  -- vsync rising edge
+            if dbg_vs_count = 49 then
+               dbg_vs_count    <= 0;
+               dbg_addr_latched <= cpu_addr;
+            else
+               dbg_vs_count <= dbg_vs_count + 1;
+            end if;
+         end if;
+      end if;
+   end process dbg_latch;
+
+   -- dbg_addr_latched is 24 bits = 6 nibbles, most-significant digit first
    with dbg_digit_idx select dbg_nibble <=
-      cpu_addr(23 downto 20) when 0,
-      cpu_addr(19 downto 16) when 1,
-      cpu_addr(15 downto 12) when 2,
-      cpu_addr(11 downto  8) when 3,
-      cpu_addr( 7 downto  4) when 4,
-      cpu_addr( 3 downto  0) when others;
+      dbg_addr_latched(23 downto 20) when 0,
+      dbg_addr_latched(19 downto 16) when 1,
+      dbg_addr_latched(15 downto 12) when 2,
+      dbg_addr_latched(11 downto  8) when 3,
+      dbg_addr_latched( 7 downto  4) when 4,
+      dbg_addr_latched( 3 downto  0) when others;
 
    dbg_ascii <= x"3" & dbg_nibble when unsigned(dbg_nibble) <= 9 else
                 std_logic_vector(resize(unsigned(dbg_nibble), 8) - 10 + 65); -- 'A'..'F'
