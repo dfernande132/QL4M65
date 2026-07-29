@@ -25,8 +25,7 @@ entity video_overlay is
 
       -- QNICE
       vga_cfg_scaling_i : in  natural range 0 to 8;
-      vga_cfg_hscale_i  : in  natural;
-      vga_cfg_vscale_i  : in  natural;
+      vga_cfg_shift_i   : in  natural;
       vga_cfg_enable_i  : in  std_logic;
       vga_cfg_r15kHz_i  : in  std_logic;
       vga_cfg_xy_i      : in  std_logic_vector(15 downto 0);
@@ -101,26 +100,9 @@ begin
          vga_de_o    => stage1.vga_de
       ); -- i_vga_recover_counters
 
-   -- QL4M65: vga_pix_x/y are recovered from whatever hs/vs/de this instance
-   -- actually sees - for the HDMI path (digital_pipeline.vhd) that is ascal's
-   -- OUTPUT (e.g. 720x576), not the core's native canvas (G_VGA_DX x G_VGA_DY,
-   -- 512x256 for the QL). A flat pixel offset (the previous vga_cfg_shift_i)
-   -- only corrects a small letterbox border and breaks down when ascal is
-   -- doing a real stretch (512->720/640, ~1.4x) rather than a near 1:1 fit -
-   -- confirmed on M1002/M1003 hardware tests, where the Welcome/Options OSD
-   -- was clipped top-left regardless of the HDMI output resolution chosen.
-   --
-   -- Rescaling proportionally maps back to the OSM's native coordinate frame
-   -- regardless of the actual stretch factor. vga_cfg_hscale_i/vscale_i are a
-   -- Q16 fixed-point reciprocal scale (65536 = "1.0", i.e. no rescale, used
-   -- by the analog path) computed by the CALLER from compile-time constants
-   -- only (see digital_pipeline.vhd) - a per-pixel runtime DIVISION here blew
-   -- the 84 MHz timing budget badly (WNS ~-25ns) on the first attempt, so
-   -- this uses a multiply plus a shift-by-a-literal-power-of-2 instead, which
-   -- Vivado maps to a single DSP48 multiply with no combinational divider.
-   stage1.vga_col <= (to_integer(stage1.vga_pix_x) * vga_cfg_hscale_i) / 65536;
-   stage1.vga_row <= (to_integer(stage1.vga_pix_y) * vga_cfg_vscale_i) / 65536 * 2 when vga_cfg_r15kHz_i = '1' else
-                     (to_integer(stage1.vga_pix_y) * vga_cfg_vscale_i) / 65536;
+   stage1.vga_col <= to_integer(stage1.vga_pix_x) - vga_cfg_shift_i;
+   stage1.vga_row <= to_integer(stage1.vga_pix_y) when vga_cfg_r15kHz_i = '0' else
+                     to_integer(stage1.vga_pix_y)*2;
 
 
    -----------------------------------------------

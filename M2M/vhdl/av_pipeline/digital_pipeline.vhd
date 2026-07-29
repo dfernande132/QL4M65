@@ -128,24 +128,13 @@ architecture synthesis of digital_pipeline is
    signal hdmi_vsstart           : integer;
    signal hdmi_vsend             : integer;
    signal hdmi_vdisp             : integer;
+   signal hdmi_shift             : integer;
 
    -- Auto-calculate display dimensions based on an 4:3 aspect ratio
    signal hdmi_hmin              : integer;
    signal hdmi_hmax              : integer;
    signal hdmi_vmin              : integer;
    signal hdmi_vmax              : integer;
-
-   -- QL4M65: Q16 fixed-point reciprocal scale (65536 = "1.0") used by
-   -- video_overlay.vhd to map the OSM's native-resolution coordinate frame
-   -- (G_VGA_DX x G_VGA_DY) onto ascal's actual OUTPUT resolution (H_PIXELS x
-   -- V_PIXELS), which can be quite different from the core's native canvas
-   -- for a small-native-resolution core like the QL (512x256). Computed only
-   -- from generics/constants (G_VGA_DX/DY, G_VIDEO_MODE_VECTOR), so this
-   -- when/else is constant-folded at elaboration time to a handful of
-   -- literal values selected by hdmi_video_mode_i - no runtime divider.
-   constant C_SCALE_ONE          : natural := 65536;
-   signal hdmi_hscale            : natural;
-   signal hdmi_vscale            : natural;
 
    -- After video_rescaler
    signal hdmi_red               : unsigned(7 downto 0);
@@ -254,21 +243,11 @@ begin
                 hdmi_video_mode.V_PIXELS-1                                                when hdmi_video_mode_i = C_VIDEO_SVGA_800_60   else
                 hdmi_video_mode.V_PIXELS-1; -- Not used
 
-   hdmi_hscale <= (G_VGA_DX * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(6).H_PIXELS when hdmi_video_mode_i = C_VIDEO_SVGA_800_60   else
-                  (G_VGA_DX * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(5).H_PIXELS when hdmi_video_mode_i = C_VIDEO_HDMI_720_5994 else
-                  (G_VGA_DX * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(4).H_PIXELS when hdmi_video_mode_i = C_VIDEO_HDMI_640_60   else
-                  (G_VGA_DX * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(3).H_PIXELS when hdmi_video_mode_i = C_VIDEO_HDMI_5_4_50   else
-                  (G_VGA_DX * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(2).H_PIXELS when hdmi_video_mode_i = C_VIDEO_HDMI_4_3_50   else
-                  (G_VGA_DX * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(1).H_PIXELS when hdmi_video_mode_i = C_VIDEO_HDMI_16_9_60  else
-                  (G_VGA_DX * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(0).H_PIXELS;
-
-   hdmi_vscale <= (G_VGA_DY * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(6).V_PIXELS when hdmi_video_mode_i = C_VIDEO_SVGA_800_60   else
-                  (G_VGA_DY * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(5).V_PIXELS when hdmi_video_mode_i = C_VIDEO_HDMI_720_5994 else
-                  (G_VGA_DY * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(4).V_PIXELS when hdmi_video_mode_i = C_VIDEO_HDMI_640_60   else
-                  (G_VGA_DY * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(3).V_PIXELS when hdmi_video_mode_i = C_VIDEO_HDMI_5_4_50   else
-                  (G_VGA_DY * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(2).V_PIXELS when hdmi_video_mode_i = C_VIDEO_HDMI_4_3_50   else
-                  (G_VGA_DY * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(1).V_PIXELS when hdmi_video_mode_i = C_VIDEO_HDMI_16_9_60  else
-                  (G_VGA_DY * C_SCALE_ONE) / G_VIDEO_MODE_VECTOR(0).V_PIXELS;
+   -- Deprecated. Will be removed in future release
+   -- The purpose is to right-shift the position of the OSM
+   -- on the HDMI output. This will be removed when the
+   -- M2M framework supports two different OSM VRAMs.
+   hdmi_shift <= hdmi_video_mode.H_PIXELS - integer(G_VGA_DX);
 
    ---------------------------------------------------------------------------------------------
    -- Digital output (HDMI) - Audio part
@@ -492,8 +471,7 @@ begin
          vga_vs_i          => hdmi_vs,
          vga_de_i          => hdmi_de,
          vga_cfg_scaling_i => hdmi_osm_cfg_scaling_i,
-         vga_cfg_hscale_i  => hdmi_hscale,
-         vga_cfg_vscale_i  => hdmi_vscale,
+         vga_cfg_shift_i   => hdmi_shift,
          vga_cfg_enable_i  => hdmi_osm_cfg_enable_i,
          vga_cfg_r15kHz_i  => '0',
          vga_cfg_xy_i      => hdmi_osm_cfg_xy_i,

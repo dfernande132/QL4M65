@@ -59,19 +59,24 @@ constant QNICE_CLK_SPEED      : natural := 50_000_000;   -- a change here has de
 ----------------------------------------------------------------------------------------------------------
 
 -- Rendering constants (in pixels)
---    VGA_*   size of the core's target output post scandoubler
---    If in doubt, use twice the values found in this link:
---    https://mister-devel.github.io/MkDocs_MiSTer/advanced/nativeres/#arcade-core-default-native-resolutions
--- QL native visible area is 512x256 (rtl/zx8301.v). The "use 2x" rule of
--- thumb only applies when the core has its own internal scandoubler
--- (doubling lines before this point) - the QL doesn't (CONF_STR fixes
--- "Scandoubler Fx" to None, mega65.vhd's qnice_scandoubler_o is hardcoded
--- '0'), so "post scandoubler" here is just the raw native resolution, no
--- doubling. Confirmed wrong at 2x in M1001's first hardware test (M2M's
--- own Welcome OSD rendered oversized/misaligned - out of proportion with
--- video_ce_ovl_o, which runs at the same rate as video_ce_o, i.e. 1x).
-constant VGA_DX               : natural := 512;
-constant VGA_DY               : natural := 256;
+--    VGA_*   the On-Screen-Menu (OSM) canvas => character grid
+--    QL4M65 M1005: NOT the QL's real native resolution (512x256, rtl/zx8301.v)
+--    - the digital/HDMI OSM (video_overlay.vhd, via digital_pipeline.vhd)
+--    composites AFTER ascal, in the OUTPUT resolution's own coordinate frame,
+--    not the core's native one. The framework's hdmi_shift mechanism
+--    (hdmi_shift = H_PIXELS - VGA_DX) only works when VGA_DX/DY is pinned at
+--    or very close to the chosen HDMI mode's H_PIXELS/V_PIXELS, same as
+--    AExp's globals.vhd (720x576, "VGA_DX is pinned to 720 ... a larger value
+--    makes hdmi_shift negative ... and breaks the HDMI OSM") and C64MEGA65's
+--    (720x540). Confirmed on M1002-M1004 hardware: 512x256 broke the HDMI OSM
+--    two different ways (clipped top-left with the flat shift, then huge/
+--    full-screen with an M1004 proportional-rescale attempt) - both because
+--    512x256 is much smaller than our C_VIDEO_HDMI_4_3_50 output (720x576).
+--    720x576 makes hdmi_shift = 0, exactly like Amiga. The QL's own picture
+--    still gets stretched by ascal same as before (real native 512x256 is
+--    unaffected by this constant) - only the OSM/menu is affected here.
+constant VGA_DX               : natural := 720;
+constant VGA_DY               : natural := 576;
 
 --    FONT_*  size of one OSM character
 constant FONT_FILE            : string  := "../font/Anikki-16x16-m2m.rom";
