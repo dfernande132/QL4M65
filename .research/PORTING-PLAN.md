@@ -24,10 +24,12 @@ bitstream sin errores (WNS=+0.130 ns, WHS=+0.051 ns, 0 nets sin rutar).
 Detalle completo en `DECISIONES.md`, sección "M1001 conseguido".
 
 **Pendiente ahora:**
-- Prueba en hardware real de `QL4M65-CoreQL-M1008_r6.cor` (overlay de
-  `cpu_addr` ahora congelado a 1Hz para poder leerlo - ver tabla de pruebas
-  abajo y `DECISIONES.md`). `M1007` ya confirmó que la CPU está viva y
-  ejecutando dentro del rango de la ROM de Minerva ($00xxxx).
+- Prueba en hardware real de `QL4M65-CoreQL-M1009_r6.cor` (teclado/IPC
+  "desconectado" a propósito, para ver si la lentitud extrema descubierta en
+  `M1006`-`M1008` desaparece o persiste - ver tabla de pruebas abajo y
+  `DECISIONES.md`). `M1007`/`M1008` ya confirmaron que la CPU está viva y
+  ejecutando código real de Minerva, mucho más lento de lo debido, sin
+  quedarse en un bucle fijo.
 - Diagnosticar el cuelgue visto en `M1001`: arranca, se ve el patrón de
   comprobación de RAM, pero se cuelga de forma reproducible más adelante en
   el arranque de Minerva — candidato principal: interacción con el enlace
@@ -65,7 +67,8 @@ razonamiento completo.
 | `M1005` | Diagnóstico real (guía + comparación con AExp/C64MEGA65): `VGA_DX`/`VGA_DY` fijados a 720×576 (igual que Amiga, para que `hdmi_shift`=0) + revertido el mecanismo de `video_overlay.vhd`/`analog_pipeline.vhd`/`digital_pipeline.vhd` al original del framework (sin el reescalado de M1004) | Mejora grande: texto legible, tamaño razonable; queda un recorte residual de 1 carácter a la izquierda y el menú se ve ancho (~50% pantalla) por `OPTM_DX=23` (ver M1006); arranque: test de RAM y directo a negro, sin ver la pantalla verde de Minerva — refuerza la hipótesis de interrupciones sobre la de teclado |
 | `M1006` | Arreglo del cuelgue: `zx8302.v` `ipl` cambiado de `AND`+"nada pendiente" a `OR`+"algo pendiente" (deja pasar `vsync_irq` propio del zx8302 al margen del IPC externo) + `OPTM_DX` 23→18 en `config.vhd` (menú más estrecho, con cabecera "Sinclair QL") | Menú reducido a ~40% como se esperaba. El cuelgue NO es tal: dejado varios minutos en negro, la pantalla se fue rellenando línea a línea desde abajo con el patrón de comprobación de memoria — avance real pero extremadamente lento, no parálisis total. Candidato: coste de reconocer `vsync_irq` (único emisor real entre los que tocamos; `xint`/`gap` atados a 0, `rtc`/`mdv_sel` fuera del rango que usa el `ipl`) |
 | `M1007` | Mini-debug propio: overlay temporal con `cpu_addr` en hexadecimal (amarillo sobre negro, esquina superior izquierda), reutilizando la ROM de fuente del OSM; `zx8301.v` expone `h_cnt`/`v_cnt` como puertos nuevos para poder posicionar el overlay (temporal, ver `doc/m2m/exceptions.md` para revertir) | Confirma que la CPU está viva: se ven cifras moviéndose (demasiado rápido para leerlas), pero las dos primeras siempre "00" — la dirección se mantiene en `$00xxxx`, el rango de la ROM de Minerva. Bucle sin avanzar a otras zonas de memoria, no parálisis del bus |
-| `M1008` | Overlay de `M1007` congelado a 1Hz (~50 pulsos de vsync) para poder leer la dirección con calma + `general.maxThreads 8` en `build_core.tcl` (Windows lo dejaba en 2 por defecto; tope duro de Vivado es 8 igualmente) | *(pendiente de probar)* |
+| `M1008` | Overlay de `M1007` congelado a 1Hz (~50 pulsos de vsync) para poder leer la dirección con calma + `general.maxThreads 8` en `build_core.tcl` (Windows lo dejaba en 2 por defecto; tope duro de Vivado es 8 igualmente) | Dirección sigue moviéndose por un rango amplio de la ROM sin patrón repetido en 2 min — no es un bucle atascado, es la CPU ejecutando código real de Minerva mucho más lento de lo debido; candidato revisado: coste del sondeo de teclado (`keyboard.vhd`) en cada `vsync_irq`, protocolo con temporización nunca validada (ver `DECISIONES.md`) |
+| `M1009` | Prueba temporal (no un arreglo): `ipc_comdata_kb2zx` forzado a `'1'` en `main.vhd`, simulando "ningún teclado/IPC conectado" — descarta la respuesta real de `keyboard.vhd` por completo. Motivación: en MiSTer real, sin teclado PS/2 conectado, igual se llega a la pantalla F1-F4 de Minerva | *(pendiente de probar)* |
 
 Detalle completo de cada prueba en `DECISIONES.md` (registro cronológico) y
 sus Anexos A/B (memoria y teclado).
