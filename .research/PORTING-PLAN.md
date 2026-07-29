@@ -24,9 +24,9 @@ bitstream sin errores (WNS=+0.130 ns, WHS=+0.051 ns, 0 nets sin rutar).
 Detalle completo en `DECISIONES.md`, sección "M1001 conseguido".
 
 **Pendiente ahora:**
-- Prueba en hardware real de `QL4M65-CoreQL-M1005_r6.cor` (`VGA_DX`/`VGA_DY`
-  fijados a 720×576 como Amiga/C64, mecanismo de `video_overlay.vhd` vuelto
-  al original del framework - ver tabla de pruebas abajo y `DECISIONES.md`).
+- Prueba en hardware real de `QL4M65-CoreQL-M1006_r6.cor` (arreglo del `ipl`/
+  `vsync_irq` en `zx8302.v` + `OPTM_DX` más estrecho - ver tabla de pruebas
+  abajo y `DECISIONES.md`).
 - Diagnosticar el cuelgue visto en `M1001`: arranca, se ve el patrón de
   comprobación de RAM, pero se cuelga de forma reproducible más adelante en
   el arranque de Minerva — candidato principal: interacción con el enlace
@@ -61,7 +61,8 @@ razonamiento completo.
 | `M1002` | Igual que M1001 + arreglo de `VGA_DX`/`VGA_DY` (512×256, sin duplicar) | Mejora parcial: el menú OSD se ve algo mejor pero sigue saliéndose por arriba y por la izquierda (TV reporta 720×576@50Hz, sin borde superior visible en el recuadro — recorte real, no solo overscan); mismo punto de cuelgue que M1001 |
 | `M1003` | Igual que M1002 + `qnice_video_mode_o` forzado a `C_VIDEO_HDMI_640_60` (diagnóstico temporal, ver `DECISIONES.md`) | Recorte idéntico en 720×576 y 640×480 (ni más ni menos) — descarta la auto-detección de `ascal`; TV sin overscan en HDMI descarta también overscan de televisor; mismo punto de cuelgue |
 | `M1004` | Arreglo real: reescalado proporcional del menú OSD para el camino HDMI (`vga_cfg_hscale_i`/`vscale_i` en `video_overlay.vhd`, ver `DECISIONES.md`) + revertido `qnice_video_mode_o` a `C_VIDEO_HDMI_4_3_50` | Peor en un sentido nuevo: el menú ocupa toda la pantalla con letras enormes (~2x el tamaño del core del Amiga) — el reescalado estira el menú en la misma proporción que `ascal` estira el vídeo del QL |
-| `M1005` | Diagnóstico real (guía + comparación con AExp/C64MEGA65): `VGA_DX`/`VGA_DY` fijados a 720×576 (igual que Amiga, para que `hdmi_shift`=0) + revertido el mecanismo de `video_overlay.vhd`/`analog_pipeline.vhd`/`digital_pipeline.vhd` al original del framework (sin el reescalado de M1004) | *(pendiente de probar)* |
+| `M1005` | Diagnóstico real (guía + comparación con AExp/C64MEGA65): `VGA_DX`/`VGA_DY` fijados a 720×576 (igual que Amiga, para que `hdmi_shift`=0) + revertido el mecanismo de `video_overlay.vhd`/`analog_pipeline.vhd`/`digital_pipeline.vhd` al original del framework (sin el reescalado de M1004) | Mejora grande: texto legible, tamaño razonable; queda un recorte residual de 1 carácter a la izquierda y el menú se ve ancho (~50% pantalla) por `OPTM_DX=23` (ver M1006); arranque: test de RAM y directo a negro, sin ver la pantalla verde de Minerva — refuerza la hipótesis de interrupciones sobre la de teclado |
+| `M1006` | Arreglo del cuelgue: `zx8302.v` `ipl` cambiado de `AND`+"nada pendiente" a `OR`+"algo pendiente" (deja pasar `vsync_irq` propio del zx8302 al margen del IPC externo) + `OPTM_DX` 23→18 en `config.vhd` (menú más estrecho) | *(pendiente de probar)* |
 
 Detalle completo de cada prueba en `DECISIONES.md` (registro cronológico) y
 sus Anexos A/B (memoria y teclado).
