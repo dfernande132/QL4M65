@@ -79,6 +79,30 @@ original `dpram.v`.
 Files that stay in the repository but are excluded from the Vivado
 compile list because of this (not deleted): `rtl/mdv.v`.
 
+### Fixed the `ipl` assignment in `rtl/zx8302.v` (interrupt lines)
+
+`assign ipl = { ipc_ipl_i[1] && (irq_pending[4:0] == 0), ipc_ipl_i[0] };`
+ANDs the external ipc's `ipl[1]` line with "no irq pending" - the opposite
+of its own comment ("any pending irq raises ipl to 2"). With the real
+embedded `ipc` (removed, see above), `ipc_ipl_i[1]` apparently defaulted
+high whenever the ipc had nothing else to report, so this acted as a
+defensive clamp against a genuine ipc signal. QL4M65's external stand-in
+(`keyboard.vhd`) never implements the real ipc's serial poll-and-relay
+protocol for zx8302's own interrupts (only its own keyboard commands 8/9),
+so it permanently drives `ipc_ipl_i` to `"00"` - meaning this line silenced
+`ipl[1]` unconditionally, including `zx8302`'s own `vsync_irq` (the ~50Hz
+frame interrupt Minerva/QDOS's scheduler depends on). Root-caused as the
+leading suspect for the reproducible post-RAM-test hang seen in every
+M1001-M1005 hardware test (see `DECISIONES.md`).
+
+Changed the operator to OR + not-equal:
+`assign ipl = { ipc_ipl_i[1] || (irq_pending[4:0] != 0), ipc_ipl_i[0] };`
+so any zx8302-internal pending irq (xint/vsync/gap) can raise `ipl[1]` on
+its own, independent of the external ipc - matching the comment's literal
+intent. When updating from a newer upstream `zx8302.v`, re-apply this same
+one-line change if the `ipc`-removal surgery above is also re-applied
+(the external `ipc_ipl_i` port only exists because of that surgery).
+
 MiSTer2MEGA65
 -------------
 

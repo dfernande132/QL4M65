@@ -281,7 +281,12 @@ constant OPTM_SIZE         : natural := 3;  -- amount of items including empty l
 
 -- Net size of the Options menu on the screen in characters (excluding the frame, which is hardcoded to two characters)
 -- Without submenus: Use OPTM_SIZE as height, otherwise count how large the actually visible main menu is.
-constant OPTM_DX           : natural := 23;
+-- QL4M65 M1006: narrowed from 23 to 18 - with VGA_DX now pinned to 720 (M1005),
+-- 23 chars made the box ~51% of the screen width for a menu whose only real
+-- content is "ROM:%s"/"Close Menu" (11 chars each); 18 leaves margin for a
+-- longer loaded ROM filename while looking proportioned like AExp/C64MEGA65's
+-- own Options menus (confirmed via M1005 hardware test screenshots).
+constant OPTM_DX           : natural := 18;
 constant OPTM_DY           : natural := 3;
 
 constant OPTM_ITEMS        : string :=
