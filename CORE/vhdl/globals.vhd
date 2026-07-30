@@ -138,8 +138,10 @@ constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 -- QL4M65: one manually loadable ROM (Minerva), routed to a dedicated QNICE device
 -- (not directly to HyperRAM - see AExp's globals.vhd for why: the HyperRAM CRTROM
 -- type's CSR handshake has no responder for manual loads). The device-side RAM
--- buffer that actually receives these bytes is wired in mega65.vhd (Dual Clocks
--- section) - pending, see DECISIONES.md for the batching plan.
+-- buffer that actually receives these bytes is ql_rom_u/l in mega65.vhd (Dual
+-- Clocks section) - a plain dualport_2clk_ram pair, same pattern as AExp's own
+-- Kickstart BRAM; the CPU's read path in main.vhd is a direct combinational
+-- ql_rom_addr_o/ql_rom_data_i, not a batched/QNICE-mediated access.
 constant C_DEV_QL_MINERVA        : std_logic_vector(15 downto 0) := x"0101";
 
 constant C_CRTROMS_MAN_NUM       : natural := 1;                                       -- amount of manually loadable ROMs and carts; maximum is 16

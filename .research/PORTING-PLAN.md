@@ -24,19 +24,27 @@ bitstream sin errores (WNS=+0.130 ns, WHS=+0.051 ns, 0 nets sin rutar).
 Detalle completo en `DECISIONES.md`, sección "M1001 conseguido".
 
 **Pendiente ahora:**
-- Prueba en hardware real de `QL4M65-CoreQL-M1011_r6.cor` (contador de
-  transacciones de bus completadas por segundo + segundos hasta la primera
-  interrupción reconocida - ver tabla de pruebas abajo y `DECISIONES.md`).
-  `M1010` ya confirmó que el reloj de bus de la CPU va a la velocidad
-  correcta (~0,16% de diferencia) - descarta un problema de generación de
-  reloj; `M1009` descartó el teclado/IPC; `M1007`/`M1008` confirmaron que la
-  CPU está viva y ejecutando código real de Minerva por un rango amplio de
-  la ROM, mucho más lento de lo debido, sin quedarse en un bucle fijo.
-- Diagnosticar el cuelgue visto en `M1001`: arranca, se ve el patrón de
-  comprobación de RAM, pero se cuelga de forma reproducible más adelante en
-  el arranque de Minerva — candidato principal: interacción con el enlace
-  IPC/teclado (líneas `ipl`, fijas a "sin IRQ" en nuestro stub). Detalle
-  completo en `DECISIONES.md`, sección "Primera prueba de M1001 en hardware".
+- Prueba en hardware real de `QL4M65-CoreQL-M1014_r6.cor`: cargar de nuevo
+  el binario mínimo de `M1013` (`/ql4m65/QL4M65-mintest-M1013.rom`) y
+  comparar la cifra de transacciones/seg (dígitos 6-11) ya con antirrebote
+  frente a los ~9.36M/seg (sin filtrar) de `M1013` y los ~831.860/seg de
+  Minerva (`M1011`/`M1012`) - para saber si el 11x de diferencia era real o
+  en parte un artefacto de medición. También comprobar los dígitos 16-19
+  (deben leer `0008`, la palabra baja del PC inicial de ese binario) como
+  verificación de que la carga de ROM en sí funciona correctamente.
+- `zx8302.v` ya revertido de vuelta a la versión `OR` de `M1006` (correcta
+  arquitectónicamente) tras concluir la comparación de `M1012`.
+- Revisión sistemática de los 4 ficheros principales del framework M2M
+  (`clk.vhd`/`globals.vhd`/`mega65.vhd`/`main.vhd`) frente a AExp/C64/vanilla
+  no encontró ninguna diferencia estructural que explique la lentitud - ver
+  `DECISIONES.md`. Candidatos que quedan si `M1013`/`M1014` no aclaran nada
+  más: contención real de vídeo vs `ql_timing.sv` (ROM exenta de la ventana
+  `could_start`, confirmado; RAM/E-S sujeta a ~80% de bloqueo durante
+  pantalla activa), jitter del acumulador fraccional de reloj de bus
+  (`FRACT_BUS_QL`) frente a la división entera simple de AExp. Ya
+  descartados: reloj de bus (`M1010`), teclado/IPC (`M1009`), magnitud del
+  wait-state individual (recalculado, demasiado pequeño), `vsync_irq`
+  (`M1012`), y el framework M2M en sí (revisión de los 4 ficheros).
 - Validar el protocolo IPC del teclado (`keyboard.vhd`) contra
   hardware/simulación real — sigue basado en un desensamblado propio no
   contrastado externamente (Anexo B de `DECISIONES.md`).
@@ -72,7 +80,10 @@ razonamiento completo.
 | `M1008` | Overlay de `M1007` congelado a 1Hz (~50 pulsos de vsync) para poder leer la dirección con calma + `general.maxThreads 8` en `build_core.tcl` (Windows lo dejaba en 2 por defecto; tope duro de Vivado es 8 igualmente) | Dirección sigue moviéndose por un rango amplio de la ROM sin patrón repetido en 2 min — no es un bucle atascado, es la CPU ejecutando código real de Minerva mucho más lento de lo debido; candidato revisado: coste del sondeo de teclado (`keyboard.vhd`) en cada `vsync_irq`, protocolo con temporización nunca validada (ver `DECISIONES.md`) |
 | `M1009` | Prueba temporal (no un arreglo): `ipc_comdata_kb2zx` forzado a `'1'` en `main.vhd`, simulando "ningún teclado/IPC conectado" — descarta la respuesta real de `keyboard.vhd` por completo. Motivación: en MiSTer real, sin teclado PS/2 conectado, igual se llega a la pantalla F1-F4 de Minerva | Comportamiento idéntico a M1008 (pantalla en negro, ROM saltando igual) — **descarta el teclado/IPC como causa de la lentitud**. El usuario recuerda además que este comportamiento probablemente ya estaba presente desde M1001 (nunca se dejó encendido el tiempo suficiente para verlo avanzar) - se descarta también `vsync_irq`/`M1006` como causa |
 | `M1010` | Revertida la prueba de M1009 (teclado normal otra vez) + overlay ampliado a 12 dígitos: los 6 nuevos cuentan pulsos de `ce_bus_p` por segundo, para medir directamente si el reloj de bus de la CPU va a la velocidad correcta (~7.5MHz nativos del QL) | `0x723FDC`/`0x723FDB` (~7.487.452/seg) frente a ~7.499.450 esperados — solo ~0,16% de diferencia. **Descarta un problema de generación de reloj**; apunta a que cada transacción de bus individual consume muchos más ciclos (ya correctos) de los debidos |
-| `M1011` | Overlay ampliado a 20 dígitos: los dígitos 6-11 pasan a contar cambios reales de `cpu_addr` por segundo (transacciones completadas, no solo pulsos de reloj); +4 dígitos de segundos desde el reset; +4 dígitos de segundos hasta el primer "interrupt acknowledge" (congelado la primera vez, `FFFF` si nunca ocurre) — para correlacionar el inicio de la lentitud con la fase de interrupciones | *(pendiente de probar)* |
+| `M1011` | Overlay ampliado a 20 dígitos: los dígitos 6-11 pasan a contar cambios reales de `cpu_addr` por segundo (transacciones completadas, no solo pulsos de reloj); +4 dígitos de segundos desde el reset; +4 dígitos de segundos hasta el primer "interrupt acknowledge" (congelado la primera vez, `FFFF` si nunca ocurre) — para correlacionar el inicio de la lentitud con la fase de interrupciones | ~831.860 transacciones/seg (~9 ciclos/transacción, plausible con contención real); primer "interrupt acknowledge" a los **0 segundos** (casi instantáneo); cientos de millones de operaciones en total durante los minutos que tarda el arranque — apunta a que la rutina de interrupción de `vsync` de Minerva hace algo caro en cada uno de sus ~50 pasos/seg, no a que cada transacción individual sea lenta |
+| `M1012` | Prueba temporal: revierte SOLO el arreglo del `ipl` de `M1006` (bloquea `vsync_irq` otra vez) manteniendo todos los contadores de `M1011`, para comparar la cifra EXACTA de transacciones/segundo con y sin esa interrupción llegando a la CPU | Prácticamente idéntico a `M1011`: ~831.860 transacciones/seg (mismo rango `0x0cb17b`/`0x0cb174`/`0x0cb16e`), mismo patrón de segundos. **Descarta la hipótesis de `vsync_irq`**: bloquear la interrupción por completo no cambia el tráfico de bus, así que el manejador de Minerva para esa interrupción no es el cuello de botella |
+| `M1013` | Sin recompilar bitstream: binario 68000 mínimo (18 bytes, bucle de 2 instrucciones tocando solo RAM en `$030000`) cargado vía el menú "ROM:%s" ya existente, sobre el `M1012` ya flasheado | Dirección latcheada = `030000` (confirma el programa correcto). Transacciones/seg ≈ 9.363.973 (~11x más que Minerva) - pero se sospecha que el contador (sin antirrebote todavía) sobre-cuenta transitorios de un ciclo en saltos de dirección tan bruscos; ver `M1014` |
+| `M1014` | Overlay de depuración: antirrebote (≥2 ciclos estables) en el contador de transacciones (dígitos 6-11) + dígitos 16-19 repurpuestos para mostrar la palabra baja del PC inicial leído de la ROM cargada (verificación de carga correcta, a petición del usuario) | *(pendiente de probar)* |
 
 Detalle completo de cada prueba en `DECISIONES.md` (registro cronológico) y
 sus Anexos A/B (memoria y teclado).

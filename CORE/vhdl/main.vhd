@@ -206,13 +206,39 @@ signal dbg_bus_cycles         : unsigned(23 downto 0) := (others => '0');
 signal dbg_bus_cycles_latched : std_logic_vector(23 downto 0) := (others => '0');
 signal dbg_cpu_addr_prev      : std_logic_vector(23 downto 0) := (others => '0');
 
--- QL4M65 TEMPORARY DEBUG AID (M1011): seconds-since-reset (free-running) and
--- seconds-until-first-interrupt-acknowledge (latched once, sentinel 0xFFFF
--- = "hasn't happened yet"). Both reset on the core's own reset.
+-- QL4M65 TEMPORARY DEBUG AID (M1011): seconds-since-reset (free-running).
 signal dbg_seconds                 : unsigned(15 downto 0) := (others => '0');
-signal dbg_first_int_ack_seconds   : std_logic_vector(15 downto 0) := (others => '1');
-signal dbg_first_int_ack_captured  : std_logic := '0';
-signal dbg_cpu_int_ack_prev        : std_logic := '0';
+
+-- QL4M65 TEMPORARY DEBUG AID (M1014): the M1011 "seconds until first
+-- interrupt-acknowledge" digits turned out to be unreliable (M1012 hardware
+-- test: read 0000 even with ipl forced permanently to "00", where the CPU
+-- should never see an interrupt at all - almost certainly a cpu_fc="111"
+-- transient right at reset release, not a genuine int-ack). Repurposed to
+-- something directly verifiable instead: latch the low 16 bits of the
+-- initial PC the CPU reads out of the loaded ROM at reset (the word at ROM
+-- address $000006 - the low half of the 32-bit reset PC vector at
+-- $000004-$000007). Since our whole address space fits in 18 bits
+-- ($000000-$03FFFF), this low word alone fully identifies the entry point
+-- - a quick sanity check that whatever ROM file was loaded (Minerva or the
+-- M1013 test binary) actually landed in ql_rom_u/l correctly and isn't
+-- byte-swapped/garbled: for the M1013 test ROM this must read 0008.
+-- Sentinel 0xFFFF = "hasn't been read yet".
+signal dbg_reset_pc_lo       : std_logic_vector(15 downto 0) := (others => '1');
+signal dbg_reset_pc_captured : std_logic := '0';
+
+-- QL4M65 TEMPORARY DEBUG AID (M1014): the M1011 address-change counter
+-- (dbg_bus_cycles) compared cpu_addr on every 84MHz clk_main_i edge with no
+-- debounce - a single-cycle combinational glitch on the address bus (e.g.
+-- fx68k's eab settling through intermediate values during a large, many-bit
+-- address swing) would be counted as an extra "change" even though it isn't
+-- a real completed bus transaction. Suspected after M1013 (a 2-instruction
+-- RAM-only loop that swings between two very different addresses each
+-- iteration) measured ~9.36M changes/sec - above what a rough cycle-count
+-- estimate for that loop's bus traffic would predict. Fix: only count a
+-- change once the new value has been stable for >=2 consecutive clk_main_i
+-- cycles (dbg_cpu_addr_stable tracks the last value actually counted, so a
+-- long-held address isn't recounted every cycle either).
+signal dbg_cpu_addr_stable   : std_logic_vector(23 downto 0) := (others => '0');
 
 ---------------------------------------------------------------------------
 -- QL4M65: ZX8302 (internal I/O) signals
@@ -560,22 +586,23 @@ begin
    begin
       if rising_edge(clk_main_i) then
          if reset = '1' then
-            dbg_seconds                <= (others => '0');
-            dbg_first_int_ack_seconds  <= (others => '1');  -- sentinel: not yet
-            dbg_first_int_ack_captured <= '0';
+            dbg_seconds          <= (others => '0');
+            dbg_reset_pc_lo       <= (others => '1');  -- sentinel: not read yet
+            dbg_reset_pc_captured <= '0';
          else
             dbg_cpu_addr_prev <= cpu_addr;
-            if cpu_addr /= dbg_cpu_addr_prev then
-               dbg_bus_cycles <= dbg_bus_cycles + 1;
+            if cpu_addr = dbg_cpu_addr_prev and dbg_cpu_addr_prev /= dbg_cpu_addr_stable then
+               dbg_bus_cycles       <= dbg_bus_cycles + 1;
+               dbg_cpu_addr_stable  <= dbg_cpu_addr_prev;
             end if;
 
-            -- QL4M65 TEMPORARY DEBUG AID (M1011): latch the elapsed seconds
-            -- the first (and only the first) time an interrupt-acknowledge
-            -- cycle happens after reset.
-            dbg_cpu_int_ack_prev <= cpu_int_ack;
-            if dbg_cpu_int_ack_prev = '0' and cpu_int_ack = '1' and dbg_first_int_ack_captured = '0' then
-               dbg_first_int_ack_seconds  <= std_logic_vector(dbg_seconds);
-               dbg_first_int_ack_captured <= '1';
+            -- QL4M65 TEMPORARY DEBUG AID (M1014): latch the low word of the
+            -- initial PC the very first time it's read from ROM ($000006,
+            -- with the read cycle actually complete per cpu_dtack).
+            if cpu_rom = '1' and cpu_rd = '1' and cpu_dtack = '1' and
+               cpu_addr = x"000006" and dbg_reset_pc_captured = '0' then
+               dbg_reset_pc_lo       <= cpu_din;
+               dbg_reset_pc_captured <= '1';
             end if;
 
             dbg_vs_prev <= zx_vs;
@@ -595,9 +622,9 @@ begin
    end process dbg_latch;
 
    -- digits 0-5:   dbg_addr_latched (24 bits, most-significant nibble first)
-   -- digits 6-11:  dbg_bus_cycles_latched (ditto)
+   -- digits 6-11:  dbg_bus_cycles_latched (ditto, now debounced - see M1014)
    -- digits 12-15: dbg_seconds (16 bits, seconds since reset)
-   -- digits 16-19: dbg_first_int_ack_seconds (16 bits, "FFFF" = not yet)
+   -- digits 16-19: dbg_reset_pc_lo (16 bits, "FFFF" = not read yet - M1014)
    with dbg_digit_idx select dbg_nibble <=
       dbg_addr_latched(23 downto 20)             when 0,
       dbg_addr_latched(19 downto 16)             when 1,
@@ -615,10 +642,10 @@ begin
       std_logic_vector(dbg_seconds(11 downto  8)) when 13,
       std_logic_vector(dbg_seconds( 7 downto  4)) when 14,
       std_logic_vector(dbg_seconds( 3 downto  0)) when 15,
-      dbg_first_int_ack_seconds(15 downto 12)    when 16,
-      dbg_first_int_ack_seconds(11 downto  8)    when 17,
-      dbg_first_int_ack_seconds( 7 downto  4)    when 18,
-      dbg_first_int_ack_seconds( 3 downto  0)    when others;
+      dbg_reset_pc_lo(15 downto 12)               when 16,
+      dbg_reset_pc_lo(11 downto  8)               when 17,
+      dbg_reset_pc_lo( 7 downto  4)                when 18,
+      dbg_reset_pc_lo( 3 downto  0)                when others;
 
    dbg_ascii <= x"3" & dbg_nibble when unsigned(dbg_nibble) <= 9 else
                 std_logic_vector(resize(unsigned(dbg_nibble), 8) - 10 + 65); -- 'A'..'F'
