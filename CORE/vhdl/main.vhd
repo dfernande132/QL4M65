@@ -152,12 +152,23 @@ signal ce_pix       : std_logic;
 constant DBG_FONT_FILE : string  := "../font/Anikki-16x16-m2m.rom";
 constant DBG_DX        : natural := 8;   -- top-left pixel position
 constant DBG_DY        : natural := 8;
--- QL4M65 TEMPORARY DEBUG AID (M1010): 6 digits for cpu_addr (as before) +
--- 6 more for a live count of ce_bus_p pulses per second - if the CPU's own
--- bus clock is running at its intended ~7.5MHz, this should read close to
--- 7500000 (0x7270E0); a much smaller number would directly confirm a raw
--- clock-rate problem instead of something stalling individual accesses.
-constant DBG_DIGITS     : natural := 12;
+-- QL4M65 TEMPORARY DEBUG AID (M1010/M1011): 6 digits for cpu_addr (as
+-- before) + 6 more for a live rate counter per second. M1010 measured
+-- ce_bus_p pulses/sec here (~7,487,452 vs ~7,499,450 expected, ~0.16% off -
+-- confirms the raw bus clock rate is correct, not the bottleneck). M1011
+-- repurposes these 6 digits to instead count cpu_addr CHANGES per second
+-- (completed bus transactions) - if THIS number is far below what a normal
+-- ~7.5 MHz bus doing simple instructions should sustain, it confirms each
+-- transaction is burning far more (correctly-ticking) cycles than it should.
+--
+-- QL4M65 TEMPORARY DEBUG AID (M1011): 4 more digits for seconds elapsed
+-- since reset (free-running), + 4 more for seconds elapsed until the FIRST
+-- interrupt-acknowledge cycle (cpu_int_ack) after reset - latched once and
+-- frozen (stays at 0xFFFF, i.e. "----", if it never happens). This times
+-- the "clean" boot/RAM-test phase (no interrupts yet) against when the
+-- interrupt-driven phase begins, to correlate against when the slowdown
+-- actually starts.
+constant DBG_DIGITS     : natural := 20;
 
 signal dbg_h_cnt      : std_logic_vector(9 downto 0);
 signal dbg_v_cnt      : std_logic_vector(9 downto 0);
@@ -181,8 +192,27 @@ signal dbg_vs_count     : natural range 0 to 63 := 0;
 
 -- QL4M65 TEMPORARY DEBUG AID (M1010): free-running count of ce_bus_p pulses,
 -- snapshotted and reset once per second alongside dbg_addr_latched above.
+-- M1010 hardware result: ~7,487,452/sec vs ~7,499,450 expected (~0.16% off)
+-- - the CPU's raw bus clock is confirmed running at essentially the correct
+-- rate, ruling out a clock-generation problem.
+--
+-- QL4M65 TEMPORARY DEBUG AID (M1011): repurposed to instead count how many
+-- times cpu_addr actually CHANGES per second (i.e. completed bus
+-- transactions), not just raw ce_bus_p pulses. Since the clock itself is now
+-- confirmed correct, this measures whether each individual transaction is
+-- taking far more (correctly-ticking) cycles than it should - the next
+-- candidate given M1010's result.
 signal dbg_bus_cycles         : unsigned(23 downto 0) := (others => '0');
 signal dbg_bus_cycles_latched : std_logic_vector(23 downto 0) := (others => '0');
+signal dbg_cpu_addr_prev      : std_logic_vector(23 downto 0) := (others => '0');
+
+-- QL4M65 TEMPORARY DEBUG AID (M1011): seconds-since-reset (free-running) and
+-- seconds-until-first-interrupt-acknowledge (latched once, sentinel 0xFFFF
+-- = "hasn't happened yet"). Both reset on the core's own reset.
+signal dbg_seconds                 : unsigned(15 downto 0) := (others => '0');
+signal dbg_first_int_ack_seconds   : std_logic_vector(15 downto 0) := (others => '1');
+signal dbg_first_int_ack_captured  : std_logic := '0';
+signal dbg_cpu_int_ack_prev        : std_logic := '0';
 
 ---------------------------------------------------------------------------
 -- QL4M65: ZX8302 (internal I/O) signals
@@ -520,47 +550,75 @@ begin
    dbg_x_in_char <= (to_integer(unsigned(dbg_h_cnt)) - DBG_DX) mod 16;
    dbg_y_in_char <= to_integer(unsigned(dbg_v_cnt)) - DBG_DY;
 
-   -- QL4M65 TEMPORARY DEBUG AID (M1007b/M1010): latch cpu_addr once per
-   -- second (~50 vsync pulses) instead of showing it live - confirmed on
+   -- QL4M65 TEMPORARY DEBUG AID (M1007b/M1010/M1011): latch cpu_addr once
+   -- per second (~50 vsync pulses) instead of showing it live - confirmed on
    -- hardware that live cpu_addr changes far too fast to read. Also counts
-   -- ce_bus_p pulses in that same second, to directly measure the CPU's
-   -- actual bus-cycle rate.
+   -- how many times cpu_addr actually changes in that same second (M1011 -
+   -- completed bus transactions, not just raw clock-enable pulses, now that
+   -- M1010 confirmed the raw clock rate itself is correct).
    dbg_latch : process (clk_main_i)
    begin
       if rising_edge(clk_main_i) then
-         if ce_bus_p = '1' then
-            dbg_bus_cycles <= dbg_bus_cycles + 1;
-         end if;
+         if reset = '1' then
+            dbg_seconds                <= (others => '0');
+            dbg_first_int_ack_seconds  <= (others => '1');  -- sentinel: not yet
+            dbg_first_int_ack_captured <= '0';
+         else
+            dbg_cpu_addr_prev <= cpu_addr;
+            if cpu_addr /= dbg_cpu_addr_prev then
+               dbg_bus_cycles <= dbg_bus_cycles + 1;
+            end if;
 
-         dbg_vs_prev <= zx_vs;
-         if dbg_vs_prev = '0' and zx_vs = '1' then  -- vsync rising edge
-            if dbg_vs_count = 49 then
-               dbg_vs_count            <= 0;
-               dbg_addr_latched        <= cpu_addr;
-               dbg_bus_cycles_latched  <= std_logic_vector(dbg_bus_cycles);
-               dbg_bus_cycles          <= (others => '0');
-            else
-               dbg_vs_count <= dbg_vs_count + 1;
+            -- QL4M65 TEMPORARY DEBUG AID (M1011): latch the elapsed seconds
+            -- the first (and only the first) time an interrupt-acknowledge
+            -- cycle happens after reset.
+            dbg_cpu_int_ack_prev <= cpu_int_ack;
+            if dbg_cpu_int_ack_prev = '0' and cpu_int_ack = '1' and dbg_first_int_ack_captured = '0' then
+               dbg_first_int_ack_seconds  <= std_logic_vector(dbg_seconds);
+               dbg_first_int_ack_captured <= '1';
+            end if;
+
+            dbg_vs_prev <= zx_vs;
+            if dbg_vs_prev = '0' and zx_vs = '1' then  -- vsync rising edge
+               if dbg_vs_count = 49 then
+                  dbg_vs_count            <= 0;
+                  dbg_addr_latched        <= cpu_addr;
+                  dbg_bus_cycles_latched  <= std_logic_vector(dbg_bus_cycles);
+                  dbg_bus_cycles          <= (others => '0');
+                  dbg_seconds             <= dbg_seconds + 1;
+               else
+                  dbg_vs_count <= dbg_vs_count + 1;
+               end if;
             end if;
          end if;
       end if;
    end process dbg_latch;
 
-   -- digits 0-5: dbg_addr_latched (24 bits, most-significant nibble first)
-   -- digits 6-11: dbg_bus_cycles_latched (ditto)
+   -- digits 0-5:   dbg_addr_latched (24 bits, most-significant nibble first)
+   -- digits 6-11:  dbg_bus_cycles_latched (ditto)
+   -- digits 12-15: dbg_seconds (16 bits, seconds since reset)
+   -- digits 16-19: dbg_first_int_ack_seconds (16 bits, "FFFF" = not yet)
    with dbg_digit_idx select dbg_nibble <=
-      dbg_addr_latched(23 downto 20)       when 0,
-      dbg_addr_latched(19 downto 16)       when 1,
-      dbg_addr_latched(15 downto 12)       when 2,
-      dbg_addr_latched(11 downto  8)       when 3,
-      dbg_addr_latched( 7 downto  4)       when 4,
-      dbg_addr_latched( 3 downto  0)       when 5,
-      dbg_bus_cycles_latched(23 downto 20) when 6,
-      dbg_bus_cycles_latched(19 downto 16) when 7,
-      dbg_bus_cycles_latched(15 downto 12) when 8,
-      dbg_bus_cycles_latched(11 downto  8) when 9,
-      dbg_bus_cycles_latched( 7 downto  4) when 10,
-      dbg_bus_cycles_latched( 3 downto  0) when others;
+      dbg_addr_latched(23 downto 20)             when 0,
+      dbg_addr_latched(19 downto 16)             when 1,
+      dbg_addr_latched(15 downto 12)             when 2,
+      dbg_addr_latched(11 downto  8)             when 3,
+      dbg_addr_latched( 7 downto  4)             when 4,
+      dbg_addr_latched( 3 downto  0)             when 5,
+      dbg_bus_cycles_latched(23 downto 20)       when 6,
+      dbg_bus_cycles_latched(19 downto 16)       when 7,
+      dbg_bus_cycles_latched(15 downto 12)       when 8,
+      dbg_bus_cycles_latched(11 downto  8)       when 9,
+      dbg_bus_cycles_latched( 7 downto  4)       when 10,
+      dbg_bus_cycles_latched( 3 downto  0)       when 11,
+      std_logic_vector(dbg_seconds(15 downto 12)) when 12,
+      std_logic_vector(dbg_seconds(11 downto  8)) when 13,
+      std_logic_vector(dbg_seconds( 7 downto  4)) when 14,
+      std_logic_vector(dbg_seconds( 3 downto  0)) when 15,
+      dbg_first_int_ack_seconds(15 downto 12)    when 16,
+      dbg_first_int_ack_seconds(11 downto  8)    when 17,
+      dbg_first_int_ack_seconds( 7 downto  4)    when 18,
+      dbg_first_int_ack_seconds( 3 downto  0)    when others;
 
    dbg_ascii <= x"3" & dbg_nibble when unsigned(dbg_nibble) <= 9 else
                 std_logic_vector(resize(unsigned(dbg_nibble), 8) - 10 + 65); -- 'A'..'F'
