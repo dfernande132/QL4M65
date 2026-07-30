@@ -152,7 +152,12 @@ signal ce_pix       : std_logic;
 constant DBG_FONT_FILE : string  := "../font/Anikki-16x16-m2m.rom";
 constant DBG_DX        : natural := 8;   -- top-left pixel position
 constant DBG_DY        : natural := 8;
-constant DBG_DIGITS     : natural := 6;   -- cpu_addr is 24 bits = 6 hex digits
+-- QL4M65 TEMPORARY DEBUG AID (M1010): 6 digits for cpu_addr (as before) +
+-- 6 more for a live count of ce_bus_p pulses per second - if the CPU's own
+-- bus clock is running at its intended ~7.5MHz, this should read close to
+-- 7500000 (0x7270E0); a much smaller number would directly confirm a raw
+-- clock-rate problem instead of something stalling individual accesses.
+constant DBG_DIGITS     : natural := 12;
 
 signal dbg_h_cnt      : std_logic_vector(9 downto 0);
 signal dbg_v_cnt      : std_logic_vector(9 downto 0);
@@ -173,6 +178,11 @@ signal dbg_pixel_on   : std_logic;
 signal dbg_addr_latched : std_logic_vector(23 downto 0) := (others => '0');
 signal dbg_vs_prev      : std_logic := '0';
 signal dbg_vs_count     : natural range 0 to 63 := 0;
+
+-- QL4M65 TEMPORARY DEBUG AID (M1010): free-running count of ce_bus_p pulses,
+-- snapshotted and reset once per second alongside dbg_addr_latched above.
+signal dbg_bus_cycles         : unsigned(23 downto 0) := (others => '0');
+signal dbg_bus_cycles_latched : std_logic_vector(23 downto 0) := (others => '0');
 
 ---------------------------------------------------------------------------
 -- QL4M65: ZX8302 (internal I/O) signals
@@ -510,17 +520,25 @@ begin
    dbg_x_in_char <= (to_integer(unsigned(dbg_h_cnt)) - DBG_DX) mod 16;
    dbg_y_in_char <= to_integer(unsigned(dbg_v_cnt)) - DBG_DY;
 
-   -- QL4M65 TEMPORARY DEBUG AID (M1007b): latch cpu_addr once per second
-   -- (~50 vsync pulses) instead of showing it live - confirmed on hardware
-   -- that live cpu_addr changes far too fast to read.
+   -- QL4M65 TEMPORARY DEBUG AID (M1007b/M1010): latch cpu_addr once per
+   -- second (~50 vsync pulses) instead of showing it live - confirmed on
+   -- hardware that live cpu_addr changes far too fast to read. Also counts
+   -- ce_bus_p pulses in that same second, to directly measure the CPU's
+   -- actual bus-cycle rate.
    dbg_latch : process (clk_main_i)
    begin
       if rising_edge(clk_main_i) then
+         if ce_bus_p = '1' then
+            dbg_bus_cycles <= dbg_bus_cycles + 1;
+         end if;
+
          dbg_vs_prev <= zx_vs;
          if dbg_vs_prev = '0' and zx_vs = '1' then  -- vsync rising edge
             if dbg_vs_count = 49 then
-               dbg_vs_count    <= 0;
-               dbg_addr_latched <= cpu_addr;
+               dbg_vs_count            <= 0;
+               dbg_addr_latched        <= cpu_addr;
+               dbg_bus_cycles_latched  <= std_logic_vector(dbg_bus_cycles);
+               dbg_bus_cycles          <= (others => '0');
             else
                dbg_vs_count <= dbg_vs_count + 1;
             end if;
@@ -528,14 +546,21 @@ begin
       end if;
    end process dbg_latch;
 
-   -- dbg_addr_latched is 24 bits = 6 nibbles, most-significant digit first
+   -- digits 0-5: dbg_addr_latched (24 bits, most-significant nibble first)
+   -- digits 6-11: dbg_bus_cycles_latched (ditto)
    with dbg_digit_idx select dbg_nibble <=
-      dbg_addr_latched(23 downto 20) when 0,
-      dbg_addr_latched(19 downto 16) when 1,
-      dbg_addr_latched(15 downto 12) when 2,
-      dbg_addr_latched(11 downto  8) when 3,
-      dbg_addr_latched( 7 downto  4) when 4,
-      dbg_addr_latched( 3 downto  0) when others;
+      dbg_addr_latched(23 downto 20)       when 0,
+      dbg_addr_latched(19 downto 16)       when 1,
+      dbg_addr_latched(15 downto 12)       when 2,
+      dbg_addr_latched(11 downto  8)       when 3,
+      dbg_addr_latched( 7 downto  4)       when 4,
+      dbg_addr_latched( 3 downto  0)       when 5,
+      dbg_bus_cycles_latched(23 downto 20) when 6,
+      dbg_bus_cycles_latched(19 downto 16) when 7,
+      dbg_bus_cycles_latched(15 downto 12) when 8,
+      dbg_bus_cycles_latched(11 downto  8) when 9,
+      dbg_bus_cycles_latched( 7 downto  4) when 10,
+      dbg_bus_cycles_latched( 3 downto  0) when others;
 
    dbg_ascii <= x"3" & dbg_nibble when unsigned(dbg_nibble) <= 9 else
                 std_logic_vector(resize(unsigned(dbg_nibble), 8) - 10 + 65); -- 'A'..'F'
@@ -656,21 +681,10 @@ begin
 
          comctrl_o       => ipc_comctrl,
          comdata_i       => ipc_comdata_zx2kb,
-         comdata_o       => open,  -- QL4M65 TEMPORARY TEST (M1009): see override below
+         comdata_o       => ipc_comdata_kb2zx,
          audio_o         => ipc_audio,
          ipl_o           => ipc_ipl
       ); -- i_keyboard
-
-   -- QL4M65 TEMPORARY TEST (M1009): simulate "no IPC/keyboard connected" by
-   -- forcing zx8302's comdata input permanently released ('1'), discarding
-   -- keyboard.vhd's actual response entirely. Testing whether the extreme
-   -- slowness discovered in M1006-M1008 (CPU alive, executing widely across
-   -- Minerva ROM, but taking minutes instead of <1s) tracks the IPC/keyboard
-   -- exchange or is independent of it - user's own reference: the real
-   -- MiSTer QL_MiSTer core reaches Minerva's F1-F4 screen fine even with no
-   -- PS/2 keyboard physically connected. Revert by restoring
-   -- "comdata_o => ipc_comdata_kb2zx" above and deleting this line.
-   ipc_comdata_kb2zx <= '1';
 
 end architecture synthesis;
 
