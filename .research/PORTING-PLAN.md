@@ -24,13 +24,14 @@ bitstream sin errores (WNS=+0.130 ns, WHS=+0.051 ns, 0 nets sin rutar).
 Detalle completo en `DECISIONES.md`, sección "M1001 conseguido".
 
 **Pendiente ahora:**
-- Prueba en hardware real de `QL4M65-CoreQL-M1010_r6.cor` (contador de
-  `ce_bus_p` por segundo, para medir directamente si el reloj de bus de la
-  CPU va a la velocidad correcta - ver tabla de pruebas abajo y
-  `DECISIONES.md`). `M1009` ya descartó el teclado/IPC como causa de la
-  lentitud extrema; `M1007`/`M1008` confirmaron que la CPU está viva y
-  ejecutando código real de Minerva por un rango amplio de la ROM, mucho más
-  lento de lo debido, sin quedarse en un bucle fijo.
+- Prueba en hardware real de `QL4M65-CoreQL-M1011_r6.cor` (contador de
+  transacciones de bus completadas por segundo + segundos hasta la primera
+  interrupción reconocida - ver tabla de pruebas abajo y `DECISIONES.md`).
+  `M1010` ya confirmó que el reloj de bus de la CPU va a la velocidad
+  correcta (~0,16% de diferencia) - descarta un problema de generación de
+  reloj; `M1009` descartó el teclado/IPC; `M1007`/`M1008` confirmaron que la
+  CPU está viva y ejecutando código real de Minerva por un rango amplio de
+  la ROM, mucho más lento de lo debido, sin quedarse en un bucle fijo.
 - Diagnosticar el cuelgue visto en `M1001`: arranca, se ve el patrón de
   comprobación de RAM, pero se cuelga de forma reproducible más adelante en
   el arranque de Minerva — candidato principal: interacción con el enlace
@@ -70,7 +71,8 @@ razonamiento completo.
 | `M1007` | Mini-debug propio: overlay temporal con `cpu_addr` en hexadecimal (amarillo sobre negro, esquina superior izquierda), reutilizando la ROM de fuente del OSM; `zx8301.v` expone `h_cnt`/`v_cnt` como puertos nuevos para poder posicionar el overlay (temporal, ver `doc/m2m/exceptions.md` para revertir) | Confirma que la CPU está viva: se ven cifras moviéndose (demasiado rápido para leerlas), pero las dos primeras siempre "00" — la dirección se mantiene en `$00xxxx`, el rango de la ROM de Minerva. Bucle sin avanzar a otras zonas de memoria, no parálisis del bus |
 | `M1008` | Overlay de `M1007` congelado a 1Hz (~50 pulsos de vsync) para poder leer la dirección con calma + `general.maxThreads 8` en `build_core.tcl` (Windows lo dejaba en 2 por defecto; tope duro de Vivado es 8 igualmente) | Dirección sigue moviéndose por un rango amplio de la ROM sin patrón repetido en 2 min — no es un bucle atascado, es la CPU ejecutando código real de Minerva mucho más lento de lo debido; candidato revisado: coste del sondeo de teclado (`keyboard.vhd`) en cada `vsync_irq`, protocolo con temporización nunca validada (ver `DECISIONES.md`) |
 | `M1009` | Prueba temporal (no un arreglo): `ipc_comdata_kb2zx` forzado a `'1'` en `main.vhd`, simulando "ningún teclado/IPC conectado" — descarta la respuesta real de `keyboard.vhd` por completo. Motivación: en MiSTer real, sin teclado PS/2 conectado, igual se llega a la pantalla F1-F4 de Minerva | Comportamiento idéntico a M1008 (pantalla en negro, ROM saltando igual) — **descarta el teclado/IPC como causa de la lentitud**. El usuario recuerda además que este comportamiento probablemente ya estaba presente desde M1001 (nunca se dejó encendido el tiempo suficiente para verlo avanzar) - se descarta también `vsync_irq`/`M1006` como causa |
-| `M1010` | Revertida la prueba de M1009 (teclado normal otra vez) + overlay ampliado a 12 dígitos: los 6 nuevos cuentan pulsos de `ce_bus_p` por segundo, para medir directamente si el reloj de bus de la CPU va a la velocidad correcta (~7.5MHz nativos del QL) | *(pendiente de probar)* |
+| `M1010` | Revertida la prueba de M1009 (teclado normal otra vez) + overlay ampliado a 12 dígitos: los 6 nuevos cuentan pulsos de `ce_bus_p` por segundo, para medir directamente si el reloj de bus de la CPU va a la velocidad correcta (~7.5MHz nativos del QL) | `0x723FDC`/`0x723FDB` (~7.487.452/seg) frente a ~7.499.450 esperados — solo ~0,16% de diferencia. **Descarta un problema de generación de reloj**; apunta a que cada transacción de bus individual consume muchos más ciclos (ya correctos) de los debidos |
+| `M1011` | Overlay ampliado a 20 dígitos: los dígitos 6-11 pasan a contar cambios reales de `cpu_addr` por segundo (transacciones completadas, no solo pulsos de reloj); +4 dígitos de segundos desde el reset; +4 dígitos de segundos hasta el primer "interrupt acknowledge" (congelado la primera vez, `FFFF` si nunca ocurre) — para correlacionar el inicio de la lentitud con la fase de interrupciones | *(pendiente de probar)* |
 
 Detalle completo de cada prueba en `DECISIONES.md` (registro cronológico) y
 sus Anexos A/B (memoria y teclado).
