@@ -1,67 +1,59 @@
-MiSTer2MEGA65
-=============
+Sinclair QL for MEGA65 (QL4M65)
+===============================
 
-MiSTer2MEGA65 is a framework to simplify porting MiSTer cores to the MEGA65.
+A port of the **Sinclair QL** to the **MEGA65**, built on top of the
+[MiSTer2MEGA65](https://github.com/sy2002/MiSTer2MEGA65) (M2M) framework and
+based on the [MiSTer-devel/QL_MiSTer](https://github.com/MiSTer-devel/QL_MiSTer)
+core (68008/`fx68k` CPU, `zx8301` video ULA, `zx8302` I/O ULA).
 
-![Title Image](doc/wiki/assets/MiSTer2MEGA65-Title.png)
+**Current status: work in progress, Milestone 1, does not boot to a usable
+state yet.** The core synthesizes and runs on real MEGA65 R6 hardware - the
+RAM-check pattern (the color noise a real QL shows during its self-test)
+appears correctly, proving the CPU is executing genuine Minerva ROM code -
+but execution becomes extremely slow shortly afterwards, well before
+reaching Minerva's identification screen. Root cause is under active
+investigation. See `.research/PORTING-PLAN.md` and `DECISIONES.md` (in the
+parent directory) for the full, detailed log of what has been tried so far.
 
-Learn more by
-[watching this YouTube video](https://youtu.be/9Ib7z64z9N4)
-and get started by reading the
-[MiSTer2MEGA65 Wiki](https://github.com/sy2002/MiSTer2MEGA65/wiki).
+Milestone 1 scope
+-----------------
 
-TL;DR
------
+- Native QL CPU speed (no QL/16MHz/24MHz/Full speed switch yet)
+- PAL video only
+- 128 KB RAM (implemented in FPGA BRAM for now; HyperRAM planned for later)
+- Manual system ROM loading (Minerva) via the Shell's Options menu
+- Keyboard (MEGA65 keys mapped to the QL's matrix, replacing the real
+  hardware's Intel 8049 IPC microcontroller with a MEGA65-native
+  translator)
 
-1. Scroll up and press the "Use this template" button to start a new
-   MiSTer2MEGA65 project. Then fork the MiSTer core you want to port
-   and make it a Git submodule of your newly created project.
+Not yet in scope for Milestone 1: microdrive (`.MDV`), QL-SD (`QXL.WIN`),
+mouse, or GoldCard/SMSQ,E support - these are planned for later milestones.
 
-2. Wrap the MiSTer core inside `CORE/vhdl/main.vhd` while
-   adjusting the clocks in `CORE/vhdl/clk.vhd`. Provide RAMs, ROMs and other
-   devices in `CORE/vhdl/mega65.vhd` and wire everything correctly.
+Repository layout
+------------------
 
-3. Configure your core's behavior, including how the start screen looks like,
-   what ROMs should be loaded (and where to), the abilities of the
-   <kbd>Help</kbd> menu and more in `CORE/vhdl/config.vhd` and in
-   `CORE/vhdl/globals.vhd`.
+- `CORE/vhdl/` - the actual QL4M65 port (clock generation, memory map, video/
+  keyboard wiring, Shell configuration)
+- `CORE/QL_MiSTer/` - git submodule, the MiSTer QL core (mostly unmodified;
+  see `doc/m2m/exceptions.md` for the handful of deliberate changes and why)
+- `M2M/` - the MiSTer2MEGA65 framework itself (not modified)
+- `.research/PORTING-PLAN.md` - the porting dossier and hardware-test log
+  (every tested build, what changed, what happened)
+- `DECISIONES.md` (parent directory) - chronological log of every technical
+  decision and diagnosis made during this port, in Spanish
 
-**DONE** your core is ported to MEGA65! :-)
+Credits
+-------
 
-*Obviously, this is a shameless exaggeration of how easy it is to work with
-MiSTer2MEGA65, but you get the gist of it.*
+- QL4M65 port by Jose Daniel Fernandez Santos ([dfsantos](https://github.com/dfernande132))
+- MiSTer2MEGA65 framework by sy2002 and MJoergen
+- MiSTer-devel/QL_MiSTer core by the MiSTer QL community
 
-Getting started, detailed documentation and support
----------------------------------------------------
+Licensed under GPL v3.
 
-1. You might whant to start your journey
-  [here](https://github.com/sy2002/MiSTer2MEGA65/wiki/1.-What-is-MiSTer2MEGA65)
-  and then follow the reading track that is pointed out in the
-  respective chapters.
+---
 
-2. Run through this tutorial: https://files.mega65.org?ar=898d573b-d30d-4438-8893-09455bd16400
-
-3. Choose the MiSTer core you want to port here: https://mister-devel.github.io/MkDocs_MiSTer/
-
-4. Use [The Ultimate MiSTer2MEGA65 Porting Guide](https://github.com/sy2002/MiSTer2MEGA65/wiki/The-Ultimate-MiSTer2MEGA65-Porting-Guide) to do the actual work. The guide contains all steps "From Zero to Hero".
-
-Status of the framework
------------------------
-
-**The MiSTer2MEGA (M2M) framework is stable and ready for being used.**
-The reference implementation of the M2M framework is the
-[Commodore 64 for MEGA65](https://github.com/MJoergen/C64MEGA65).
-Additionally there is already
-[a decent amount of cores](https://cores.mega65.org)
-that are based on the M2M framework. Head to the
-[Alternate MEGA65 cores](https://sy2002.github.io/m65cores/)
-website to learn more.
-
+Built on the [MiSTer2MEGA65](https://github.com/sy2002/MiSTer2MEGA65)
+framework - learn more about M2M itself via
 [The Ultimate MiSTer2MEGA65 Porting Guide](https://github.com/sy2002/MiSTer2MEGA65/wiki/The-Ultimate-MiSTer2MEGA65-Porting-Guide)
-is very comprehensive - if you miss something or have questions, contact us on Discord.
-
-The [Commodore 64 for MEGA65](https://github.com/MJoergen/C64MEGA65) is the reference implementation
-of the M2M framework and [The Ultimate MiSTer2MEGA65 Porting Guide](https://github.com/sy2002/MiSTer2MEGA65/wiki/The-Ultimate-MiSTer2MEGA65-Porting-Guide) uses it heavily to provide you with examples. Don't hesitate to take code snippets from the
-[Commodore 64 for MEGA65](https://github.com/MJoergen/C64MEGA65) for your own projects.
-nd join the
-[friendly MEGA65 community on Discord](https://discord.com/channels/719326990221574164/1177364456896999485).
+or the [friendly MEGA65 community on Discord](https://discord.com/channels/719326990221574164/1177364456896999485).
