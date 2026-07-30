@@ -23,28 +23,38 @@ VRAM (64k) + `keyboard.vhd` cableado de verdad. Síntesis + implementación +
 bitstream sin errores (WNS=+0.130 ns, WHS=+0.051 ns, 0 nets sin rutar).
 Detalle completo en `DECISIONES.md`, sección "M1001 conseguido".
 
+**CAUSA REAL ENCONTRADA (2026-07-30): nunca se cargaba Minerva.** Toda la
+investigación de "lentitud 100-1000x" de `M1001` a `M1012` resultó ser el
+efecto de ejecutar una ROM en blanco (BRAM sin `INIT`, nunca cargada
+manualmente por el menú OSD - el usuario asumía que Minerva venía incluida
+en el `.cor`). Con Minerva 1.97 cargada de verdad por el menú "ROM:%s", el
+core arranca **rápido, igual que un QL real**: chequeo de RAM en ~1 segundo
+y aparece la pantalla de bienvenida de Minerva. Detalle completo,
+razonamiento y verificación byte a byte contra el fichero real en
+`DECISIONES.md` ("LA CAUSA REAL DEL CUELGUE/LENTITUD").
+
 **Pendiente ahora:**
-- Prueba en hardware real de `QL4M65-CoreQL-M1014_r6.cor`: cargar de nuevo
-  el binario mínimo de `M1013` (`/ql4m65/QL4M65-mintest-M1013.rom`) y
-  comparar la cifra de transacciones/seg (dígitos 6-11) ya con antirrebote
-  frente a los ~9.36M/seg (sin filtrar) de `M1013` y los ~831.860/seg de
-  Minerva (`M1011`/`M1012`) - para saber si el 11x de diferencia era real o
-  en parte un artefacto de medición. También comprobar los dígitos 16-19
-  (deben leer `0008`, la palabra baja del PC inicial de ese binario) como
-  verificación de que la carga de ROM en sí funciona correctamente.
+- Dejar avanzar Minerva más allá de la pantalla de bienvenida (teclado
+  real, pantalla F1-F4, etc.) y ver hasta dónde llega con `keyboard.vhd`
+  (aproximación parcial del protocolo IPC real).
+- Nota aparte: `mge_rom` (una ROM original del QL, no Minerva) sí carga
+  pero se queda negra/lentísima tras el chequeo de RAM - probable
+  incompatibilidad con nuestro `keyboard.vhd` (protocolo IPC real no
+  implementado del todo, ver Anexo B). Aparcado, no es el objetivo del
+  Milestone 1.
+- Limpiar el overlay de depuración temporal cuando ya no haga falta (ver
+  `doc/m2m/exceptions.md` para la lista de reversiones pendientes).
 - `zx8302.v` ya revertido de vuelta a la versión `OR` de `M1006` (correcta
-  arquitectónicamente) tras concluir la comparación de `M1012`.
-- Revisión sistemática de los 4 ficheros principales del framework M2M
-  (`clk.vhd`/`globals.vhd`/`mega65.vhd`/`main.vhd`) frente a AExp/C64/vanilla
-  no encontró ninguna diferencia estructural que explique la lentitud - ver
-  `DECISIONES.md`. Candidatos que quedan si `M1013`/`M1014` no aclaran nada
-  más: contención real de vídeo vs `ql_timing.sv` (ROM exenta de la ventana
-  `could_start`, confirmado; RAM/E-S sujeta a ~80% de bloqueo durante
-  pantalla activa), jitter del acumulador fraccional de reloj de bus
-  (`FRACT_BUS_QL`) frente a la división entera simple de AExp. Ya
-  descartados: reloj de bus (`M1010`), teclado/IPC (`M1009`), magnitud del
-  wait-state individual (recalculado, demasiado pequeño), `vsync_irq`
-  (`M1012`), y el framework M2M en sí (revisión de los 4 ficheros).
+  arquitectónicamente, y de hecho ya validada de forma indirecta: con
+  Minerva real cargada y arrancando bien, el manejo de `vsync_irq` es
+  necesario para que el sistema siga vivo más allá del arranque).
+- Añadir los ficheros del core a los otros tres `.xpr` (R3/R4/R5) - solo se
+  ha tocado `CORE-R6.xpr` hasta ahora.
+- (Futuro, no urgente) Cargar Minerva automáticamente al arrancar, en vez
+  del menú manual "ROM:%s" actual - mismo patrón que la Kickstart de AExp
+  (`C_CRTROMTYPE_MANDATORY` + `C_CRTROMS_AUTO` en `globals.vhd`, fichero de
+  nombre fijo tipo `/ql4m65/minerva.rom`, core en reset hasta que termina la
+  carga).
 - Validar el protocolo IPC del teclado (`keyboard.vhd`) contra
   hardware/simulación real — sigue basado en un desensamblado propio no
   contrastado externamente (Anexo B de `DECISIONES.md`).
@@ -83,7 +93,7 @@ razonamiento completo.
 | `M1011` | Overlay ampliado a 20 dígitos: los dígitos 6-11 pasan a contar cambios reales de `cpu_addr` por segundo (transacciones completadas, no solo pulsos de reloj); +4 dígitos de segundos desde el reset; +4 dígitos de segundos hasta el primer "interrupt acknowledge" (congelado la primera vez, `FFFF` si nunca ocurre) — para correlacionar el inicio de la lentitud con la fase de interrupciones | ~831.860 transacciones/seg (~9 ciclos/transacción, plausible con contención real); primer "interrupt acknowledge" a los **0 segundos** (casi instantáneo); cientos de millones de operaciones en total durante los minutos que tarda el arranque — apunta a que la rutina de interrupción de `vsync` de Minerva hace algo caro en cada uno de sus ~50 pasos/seg, no a que cada transacción individual sea lenta |
 | `M1012` | Prueba temporal: revierte SOLO el arreglo del `ipl` de `M1006` (bloquea `vsync_irq` otra vez) manteniendo todos los contadores de `M1011`, para comparar la cifra EXACTA de transacciones/segundo con y sin esa interrupción llegando a la CPU | Prácticamente idéntico a `M1011`: ~831.860 transacciones/seg (mismo rango `0x0cb17b`/`0x0cb174`/`0x0cb16e`), mismo patrón de segundos. **Descarta la hipótesis de `vsync_irq`**: bloquear la interrupción por completo no cambia el tráfico de bus, así que el manejador de Minerva para esa interrupción no es el cuello de botella |
 | `M1013` | Sin recompilar bitstream: binario 68000 mínimo (18 bytes, bucle de 2 instrucciones tocando solo RAM en `$030000`) cargado vía el menú "ROM:%s" ya existente, sobre el `M1012` ya flasheado | Dirección latcheada = `030000` (confirma el programa correcto). Transacciones/seg ≈ 9.363.973 (~11x más que Minerva) - pero se sospecha que el contador (sin antirrebote todavía) sobre-cuenta transitorios de un ciclo en saltos de dirección tan bruscos; ver `M1014` |
-| `M1014` | Overlay de depuración: antirrebote (≥2 ciclos estables) en el contador de transacciones (dígitos 6-11) + dígitos 16-19 repurpuestos para mostrar la palabra baja del PC inicial leído de la ROM cargada (verificación de carga correcta, a petición del usuario) | *(pendiente de probar)* |
+| `M1014` | Overlay de depuración: antirrebote (≥2 ciclos estables) en el contador de transacciones (dígitos 6-11) + dígitos 16-19 repurpuestos para mostrar la palabra baja del PC inicial leído de la ROM cargada (verificación de carga correcta, a petición del usuario) | Con `M1013` (binario mínimo): ~9.364.000/seg, prácticamente igual que sin antirrebote - **descarta que el 11x fuera un artefacto de medición, es una diferencia real**; PC inicial = `0008`, correcto. Con Minerva: ~831.868/seg, igual que sin antirrebote; pero PC inicial = **`0000`**, inesperado - pendiente verificar contra los bytes reales del fichero de ROM de Minerva usado (offset `$04`-`$07`) |
 
 Detalle completo de cada prueba en `DECISIONES.md` (registro cronológico) y
 sus Anexos A/B (memoria y teclado).

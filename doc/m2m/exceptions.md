@@ -8,21 +8,24 @@ changes described here.
 MiSTer core QL_MiSTer
 ----------------------
 
-### TEMPORARY: `rtl/zx8301.v` exposes `h_cnt_o`/`v_cnt_o` (M1007 debug aid)
+### REVERTED (M1015): `rtl/zx8301.v` no longer exposes `h_cnt_o`/`v_cnt_o`
 
-To diagnose the reproducible post-RAM-test hang (M1001-M1006), `main.vhd`
-composites a small on-screen hex readout of the CPU's address bus directly
-onto the video output, independent of whatever QDOS/Minerva is doing with
-its own screen - so it stays visible even if the boot hangs. This needs to
-know the current pixel position, so `zx8301.v`'s internal `h_cnt`/`v_cnt`
-counters were exposed as two new top-level outputs (`h_cnt_o`, `v_cnt_o`),
-purely combinational (`assign h_cnt_o = h_cnt;` etc.), no other change to
-the module's behavior.
-
-**Revert this once the hang is diagnosed**: remove `h_cnt_o`/`v_cnt_o` from
-`zx8301.v`, and remove the whole "QL4M65 TEMPORARY DEBUG AID (M1007)" block
-in `main.vhd` (signal declarations, the `i_dbg_font` instance, and the
-`video_red_o`/`green_o`/`blue_o` overlay logic).
+M1007-M1014 used a temporary on-screen hex readout (composited directly
+onto the video output in `main.vhd`, independent of whatever QDOS/Minerva
+was doing with its own screen) to diagnose a reproducible post-RAM-test
+"hang". That investigation concluded (see `DECISIONES.md`, "LA CAUSA REAL
+DEL CUELGUE/LENTITUD"): the ROM buffer was simply never being loaded (the
+manual "ROM:%s" OSD menu load is required every time - the QL4M65 core does
+not ship Minerva bundled in the `.cor`), so the CPU was executing a blank
+buffer, not a slow/hung real Minerva. With Minerva actually loaded, the
+core boots at normal speed. The debug overlay served its purpose and was
+removed in M1015: `zx8301.v`'s `h_cnt_o`/`v_cnt_o` ports, and the whole
+"QL4M65 TEMPORARY DEBUG AID" block in `main.vhd` (signal declarations, the
+`i_dbg_font` instance, and the `video_red_o`/`green_o`/`blue_o` overlay
+logic) are gone. If similar on-screen debugging is needed again, the
+technique (reusing the OSM's own font ROM, latching values once per second
+via vsync counting) is documented in `DECISIONES.md`'s M1007-M1014 entries
+and can be reintroduced the same way.
 
 ### Removed the embedded "ipc" instance from `rtl/zx8302.v`
 
