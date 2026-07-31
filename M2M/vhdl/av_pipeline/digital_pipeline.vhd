@@ -367,33 +367,23 @@ begin
 
          -- Input video parameters
          --
-         -- QL4M65 (M1015): switched from auto-detect (iauto=1) to a manual
-         -- crop window, following AExp v1.0's proven "HDMI crop" pattern for
-         -- the same class of problem (residual ~1-character clip on the
-         -- Welcome/Options screens, confirmed to also affect the QL's own
-         -- video content, not just the OSM overlay - see DECISIONES.md).
-         --
-         -- ascal's himin/himax/vimin/vimax are absolute positions in its own
-         -- internal hcpt/vcpt counters, which (per ascal.vhd) reset at the
-         -- incoming hsync/vsync edge, not at zx8301.v's own h_cnt/v_cnt=0
-         -- (which marks the start of the ACTIVE area instead). Given
-         -- zx8301.v's PAL timing constants (H=512, HFP=24, HSW=72, HBP=64;
-         -- V=256, VFP=25, VSW=6, VBP=25), the active window in ascal's own
-         -- coordinate space works out to:
-         --   himin = HSW+HBP        = 72+64 = 136, himax = himin+H = 648
-         --   vimin = VSW+VBP        =  6+25 =  31, vimax = vimin+V = 287
-         -- That reproduces auto-detect's own window exactly - since content
-         -- is being CLIPPED (missing), not framed with too much border, the
-         -- fix is to give ascal a slightly WIDER window than the textbook
-         -- active area (a few pixels of padding into the front/back porch on
-         -- each side), the same reasoning AExp's own 4:3/576p preset needs
-         -- non-zero crop values. First-guess padding, likely needs one more
-         -- hardware-guided adjustment pass (see DECISIONES.md):
-         iauto             => '0',                          -- input
-         himin             => 136 - 6,                       -- input
-         himax             => 648 + 6,                       -- input
-         vimin             => 31 - 3,                        -- input
-         vimax             => 287 + 3,                       -- input
+         -- QL4M65 (M1015 attempt, REVERTED): tried a manual crop window
+         -- (iauto=0, himin/himax/vimin/vimax computed from zx8301.v's PAL
+         -- timing) to fix a residual ~1-character clip, following AExp's
+         -- HDMI-crop pattern. Hardware result: regression, not a fix - the
+         -- picture got stuck unscaled at native 512-wide, docked to the
+         -- right of the screen, instead of stretching to fill the HDMI
+         -- output. The manual himax/vimax values are evidently missing
+         -- something ascal's own auto-detect derives correctly (likely the
+         -- total line/frame period it needs for its scale-factor math, not
+         -- just the active window bounds) - reverted to auto-detect
+         -- (iauto=1) until this is understood properly. The 1-character
+         -- clip itself remains unresolved - see DECISIONES.md.
+         iauto             => '1',                          -- input
+         himin             => 0,                            -- input
+         himax             => 0,                            -- input
+         vimin             => 0,                            -- input
+         vimax             => 0,                            -- input
 
          -- Detected input image size
          i_hdmax           => video_hdmax_o,                -- output

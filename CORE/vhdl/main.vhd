@@ -141,6 +141,42 @@ signal zx_vblank    : std_logic;
 signal ce_pix       : std_logic;
 
 ---------------------------------------------------------------------------
+-- QL4M65 TEMPORARY DEBUG AID (M1016): minimal on-screen hex readout of
+-- cpu_addr only (no bus-cycle-rate/seconds/PC-verify counters this time -
+-- those already answered their questions and were removed in M1015). Goal
+-- this time: see whether the CPU is stuck in a narrow, repeating loop
+-- (polling something) right after the Minerva/mge splash logo, or still
+-- wandering broadly like the M1007/M1008 "blank ROM" symptom. Remove this
+-- whole block (signals, i_dbg_font instance, the h_cnt_o/v_cnt_o ports on
+-- zx8301, the video_red/green/blue_o override) once diagnosed - see
+-- doc/m2m/exceptions.md.
+---------------------------------------------------------------------------
+
+constant DBG_FONT_FILE : string  := "../font/Anikki-16x16-m2m.rom";
+constant DBG_DX        : natural := 8;
+constant DBG_DY        : natural := 8;
+constant DBG_DIGITS    : natural := 6;
+
+signal dbg_h_cnt      : std_logic_vector(9 downto 0);
+signal dbg_v_cnt      : std_logic_vector(9 downto 0);
+signal dbg_active     : std_logic;
+signal dbg_digit_idx  : integer;
+signal dbg_x_in_char  : integer;
+signal dbg_y_in_char  : integer;
+signal dbg_nibble     : std_logic_vector(3 downto 0);
+signal dbg_ascii      : std_logic_vector(7 downto 0);
+signal dbg_font_addr  : std_logic_vector(11 downto 0);
+signal dbg_font_data  : std_logic_vector(15 downto 0);
+signal dbg_pixel_on   : std_logic;
+
+-- Latch cpu_addr once per second (~50 vsync pulses) instead of showing it
+-- live - live cpu_addr changes far too fast to read (confirmed on M1007
+-- hardware).
+signal dbg_addr_latched : std_logic_vector(23 downto 0) := (others => '0');
+signal dbg_vs_prev      : std_logic := '0';
+signal dbg_vs_count     : natural range 0 to 63 := 0;
+
+---------------------------------------------------------------------------
 -- QL4M65: ZX8302 (internal I/O) signals
 ---------------------------------------------------------------------------
 
@@ -457,8 +493,76 @@ begin
          hs      => zx_hs,
          vs      => zx_vs,
          HBlank  => zx_hblank,
-         VBlank  => zx_vblank
+         VBlank  => zx_vblank,
+
+         -- QL4M65 TEMPORARY DEBUG AID (M1016, see signal declarations above)
+         h_cnt_o => dbg_h_cnt,
+         v_cnt_o => dbg_v_cnt
       ); -- i_zx8301
+
+   ---------------------------------------------------------------------------
+   -- QL4M65 TEMPORARY DEBUG AID (M1016): on-screen hex readout of cpu_addr
+   ---------------------------------------------------------------------------
+
+   dbg_active    <= '1' when unsigned(dbg_v_cnt) >= DBG_DY and unsigned(dbg_v_cnt) < DBG_DY + 16 and
+                             unsigned(dbg_h_cnt) >= DBG_DX and unsigned(dbg_h_cnt) < DBG_DX + DBG_DIGITS * 16
+                     else '0';
+
+   dbg_digit_idx <= (to_integer(unsigned(dbg_h_cnt)) - DBG_DX) / 16;
+   dbg_x_in_char <= (to_integer(unsigned(dbg_h_cnt)) - DBG_DX) mod 16;
+   dbg_y_in_char <= to_integer(unsigned(dbg_v_cnt)) - DBG_DY;
+
+   dbg_latch : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if reset = '1' then
+            null;
+         else
+            dbg_vs_prev <= zx_vs;
+            if dbg_vs_prev = '0' and zx_vs = '1' then  -- vsync rising edge
+               if dbg_vs_count = 49 then
+                  dbg_vs_count     <= 0;
+                  dbg_addr_latched <= cpu_addr;
+               else
+                  dbg_vs_count <= dbg_vs_count + 1;
+               end if;
+            end if;
+         end if;
+      end if;
+   end process dbg_latch;
+
+   with dbg_digit_idx select dbg_nibble <=
+      dbg_addr_latched(23 downto 20) when 0,
+      dbg_addr_latched(19 downto 16) when 1,
+      dbg_addr_latched(15 downto 12) when 2,
+      dbg_addr_latched(11 downto  8) when 3,
+      dbg_addr_latched( 7 downto  4) when 4,
+      dbg_addr_latched( 3 downto  0) when others;
+
+   dbg_ascii <= x"3" & dbg_nibble when unsigned(dbg_nibble) <= 9 else
+                std_logic_vector(resize(unsigned(dbg_nibble), 8) - 10 + 65); -- 'A'..'F'
+
+   dbg_font_addr <= std_logic_vector(to_unsigned(to_integer(unsigned(dbg_ascii)) * 16 + dbg_y_in_char, 12))
+                       when dbg_active = '1' else (others => '0');
+
+   i_dbg_font : entity work.ram_init
+      generic map (
+         G_ADDR_WIDTH   => 12,
+         G_DATA_WIDTH   => 16,
+         G_ROM_PRELOAD  => true,
+         G_ROM_FILE     => DBG_FONT_FILE,
+         G_ROM_FILE_HEX => false
+      )
+      port map (
+         clock_i   => clk_main_i,
+         clen_i    => '1',
+         address_i => dbg_font_addr,
+         data_i    => (others => '0'),
+         wren_i    => '0',
+         q_o       => dbg_font_data
+      ); -- i_dbg_font
+
+   dbg_pixel_on <= dbg_font_data(15 - dbg_x_in_char) when dbg_active = '1' else '0';
 
    -- video_ce_o: divides clk_main_i into the core's native pre-scandoubler
    -- pixel clock; video_ce_ovl_o: same rate for milestone 1 (no separate
@@ -467,9 +571,17 @@ begin
    video_ce_o     <= ce_pix;
    video_ce_ovl_o <= video_ce_o;
 
-   video_red_o    <= (others => video_r);
-   video_green_o  <= (others => video_g);
-   video_blue_o   <= (others => video_b);
+   -- QL4M65 TEMPORARY DEBUG AID (M1016): yellow hex text on solid black,
+   -- composited on top of the QL's own video. Passes normal video through
+   -- unchanged outside the box (dbg_active='0').
+   video_red_o    <= x"FF" when dbg_active = '1' and dbg_pixel_on = '1' else
+                      x"00" when dbg_active = '1' else
+                      (others => video_r);
+   video_green_o  <= x"FF" when dbg_active = '1' and dbg_pixel_on = '1' else
+                      x"00" when dbg_active = '1' else
+                      (others => video_g);
+   video_blue_o   <= x"00" when dbg_active = '1' else
+                      (others => video_b);
    video_vs_o     <= zx_vs;
    video_hs_o     <= zx_hs;
    video_hblank_o <= zx_hblank;
