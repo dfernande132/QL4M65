@@ -253,7 +253,11 @@ architecture beh of keyboard is
    constant DBG_FORCE_IDLE_MATRIX : boolean := false;
 
    -- IPC comdata/comctrl link (see architecture-level comment above)
-   type t_cmd_state is (CMD, ROWSEL, RESPOND);
+   -- SETIPL added (M1023): command C ("set P2.3") receives one more nibble
+   -- parameter after the command nibble, same shape as ROWSEL, but doesn't
+   -- transmit anything back - see the ipc8049.hex disassembly at 0x02C3 in
+   -- DECISIONES.md.
+   type t_cmd_state is (CMD, ROWSEL, RESPOND, SETIPL);
 
    signal comctrl_r  : std_logic := '1';
    signal phase_cnt  : unsigned(5 downto 0) := (others => '0');
@@ -264,6 +268,13 @@ architecture beh of keyboard is
    signal shift_in   : std_logic_vector(7 downto 0) := (others => '0');
    signal resp_byte  : std_logic_vector(7 downto 0) := (others => '1');
    signal cmd_state  : t_cmd_state := CMD;
+
+   -- QL4M65 (M1023): real IPC's "set/clear P2.3" state (command C), which
+   -- ipc.v wires directly to ipl[1] (ipl = t8049_p2_o[3:2]). Disassembled
+   -- rtl/ipc8049.hex at 0x02C3: receives one nibble, bit0 of it decides
+   -- ORL P2,#08h (set) vs ANL P2,#F7h (clear). Never implemented before -
+   -- ipl_o was hardcoded "00" regardless of what Minerva asked for.
+   signal ipl1_reg : std_logic := '0';
 
    -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019/M1020)
    signal dbg_last_cmd    : std_logic_vector(3 downto 0) := (others => '0');
@@ -499,6 +510,7 @@ begin
             shift_in   <= (others => '0');
             resp_byte  <= (others => '1');
             cmd_state  <= CMD;
+            ipl1_reg   <= '0';
             dbg_last_cmd   <= (others => '0');
             dbg_seen_flags <= (others => '0');
          elsif edge_pulse = '1' then
@@ -529,19 +541,28 @@ begin
                            cmd_state <= ROWSEL;
                         elsif v_shift(3 downto 0) = x"8" then     -- "read keyboard"
                            dbg_seen_flags(0) <= '1';
-                           -- QL4M65 TEMPORARY TEST (M1022): was x"00" ("safe
-                           -- stub", real encoding never reverse-engineered).
-                           -- Minerva never times out to TV mode after 8-10s
-                           -- even with the cmd-9 matrix forced fully idle
-                           -- (M1021) - testing whether x"00" is actually
-                           -- being misread as "a real queued key event"
-                           -- (e.g. scancode 0) rather than "queue empty",
-                           -- which would explain a permanently-reset
-                           -- countdown independent of real key state. Revert
-                           -- to x"00" once this experiment concludes either
-                           -- way - see DECISIONES.md.
-                           resp_byte <= x"FF";
+                           -- M1022 TEMPORARY TEST (concluded, reverted): tried
+                           -- x"FF" instead of x"00" for this stub, on the
+                           -- theory that Minerva might misread x"00" as a
+                           -- real queued key event rather than "queue
+                           -- empty". No change in behaviour - ruled out. Real
+                           -- encoding still not reverse-engineered.
+                           resp_byte <= x"00";
                            cmd_state <= RESPOND;
+                        elsif v_shift(3 downto 0) = x"1" then     -- "interrupt status"
+                           -- QL4M65 (M1023): disassembled at 0x0228 - builds
+                           -- a status byte from P2.6, an internal "network"
+                           -- flag (RAM 0x20) and two more flags for pending
+                           -- ser1/ser2 conditions (RAM 0x4C/0x4D), then
+                           -- transmits it. We have none of that real
+                           -- hardware (no RS232, no network) - answer with
+                           -- no flags set (x"00") instead of never
+                           -- transmitting anything at all (which read as
+                           -- all-1s garbage to the CPU before this fix).
+                           resp_byte <= x"00";
+                           cmd_state <= RESPOND;
+                        elsif v_shift(3 downto 0) = x"C" then     -- "set P2.3" (= ipl[1])
+                           cmd_state <= SETIPL;
                         elsif v_shift(3 downto 0) = x"6" or v_shift(3 downto 0) = x"7" then
                            dbg_seen_flags(2) <= '1';
                            cmd_state <= CMD;
@@ -549,6 +570,13 @@ begin
                            dbg_seen_flags(3) <= '1';
                            cmd_state <= CMD;
                         end if;
+
+                     -- QL4M65 (M1023): the parameter nibble's bit 0 chooses
+                     -- ORL P2,#08h (set) vs ANL P2,#F7h (clear) in the real
+                     -- ROM (0x02C5-0x02CD) - no response is transmitted.
+                     when SETIPL =>
+                        ipl1_reg  <= v_shift(0);
+                        cmd_state <= CMD;
 
                      -- row-select nibble: its low 3 bits choose which of
                      -- the 8 ql_matrix bytes to answer with next
@@ -581,10 +609,13 @@ begin
    -- command/parameter nibble we don't recognise.
    comdata_o <= resp_byte(7 - to_integer(bit_cnt)) when cmd_state = RESPOND else '1';
 
-   -- Not implemented (see entity port comments): no IPC-driven audio or
-   -- interrupt-priority lines in milestone 1.
+   -- Not implemented: no IPC-driven audio in milestone 1.
    audio_o <= '0';
-   ipl_o   <= "00";
+
+   -- QL4M65 (M1023): ipl(1) = P2.3, now genuinely driven by the "set P2.3"
+   -- command (0xC) - see ipl1_reg above. ipl(0) = P2.2: no command was
+   -- found that controls it independently, left at '0' (unimplemented).
+   ipl_o <= ipl1_reg & '0';
 
    -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019/M1020)
    dbg_last_cmd_o    <= dbg_last_cmd;
