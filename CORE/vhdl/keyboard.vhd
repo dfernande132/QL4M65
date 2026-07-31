@@ -120,7 +120,15 @@ entity keyboard is
       -- could hide a rare cmd 8/9 entirely.
       dbg_last_cmd_o     : out std_logic_vector(3 downto 0); -- last CMD nibble seen (CMD state)
       dbg_seen_flags_o   : out std_logic_vector(3 downto 0); -- bit0=cmd8 ever seen, bit1=cmd9 ever seen, bit2=cmd6/7 ever seen, bit3=any other cmd ever seen (all sticky since reset)
-      dbg_cmd_count_o    : out std_logic_vector(7 downto 0)  -- free-running count of CMD nibbles received
+
+      -- QL4M65 TEMPORARY DEBUG AID (M1020): the real QL confirms holding
+      -- ANY key down forever also prevents Minerva's own 8-10s "no key ->
+      -- auto TV mode" timeout from ever firing - matching exactly what we
+      -- see (never times out). Prime suspect: a phantom/stuck-high bit in
+      -- ql_matrix even though nothing is actually pressed. Sticky, one bit
+      -- per matrix byte (row): sees a byte go non-idle ('/= "00000000"')
+      -- even once since reset.
+      dbg_matrix_seen_o  : out std_logic_vector(7 downto 0)
    );
 end entity keyboard;
 
@@ -249,10 +257,10 @@ architecture beh of keyboard is
    signal resp_byte  : std_logic_vector(7 downto 0) := (others => '1');
    signal cmd_state  : t_cmd_state := CMD;
 
-   -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019)
-   signal dbg_last_cmd   : std_logic_vector(3 downto 0) := (others => '0');
-   signal dbg_seen_flags : std_logic_vector(3 downto 0) := (others => '0');
-   signal dbg_cmd_count  : unsigned(7 downto 0) := (others => '0');
+   -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019/M1020)
+   signal dbg_last_cmd    : std_logic_vector(3 downto 0) := (others => '0');
+   signal dbg_seen_flags  : std_logic_vector(3 downto 0) := (others => '0');
+   signal dbg_matrix_seen : std_logic_vector(7 downto 0) := (others => '0');
 
 begin
 
@@ -406,6 +414,27 @@ begin
    ql_matrix(8*7+7) <= not key_pressed_n(m65_comma);
 
    ---------------------------------------------------------------------------
+   -- QL4M65 TEMPORARY DEBUG AID (M1020): sticky "this matrix byte (row) has
+   -- shown at least one bit set" per row, continuously monitored (not tied
+   -- to the IPC exchange at all) - checks for a phantom/stuck-pressed key
+   -- independent of whether keyboard.vhd is even being asked for it.
+   ---------------------------------------------------------------------------
+   dbg_matrix_watch : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if reset_i = '1' then
+            dbg_matrix_seen <= (others => '0');
+         else
+            for b in 0 to 7 loop
+               if ql_matrix(8*b+7 downto 8*b) /= "00000000" then
+                  dbg_matrix_seen(b) <= '1';
+               end if;
+            end loop;
+         end if;
+      end if;
+   end process dbg_matrix_watch;
+
+   ---------------------------------------------------------------------------
    -- IPC comdata/comctrl protocol (see architecture-level comment above for
    -- the confidence level of each part of this)
    ---------------------------------------------------------------------------
@@ -461,7 +490,6 @@ begin
             cmd_state  <= CMD;
             dbg_last_cmd   <= (others => '0');
             dbg_seen_flags <= (others => '0');
-            dbg_cmd_count  <= (others => '0');
          elsif edge_pulse = '1' then
             edge_phase <= not edge_phase;
 
@@ -484,8 +512,7 @@ begin
                   case cmd_state is
                      -- command nibble ends up in shift_in(3 downto 0)
                      when CMD =>
-                        dbg_last_cmd  <= v_shift(3 downto 0);
-                        dbg_cmd_count <= dbg_cmd_count + 1;
+                        dbg_last_cmd <= v_shift(3 downto 0);
                         if v_shift(3 downto 0) = x"9" then       -- "keyrow"
                            dbg_seen_flags(1) <= '1';
                            cmd_state <= ROWSEL;
@@ -537,9 +564,9 @@ begin
    audio_o <= '0';
    ipl_o   <= "00";
 
-   -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019)
-   dbg_last_cmd_o   <= dbg_last_cmd;
-   dbg_seen_flags_o <= dbg_seen_flags;
-   dbg_cmd_count_o  <= std_logic_vector(dbg_cmd_count);
+   -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019/M1020)
+   dbg_last_cmd_o    <= dbg_last_cmd;
+   dbg_seen_flags_o  <= dbg_seen_flags;
+   dbg_matrix_seen_o <= dbg_matrix_seen;
 
 end architecture beh;
