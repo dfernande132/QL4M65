@@ -141,21 +141,28 @@ signal zx_vblank    : std_logic;
 signal ce_pix       : std_logic;
 
 ---------------------------------------------------------------------------
--- QL4M65 TEMPORARY DEBUG AID (M1026): cpu_addr is back (dropped
--- dbg_matrix_seen instead - M1020/M1021 already answered the "phantom
--- stuck key" question). Goal this time: capture exactly where the CPU
--- loops once Minerva is parked at the F1/F2/F3/F4 screen (post-M1017 IPL
--- fix), to disassemble that address and see precisely what it's polling -
--- is it even looking at zx8302's IPC status at that point at all? Remove
--- this whole block (signals, i_dbg_font instance, the h_cnt_o/v_cnt_o
--- ports on zx8301, the video_red/green/blue_o override) once the keyboard
--- issue is diagnosed - see doc/m2m/exceptions.md.
+-- QL4M65 TEMPORARY DEBUG AID (M1027): cpu_addr/keyboard-command traces
+-- (M1016-M1026) already did their job - source-level tracing (Minerva's
+-- own GPL sources, see DECISIONES.md) pinned the F1-F4 timeout down to
+-- ss/int2.asm's frame-interrupt branch, which increments a system variable
+-- (sv_pollm) whenever it sees irq_pending's bit 3 (frame/vsync) set on its
+-- own, per inc/pc's real hardware bit layout (bit4=external, bit3=frame,
+-- bit2=transmit, bit1=interface, bit0=gap). Direct empirical check this
+-- time: snoop the CPU's own read of zx8302's status/irq register
+-- (cpu_addr matching zx8302_sel/zx8302_addr="10", the same address
+-- ss_int2's "move.w (a3),d7" reads) and see what pattern actually shows up
+-- - clean bit3-only ("frame"), or something else/mixed that would make the
+-- real ROM's bit-shift dispatch (lsl.b #4,d7 / bcs.s exint / bmi.s frint)
+-- take the wrong branch and never touch sv_pollm at all. Remove this whole
+-- block (signals, i_dbg_font instance, the h_cnt_o/v_cnt_o ports on
+-- zx8301, the video_red/green/blue_o override) once diagnosed - see
+-- doc/m2m/exceptions.md.
 ---------------------------------------------------------------------------
 
 constant DBG_FONT_FILE : string  := "../font/Anikki-16x16-m2m.rom";
 constant DBG_DX        : natural := 8;
 constant DBG_DY        : natural := 8;
-constant DBG_DIGITS    : natural := 8;
+constant DBG_DIGITS    : natural := 6;
 
 signal dbg_h_cnt      : std_logic_vector(9 downto 0);
 signal dbg_v_cnt      : std_logic_vector(9 downto 0);
@@ -172,15 +179,17 @@ signal dbg_pixel_on   : std_logic;
 signal dbg_vs_prev      : std_logic := '0';
 signal dbg_vs_count     : natural range 0 to 63 := 0;
 
--- digits 0-5: cpu_addr, latched once per second (~50 vsync pulses),
--- same technique as M1016.
-signal dbg_addr_latched : std_logic_vector(23 downto 0) := (others => '0');
-
--- digits 6-7: last_cmd(1) & seen_flags(1, bit0=cmd8 bit1=cmd9 bit2=cmd6/7
--- bit3=other, all sticky since reset), latched at the same time.
-signal dbg_kbd_last_cmd    : std_logic_vector(3 downto 0);
-signal dbg_kbd_seen_flags  : std_logic_vector(3 downto 0);
-signal dbg_kbd_latched     : std_logic_vector(7 downto 0) := (others => '0');
+-- digits 0-1: last irq_pending value seen on a completed CPU read of
+-- zx8302's status/irq register (5 meaningful bits, shown as 2 hex digits),
+-- latched once per second alongside the counters below.
+-- digits 2-3: free-running count (8-bit) of reads where irq_pending was
+-- EXACTLY "01000" (bit3 only = clean "frame" pattern) since the last latch.
+-- digits 4-5: free-running count (8-bit) of reads where irq_pending was
+-- anything else (mixed/other pattern) since the last latch.
+signal dbg_irqp_last       : std_logic_vector(4 downto 0) := (others => '0');
+signal dbg_irqp_frame_cnt  : unsigned(7 downto 0) := (others => '0');
+signal dbg_irqp_other_cnt  : unsigned(7 downto 0) := (others => '0');
+signal dbg_irqp_latched    : std_logic_vector(23 downto 0) := (others => '0');
 
 ---------------------------------------------------------------------------
 -- QL4M65: ZX8302 (internal I/O) signals
@@ -538,18 +547,41 @@ begin
    dbg_x_in_char <= (to_integer(unsigned(dbg_h_cnt)) - DBG_DX) mod 16;
    dbg_y_in_char <= to_integer(unsigned(dbg_v_cnt)) - DBG_DY;
 
+   -- QL4M65 TEMPORARY DEBUG AID (M1027): continuously snoop the CPU's own
+   -- reads of zx8302's status/irq register ($18020/$18021, cpu_addr(5)='1'
+   -- and cpu_addr(1)='0' per zx8302_addr's own decode) - the exact same
+   -- register ss_int2's "move.w (a3),d7" reads in real Minerva. Gated on
+   -- cpu_dtack so each real completed bus cycle is counted exactly once.
+   -- Combined with the once-per-second vsync latch in a single process
+   -- (two separate processes both driving dbg_irqp_frame_cnt/other_cnt -
+   -- one incrementing, one resetting - is an illegal multiple-driver
+   -- conflict in VHDL).
    dbg_latch : process (clk_main_i)
    begin
       if rising_edge(clk_main_i) then
          if reset = '1' then
-            null;
+            dbg_irqp_last      <= (others => '0');
+            dbg_irqp_frame_cnt <= (others => '0');
+            dbg_irqp_other_cnt <= (others => '0');
          else
+            if zx8302_sel = '1' and zx8302_addr = "10" and cpu_rd = '1' and cpu_dtack = '1' then
+               dbg_irqp_last <= zx8302_dout(4 downto 0);
+               if zx8302_dout(4 downto 0) = "01000" then  -- bit3 only = clean "frame"
+                  dbg_irqp_frame_cnt <= dbg_irqp_frame_cnt + 1;
+               else
+                  dbg_irqp_other_cnt <= dbg_irqp_other_cnt + 1;
+               end if;
+            end if;
+
             dbg_vs_prev <= zx_vs;
             if dbg_vs_prev = '0' and zx_vs = '1' then  -- vsync rising edge
                if dbg_vs_count = 49 then
-                  dbg_vs_count     <= 0;
-                  dbg_addr_latched <= cpu_addr;
-                  dbg_kbd_latched  <= dbg_kbd_last_cmd & dbg_kbd_seen_flags;
+                  dbg_vs_count      <= 0;
+                  dbg_irqp_latched  <= "000" & dbg_irqp_last &
+                                        std_logic_vector(dbg_irqp_frame_cnt) &
+                                        std_logic_vector(dbg_irqp_other_cnt);
+                  dbg_irqp_frame_cnt <= (others => '0');
+                  dbg_irqp_other_cnt <= (others => '0');
                else
                   dbg_vs_count <= dbg_vs_count + 1;
                end if;
@@ -558,17 +590,15 @@ begin
       end if;
    end process dbg_latch;
 
-   -- digits 0-5: dbg_addr_latched (cpu_addr); digits 6-7: dbg_kbd_latched
-   -- (last CMD nibble, sticky seen-flags)
+   -- digits 0-1: last irq_pending value; digits 2-3: clean-frame count/sec;
+   -- digits 4-5: other-pattern count/sec
    with dbg_digit_idx select dbg_nibble <=
-      dbg_addr_latched(23 downto 20) when 0,
-      dbg_addr_latched(19 downto 16) when 1,
-      dbg_addr_latched(15 downto 12) when 2,
-      dbg_addr_latched(11 downto  8) when 3,
-      dbg_addr_latched( 7 downto  4) when 4,
-      dbg_addr_latched( 3 downto  0) when 5,
-      dbg_kbd_latched(7 downto 4)    when 6,
-      dbg_kbd_latched(3 downto 0)    when others;
+      dbg_irqp_latched(23 downto 20) when 0,
+      dbg_irqp_latched(19 downto 16) when 1,
+      dbg_irqp_latched(15 downto 12) when 2,
+      dbg_irqp_latched(11 downto  8) when 3,
+      dbg_irqp_latched( 7 downto  4) when 4,
+      dbg_irqp_latched( 3 downto  0) when others;
 
    dbg_ascii <= x"3" & dbg_nibble when unsigned(dbg_nibble) <= 9 else
                 std_logic_vector(resize(unsigned(dbg_nibble), 8) - 10 + 65); -- 'A'..'F'
@@ -697,10 +727,13 @@ begin
          audio_o         => ipc_audio,
          ipl_o           => ipc_ipl,
 
-         -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019/M1026, see signal declarations above)
-         dbg_last_cmd_o    => dbg_kbd_last_cmd,
-         dbg_seen_flags_o  => dbg_kbd_seen_flags,
-         dbg_matrix_seen_o => open  -- M1020/M1021 already answered this - not shown anymore
+         -- QL4M65 (M1027): the keyboard-command debug digits (M1018-M1026)
+         -- already answered what they set out to - not shown anymore, but
+         -- keyboard.vhd's debug ports are left in place in case they're
+         -- useful again later.
+         dbg_last_cmd_o    => open,
+         dbg_seen_flags_o  => open,
+         dbg_matrix_seen_o => open
       ); -- i_keyboard
 
 end architecture synthesis;
