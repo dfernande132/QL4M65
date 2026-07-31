@@ -141,21 +141,24 @@ signal zx_vblank    : std_logic;
 signal ce_pix       : std_logic;
 
 ---------------------------------------------------------------------------
--- QL4M65 TEMPORARY DEBUG AID (M1016): minimal on-screen hex readout of
--- cpu_addr only (no bus-cycle-rate/seconds/PC-verify counters this time -
--- those already answered their questions and were removed in M1015). Goal
--- this time: see whether the CPU is stuck in a narrow, repeating loop
--- (polling something) right after the Minerva/mge splash logo, or still
--- wandering broadly like the M1007/M1008 "blank ROM" symptom. Remove this
--- whole block (signals, i_dbg_font instance, the h_cnt_o/v_cnt_o ports on
--- zx8301, the video_red/green/blue_o override) once diagnosed - see
--- doc/m2m/exceptions.md.
+-- QL4M65 TEMPORARY DEBUG AID (M1018): the M1016 cpu_addr readout (10
+-- digits total with M1018's keyboard digits added) pushed timing into a
+-- genuine hold violation (WHS=-0.114ns on the M1018 build) - not just a
+-- shrinking margin like previous iterations. cpu_addr already answered its
+-- question (M1017 fixed the real stall; Minerva reaches the F1/F2 screen
+-- now), so it's dropped here to claw back margin. Down to 4 digits: what
+-- keyboard.vhd is actually seeing on the comdata/comctrl link - is Minerva
+-- sending recognisable IPC commands at all (8="read keyboard", 9="keyrow"),
+-- and how many since reset? Remove this whole block (signals, i_dbg_font
+-- instance, the h_cnt_o/v_cnt_o ports on zx8301, the
+-- video_red/green/blue_o override) once the keyboard issue is diagnosed -
+-- see doc/m2m/exceptions.md.
 ---------------------------------------------------------------------------
 
 constant DBG_FONT_FILE : string  := "../font/Anikki-16x16-m2m.rom";
 constant DBG_DX        : natural := 8;
 constant DBG_DY        : natural := 8;
-constant DBG_DIGITS    : natural := 6;
+constant DBG_DIGITS    : natural := 4;
 
 signal dbg_h_cnt      : std_logic_vector(9 downto 0);
 signal dbg_v_cnt      : std_logic_vector(9 downto 0);
@@ -169,12 +172,15 @@ signal dbg_font_addr  : std_logic_vector(11 downto 0);
 signal dbg_font_data  : std_logic_vector(15 downto 0);
 signal dbg_pixel_on   : std_logic;
 
--- Latch cpu_addr once per second (~50 vsync pulses) instead of showing it
--- live - live cpu_addr changes far too fast to read (confirmed on M1007
--- hardware).
-signal dbg_addr_latched : std_logic_vector(23 downto 0) := (others => '0');
 signal dbg_vs_prev      : std_logic := '0';
 signal dbg_vs_count     : natural range 0 to 63 := 0;
+
+-- digits 0-3: last_cmd(1) & last_rowsel(1) & cmd_count(2), latched once
+-- per second (~50 vsync pulses).
+signal dbg_kbd_last_cmd    : std_logic_vector(3 downto 0);
+signal dbg_kbd_last_rowsel : std_logic_vector(3 downto 0);
+signal dbg_kbd_cmd_count   : std_logic_vector(7 downto 0);
+signal dbg_kbd_latched     : std_logic_vector(15 downto 0) := (others => '0');
 
 ---------------------------------------------------------------------------
 -- QL4M65: ZX8302 (internal I/O) signals
@@ -520,7 +526,8 @@ begin
       ); -- i_zx8301
 
    ---------------------------------------------------------------------------
-   -- QL4M65 TEMPORARY DEBUG AID (M1016): on-screen hex readout of cpu_addr
+   -- QL4M65 TEMPORARY DEBUG AID (M1018): on-screen hex readout of the
+   -- keyboard IPC command info (see signal declarations above)
    ---------------------------------------------------------------------------
 
    dbg_active    <= '1' when unsigned(dbg_v_cnt) >= DBG_DY and unsigned(dbg_v_cnt) < DBG_DY + 16 and
@@ -541,7 +548,7 @@ begin
             if dbg_vs_prev = '0' and zx_vs = '1' then  -- vsync rising edge
                if dbg_vs_count = 49 then
                   dbg_vs_count     <= 0;
-                  dbg_addr_latched <= cpu_addr;
+                  dbg_kbd_latched  <= dbg_kbd_last_cmd & dbg_kbd_last_rowsel & dbg_kbd_cmd_count;
                else
                   dbg_vs_count <= dbg_vs_count + 1;
                end if;
@@ -550,13 +557,13 @@ begin
       end if;
    end process dbg_latch;
 
+   -- digits 0-3: dbg_kbd_latched (last CMD nibble, last ROWSEL nibble,
+   -- 2-digit CMD count since reset)
    with dbg_digit_idx select dbg_nibble <=
-      dbg_addr_latched(23 downto 20) when 0,
-      dbg_addr_latched(19 downto 16) when 1,
-      dbg_addr_latched(15 downto 12) when 2,
-      dbg_addr_latched(11 downto  8) when 3,
-      dbg_addr_latched( 7 downto  4) when 4,
-      dbg_addr_latched( 3 downto  0) when others;
+      dbg_kbd_latched(15 downto 12)  when 0,
+      dbg_kbd_latched(11 downto  8)  when 1,
+      dbg_kbd_latched( 7 downto  4)  when 2,
+      dbg_kbd_latched( 3 downto  0)  when others;
 
    dbg_ascii <= x"3" & dbg_nibble when unsigned(dbg_nibble) <= 9 else
                 std_logic_vector(resize(unsigned(dbg_nibble), 8) - 10 + 65); -- 'A'..'F'
@@ -678,7 +685,12 @@ begin
          comdata_i       => ipc_comdata_zx2kb,
          comdata_o       => ipc_comdata_kb2zx,
          audio_o         => ipc_audio,
-         ipl_o           => ipc_ipl
+         ipl_o           => ipc_ipl,
+
+         -- QL4M65 TEMPORARY DEBUG AID (M1018, see signal declarations above)
+         dbg_last_cmd_o    => dbg_kbd_last_cmd,
+         dbg_last_rowsel_o => dbg_kbd_last_rowsel,
+         dbg_cmd_count_o   => dbg_kbd_cmd_count
       ); -- i_keyboard
 
 end architecture synthesis;

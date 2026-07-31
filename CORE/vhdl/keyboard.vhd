@@ -106,7 +106,15 @@ entity keyboard is
       comdata_i        : in  std_logic;                    -- the ZX8302's own raw outgoing bit (rtl/zx8302.v's ipc_comdata_in)
       comdata_o        : out std_logic;                    -- '1' = released, '0' = driven low
       audio_o          : out std_logic;                    -- IPC-generated audio: not implemented, unused in milestone 1
-      ipl_o            : out std_logic_vector(1 downto 0)  -- IPC interrupt-priority lines: not implemented, tied to "no IRQ"
+      ipl_o            : out std_logic_vector(1 downto 0); -- IPC interrupt-priority lines: not implemented, tied to "no IRQ"
+
+      -- QL4M65 TEMPORARY DEBUG AID (M1018): expose what's actually coming
+      -- through the comdata/comctrl link, to check whether Minerva is
+      -- really talking to us at all and with which command (see main.vhd
+      -- for how these get displayed; doc/m2m/exceptions.md for the revert).
+      dbg_last_cmd_o     : out std_logic_vector(3 downto 0); -- last CMD nibble seen (CMD state)
+      dbg_last_rowsel_o  : out std_logic_vector(3 downto 0); -- last ROWSEL nibble seen (ROWSEL state)
+      dbg_cmd_count_o    : out std_logic_vector(7 downto 0)  -- free-running count of CMD nibbles received
    );
 end entity keyboard;
 
@@ -234,6 +242,11 @@ architecture beh of keyboard is
    signal shift_in   : std_logic_vector(7 downto 0) := (others => '0');
    signal resp_byte  : std_logic_vector(7 downto 0) := (others => '1');
    signal cmd_state  : t_cmd_state := CMD;
+
+   -- QL4M65 TEMPORARY DEBUG AID (M1018)
+   signal dbg_last_cmd    : std_logic_vector(3 downto 0) := (others => '0');
+   signal dbg_last_rowsel : std_logic_vector(3 downto 0) := (others => '0');
+   signal dbg_cmd_count   : unsigned(7 downto 0) := (others => '0');
 
 begin
 
@@ -440,6 +453,9 @@ begin
             shift_in   <= (others => '0');
             resp_byte  <= (others => '1');
             cmd_state  <= CMD;
+            dbg_last_cmd    <= (others => '0');
+            dbg_last_rowsel <= (others => '0');
+            dbg_cmd_count   <= (others => '0');
          elsif edge_pulse = '1' then
             edge_phase <= not edge_phase;
 
@@ -462,6 +478,8 @@ begin
                   case cmd_state is
                      -- command nibble ends up in shift_in(3 downto 0)
                      when CMD =>
+                        dbg_last_cmd  <= v_shift(3 downto 0);
+                        dbg_cmd_count <= dbg_cmd_count + 1;
                         if v_shift(3 downto 0) = x"9" then       -- "keyrow"
                            cmd_state <= ROWSEL;
                         elsif v_shift(3 downto 0) = x"8" then     -- "read keyboard"
@@ -474,6 +492,7 @@ begin
                      -- row-select nibble: its low 3 bits choose which of
                      -- the 8 ql_matrix bytes to answer with next
                      when ROWSEL =>
+                        dbg_last_rowsel <= '0' & v_shift(2 downto 0);
                         case to_integer(unsigned(v_shift(2 downto 0))) is
                            when 0 => resp_byte <= ql_matrix( 7 downto  0);
                            when 1 => resp_byte <= ql_matrix(15 downto  8);
@@ -506,5 +525,10 @@ begin
    -- interrupt-priority lines in milestone 1.
    audio_o <= '0';
    ipl_o   <= "00";
+
+   -- QL4M65 TEMPORARY DEBUG AID (M1018)
+   dbg_last_cmd_o    <= dbg_last_cmd;
+   dbg_last_rowsel_o <= dbg_last_rowsel;
+   dbg_cmd_count_o   <= std_logic_vector(dbg_cmd_count);
 
 end architecture beh;

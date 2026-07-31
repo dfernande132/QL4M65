@@ -34,6 +34,23 @@ where.
 `video_red_o`/`green_o`/`blue_o` overlay logic, and the `h_cnt_o`/`v_cnt_o`
 port map entries on `i_zx8301`).
 
+### TEMPORARY (M1018): `keyboard.vhd` exposes `dbg_last_cmd_o`/`dbg_last_rowsel_o`/`dbg_cmd_count_o`
+
+M1017 fixed the IPL polarity bug (see `DECISIONES.md`) - Minerva now boots
+properly and reaches the F1/F2/F3/F4 info screen, but the keyboard still
+doesn't respond to any key. Added three debug-only output ports to
+`keyboard.vhd`: the last CMD nibble it received on the comdata/comctrl
+link, the last ROWSEL nibble (if any), and a free-running count of CMD
+nibbles received since reset - wired into the same M1016 on-screen overlay
+in `main.vhd` (digits 6-9) to see empirically whether Minerva is sending
+recognisable IPC commands at all, and which ones, instead of guessing at
+the comdata/comctrl protocol's timing.
+
+**Revert once diagnosed**: remove `dbg_last_cmd_o`/`dbg_last_rowsel_o`/
+`dbg_cmd_count_o` from `keyboard.vhd` (entity ports, the `dbg_*` signals,
+the assignments in `ipc_fsm` and at the bottom of the architecture), and
+the corresponding `dbg_kbd_*` signals/wiring/digits in `main.vhd`.
+
 ### Removed the embedded "ipc" instance from `rtl/zx8302.v`
 
 The original `zx8302.v` instantiates `ipc` (an emulation of the QL's real
