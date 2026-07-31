@@ -376,9 +376,28 @@ begin
          BERRn      => '1',
          BRn        => '1',
          BGACKn     => '1',
-         IPL0n      => cpu_ipl(0),
-         IPL1n      => cpu_ipl(1),
-         IPL2n      => cpu_ipl(0),  -- IPL0/IPL2 are tied together on the 68008, matches QL.sv
+         -- QL4M65 (M1017): fx68k.sv:212 computes its internal priority
+         -- register as `rIpl <= ~{IPL2n,IPL1n,IPL0n}` - these pins are
+         -- genuinely active-low, matching real 68000 hardware. zx8302's
+         -- "ipl" output is a plain (non-inverted) priority number (0/2 in
+         -- our case, per its own "raises ipl to 2" comment), so it must be
+         -- inverted here before reaching fx68k. Previously wired without
+         -- inversion (matching QL.sv's own literal wiring pattern) - that
+         -- verification only checked the STRUCTURE (IPL0n/IPL2n tied
+         -- together) was faithful, not that the resulting priority LEVEL
+         -- was correct. Confirmed as a real bug via M1016 hardware data:
+         -- cpu_ipl="10" (intended level 2) without inversion computes
+         -- rIpl=5 in fx68k, and Minerva197_rom's own vector table sends
+         -- level 5 to a shared do-nothing RTE stub at $00005E - exactly
+         -- where the CPU was found stuck (M1016), instead of the real
+         -- level-2 handler at $0006BC. AExp's equivalent wiring also has no
+         -- explicit inversion, but its own chip_ipl source is already
+         -- generated in active-low form upstream (real Amiga chipset
+         -- convention) - zx8302's plain-number "ipl" is not, so it needs
+         -- the "not" here that AExp's own source doesn't need.
+         IPL0n      => not cpu_ipl(0),
+         IPL1n      => not cpu_ipl(1),
+         IPL2n      => not cpu_ipl(0),  -- IPL0/IPL2 are tied together on the 68008, matches QL.sv
          iEdb       => cpu_din,
          oEdb       => cpu_dout,
          eab        => cpu_addr16

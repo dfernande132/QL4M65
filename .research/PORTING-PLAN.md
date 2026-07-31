@@ -55,6 +55,14 @@ razonamiento y verificación byte a byte contra el fichero real en
   (`C_CRTROMTYPE_MANDATORY` + `C_CRTROMS_AUTO` en `globals.vhd`, fichero de
   nombre fijo tipo `/ql4m65/minerva.rom`, core en reset hasta que termina la
   carga).
+- El recorte residual de ~1 carácter en el menú OSD: confirmado en otro
+  monitor HDMI que se ve perfecto - es overscan del monitor de pruebas
+  original, no un bug del core. Aparcado definitivamente, no se toca.
+- `M1016`/`M1017`: encontrada y corregida (pendiente de confirmar en
+  hardware) la causa de que Minerva/ROMs originales se queden colgadas tras
+  el logo - faltaba invertir `cpu_ipl` antes de `IPL0n`/`IPL1n`/`IPL2n` en
+  `main.vhd` (`fx68k` trata esos pines como activos a nivel bajo de
+  verdad). Ver `DECISIONES.md` para el diagnóstico completo.
 - Validar el protocolo IPC del teclado (`keyboard.vhd`) contra
   hardware/simulación real — sigue basado en un desensamblado propio no
   contrastado externamente (Anexo B de `DECISIONES.md`).
