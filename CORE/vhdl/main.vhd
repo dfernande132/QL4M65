@@ -179,6 +179,17 @@ signal dbg_pixel_on   : std_logic;
 signal dbg_vs_prev      : std_logic := '0';
 signal dbg_vs_count     : natural range 0 to 63 := 0;
 
+-- QL4M65 (M1028): the snoop condition below (zx8302_sel/addr match, cpu_rd,
+-- cpu_dtack) very likely stays true for several clk_main_i cycles per real
+-- completed CPU bus transaction (cpu_dtack doesn't pulse for just one
+-- cycle) - counting on the LEVEL rather than the RISING EDGE would count
+-- every real access several times over, inflating and randomising the
+-- rate depending on exactly how many cycles dtack happens to stay up each
+-- time. Same class of bug M1014 already fixed once for a different
+-- counter - fixed here the same way, with a "seen" edge-detect register.
+signal dbg_irqp_seen       : std_logic;
+signal dbg_irqp_seen_prev  : std_logic := '0';
+
 -- digits 0-1: last irq_pending value seen on a completed CPU read of
 -- zx8302's status/irq register (5 meaningful bits, shown as 2 hex digits),
 -- latched once per second alongside the counters below.
@@ -547,6 +558,9 @@ begin
    dbg_x_in_char <= (to_integer(unsigned(dbg_h_cnt)) - DBG_DX) mod 16;
    dbg_y_in_char <= to_integer(unsigned(dbg_v_cnt)) - DBG_DY;
 
+   dbg_irqp_seen <= '1' when (zx8302_sel = '1' and zx8302_addr = "10" and
+                              cpu_rd = '1' and cpu_dtack = '1') else '0';
+
    -- QL4M65 TEMPORARY DEBUG AID (M1027): continuously snoop the CPU's own
    -- reads of zx8302's status/irq register ($18020/$18021, cpu_addr(5)='1'
    -- and cpu_addr(1)='0' per zx8302_addr's own decode) - the exact same
@@ -563,8 +577,12 @@ begin
             dbg_irqp_last      <= (others => '0');
             dbg_irqp_frame_cnt <= (others => '0');
             dbg_irqp_other_cnt <= (others => '0');
+            dbg_irqp_seen_prev <= '0';
          else
-            if zx8302_sel = '1' and zx8302_addr = "10" and cpu_rd = '1' and cpu_dtack = '1' then
+            -- QL4M65 (M1028): edge-detect - only count the RISING edge of
+            -- the snoop condition, not every cycle it happens to stay true.
+            dbg_irqp_seen_prev <= dbg_irqp_seen;
+            if dbg_irqp_seen = '1' and dbg_irqp_seen_prev = '0' then
                dbg_irqp_last <= zx8302_dout(4 downto 0);
                if zx8302_dout(4 downto 0) = "01000" then  -- bit3 only = clean "frame"
                   dbg_irqp_frame_cnt <= dbg_irqp_frame_cnt + 1;
