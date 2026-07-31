@@ -242,7 +242,19 @@ architecture beh of keyboard is
 
    -- the QL's 8x8 keyboard matrix: bit(8*byte + pos), same addressing as
    -- rtl/ipc.v's one-hot P1 byte-select into this 64-bit value
-   signal ql_matrix : std_logic_vector(63 downto 0);
+   signal ql_matrix_real : std_logic_vector(63 downto 0);
+   signal ql_matrix      : std_logic_vector(63 downto 0);
+
+   -- QL4M65 TEMPORARY TEST (M1021): force the matrix zx8302/Minerva actually
+   -- sees to permanently idle (nothing ever pressed), regardless of the
+   -- real MEGA65 keyboard state (still computed into ql_matrix_real above,
+   -- just not used while this is true). Isolates whether Minerva's own
+   -- 8-10s no-input auto-timeout (confirmed on real QL hardware, never
+   -- observed on ours) is blocked by something in our keyboard-state
+   -- generation specifically, or by something else entirely (e.g. the
+   -- interrupt/scheduler chain) - see DECISIONES.md. Set back to false once
+   -- diagnosed.
+   constant DBG_FORCE_IDLE_MATRIX : boolean := true;
 
    -- IPC comdata/comctrl link (see architecture-level comment above)
    type t_cmd_state is (CMD, ROWSEL, RESPOND);
@@ -334,84 +346,87 @@ begin
    ---------------------------------------------------------------------------
 
    -- byte 0: F4 F1 "5" F2 F3 F5 "4" "7"
-   ql_matrix(8*0+0) <= ql_f4;
-   ql_matrix(8*0+1) <= ql_f1;
-   ql_matrix(8*0+2) <= not key_pressed_n(m65_5);
-   ql_matrix(8*0+3) <= ql_f2;
-   ql_matrix(8*0+4) <= ql_f3;
-   ql_matrix(8*0+5) <= ql_f5;
-   ql_matrix(8*0+6) <= not key_pressed_n(m65_4);
-   ql_matrix(8*0+7) <= not key_pressed_n(m65_7);
+   ql_matrix_real(8*0+0) <= ql_f4;
+   ql_matrix_real(8*0+1) <= ql_f1;
+   ql_matrix_real(8*0+2) <= not key_pressed_n(m65_5);
+   ql_matrix_real(8*0+3) <= ql_f2;
+   ql_matrix_real(8*0+4) <= ql_f3;
+   ql_matrix_real(8*0+5) <= ql_f5;
+   ql_matrix_real(8*0+6) <= not key_pressed_n(m65_4);
+   ql_matrix_real(8*0+7) <= not key_pressed_n(m65_7);
 
    -- byte 1: Ret Left Up Esc Right "\" Space Down
-   ql_matrix(8*1+0) <= not key_pressed_n(m65_return);
-   ql_matrix(8*1+1) <= (not key_pressed_n(m65_left_crsr)) or ins_del_left;
-   ql_matrix(8*1+2) <= not key_pressed_n(m65_up_crsr);
-   ql_matrix(8*1+3) <= not key_pressed_n(m65_esc);
-   ql_matrix(8*1+4) <= not key_pressed_n(m65_horz_crsr);   -- QL Right
-   ql_matrix(8*1+5) <= not key_pressed_n(m65_no_scrl);     -- QL "\"
-   ql_matrix(8*1+6) <= not key_pressed_n(m65_space);
-   ql_matrix(8*1+7) <= not key_pressed_n(m65_vert_crsr);   -- QL Down
+   ql_matrix_real(8*1+0) <= not key_pressed_n(m65_return);
+   ql_matrix_real(8*1+1) <= (not key_pressed_n(m65_left_crsr)) or ins_del_left;
+   ql_matrix_real(8*1+2) <= not key_pressed_n(m65_up_crsr);
+   ql_matrix_real(8*1+3) <= not key_pressed_n(m65_esc);
+   ql_matrix_real(8*1+4) <= not key_pressed_n(m65_horz_crsr);   -- QL Right
+   ql_matrix_real(8*1+5) <= not key_pressed_n(m65_no_scrl);     -- QL "\"
+   ql_matrix_real(8*1+6) <= not key_pressed_n(m65_space);
+   ql_matrix_real(8*1+7) <= not key_pressed_n(m65_vert_crsr);   -- QL Down
 
    -- byte 2: "]" z . c b "GBP" m '
-   ql_matrix(8*2+0) <= not key_pressed_n(m65_arrow_up);    -- QL "]"
-   ql_matrix(8*2+1) <= not key_pressed_n(m65_z);
-   ql_matrix(8*2+2) <= not key_pressed_n(m65_dot);
-   ql_matrix(8*2+3) <= not key_pressed_n(m65_c);
-   ql_matrix(8*2+4) <= not key_pressed_n(m65_b);
-   ql_matrix(8*2+5) <= not key_pressed_n(m65_gbp);
-   ql_matrix(8*2+6) <= not key_pressed_n(m65_m);
-   ql_matrix(8*2+7) <= not key_pressed_n(m65_colon);       -- QL "'"
+   ql_matrix_real(8*2+0) <= not key_pressed_n(m65_arrow_up);    -- QL "]"
+   ql_matrix_real(8*2+1) <= not key_pressed_n(m65_z);
+   ql_matrix_real(8*2+2) <= not key_pressed_n(m65_dot);
+   ql_matrix_real(8*2+3) <= not key_pressed_n(m65_c);
+   ql_matrix_real(8*2+4) <= not key_pressed_n(m65_b);
+   ql_matrix_real(8*2+5) <= not key_pressed_n(m65_gbp);
+   ql_matrix_real(8*2+6) <= not key_pressed_n(m65_m);
+   ql_matrix_real(8*2+7) <= not key_pressed_n(m65_colon);       -- QL "'"
 
    -- byte 3: "[" Caps k s f "=" g ;
-   ql_matrix(8*3+0) <= not key_pressed_n(m65_arrow_left);  -- QL "["
-   ql_matrix(8*3+1) <= not key_pressed_n(m65_capslock);
-   ql_matrix(8*3+2) <= not key_pressed_n(m65_k);
-   ql_matrix(8*3+3) <= not key_pressed_n(m65_s);
-   ql_matrix(8*3+4) <= not key_pressed_n(m65_f);
-   ql_matrix(8*3+5) <= not key_pressed_n(m65_equal);
-   ql_matrix(8*3+6) <= not key_pressed_n(m65_g);
-   ql_matrix(8*3+7) <= not key_pressed_n(m65_semicolon);
+   ql_matrix_real(8*3+0) <= not key_pressed_n(m65_arrow_left);  -- QL "["
+   ql_matrix_real(8*3+1) <= not key_pressed_n(m65_capslock);
+   ql_matrix_real(8*3+2) <= not key_pressed_n(m65_k);
+   ql_matrix_real(8*3+3) <= not key_pressed_n(m65_s);
+   ql_matrix_real(8*3+4) <= not key_pressed_n(m65_f);
+   ql_matrix_real(8*3+5) <= not key_pressed_n(m65_equal);
+   ql_matrix_real(8*3+6) <= not key_pressed_n(m65_g);
+   ql_matrix_real(8*3+7) <= not key_pressed_n(m65_semicolon);
 
    -- byte 4: l 3 h 1 a p d j
-   ql_matrix(8*4+0) <= not key_pressed_n(m65_l);
-   ql_matrix(8*4+1) <= not key_pressed_n(m65_3);
-   ql_matrix(8*4+2) <= not key_pressed_n(m65_h);
-   ql_matrix(8*4+3) <= not key_pressed_n(m65_1);
-   ql_matrix(8*4+4) <= not key_pressed_n(m65_a);
-   ql_matrix(8*4+5) <= not key_pressed_n(m65_p);
-   ql_matrix(8*4+6) <= not key_pressed_n(m65_d);
-   ql_matrix(8*4+7) <= not key_pressed_n(m65_j);
+   ql_matrix_real(8*4+0) <= not key_pressed_n(m65_l);
+   ql_matrix_real(8*4+1) <= not key_pressed_n(m65_3);
+   ql_matrix_real(8*4+2) <= not key_pressed_n(m65_h);
+   ql_matrix_real(8*4+3) <= not key_pressed_n(m65_1);
+   ql_matrix_real(8*4+4) <= not key_pressed_n(m65_a);
+   ql_matrix_real(8*4+5) <= not key_pressed_n(m65_p);
+   ql_matrix_real(8*4+6) <= not key_pressed_n(m65_d);
+   ql_matrix_real(8*4+7) <= not key_pressed_n(m65_j);
 
    -- byte 5: 9 w i Tab r "-" y o
-   ql_matrix(8*5+0) <= not key_pressed_n(m65_9);
-   ql_matrix(8*5+1) <= not key_pressed_n(m65_w);
-   ql_matrix(8*5+2) <= not key_pressed_n(m65_i);
-   ql_matrix(8*5+3) <= not key_pressed_n(m65_tab);
-   ql_matrix(8*5+4) <= not key_pressed_n(m65_r);
-   ql_matrix(8*5+5) <= not key_pressed_n(m65_minus);
-   ql_matrix(8*5+6) <= not key_pressed_n(m65_y);
-   ql_matrix(8*5+7) <= not key_pressed_n(m65_o);
+   ql_matrix_real(8*5+0) <= not key_pressed_n(m65_9);
+   ql_matrix_real(8*5+1) <= not key_pressed_n(m65_w);
+   ql_matrix_real(8*5+2) <= not key_pressed_n(m65_i);
+   ql_matrix_real(8*5+3) <= not key_pressed_n(m65_tab);
+   ql_matrix_real(8*5+4) <= not key_pressed_n(m65_r);
+   ql_matrix_real(8*5+5) <= not key_pressed_n(m65_minus);
+   ql_matrix_real(8*5+6) <= not key_pressed_n(m65_y);
+   ql_matrix_real(8*5+7) <= not key_pressed_n(m65_o);
 
    -- byte 6: 8 2 6 q e 0 t u
-   ql_matrix(8*6+0) <= not key_pressed_n(m65_8);
-   ql_matrix(8*6+1) <= not key_pressed_n(m65_2);
-   ql_matrix(8*6+2) <= not key_pressed_n(m65_6);
-   ql_matrix(8*6+3) <= not key_pressed_n(m65_q);
-   ql_matrix(8*6+4) <= not key_pressed_n(m65_e);
-   ql_matrix(8*6+5) <= not key_pressed_n(m65_0);
-   ql_matrix(8*6+6) <= not key_pressed_n(m65_t);
-   ql_matrix(8*6+7) <= not key_pressed_n(m65_u);
+   ql_matrix_real(8*6+0) <= not key_pressed_n(m65_8);
+   ql_matrix_real(8*6+1) <= not key_pressed_n(m65_2);
+   ql_matrix_real(8*6+2) <= not key_pressed_n(m65_6);
+   ql_matrix_real(8*6+3) <= not key_pressed_n(m65_q);
+   ql_matrix_real(8*6+4) <= not key_pressed_n(m65_e);
+   ql_matrix_real(8*6+5) <= not key_pressed_n(m65_0);
+   ql_matrix_real(8*6+6) <= not key_pressed_n(m65_t);
+   ql_matrix_real(8*6+7) <= not key_pressed_n(m65_u);
 
    -- byte 7: Shift Ctrl Alt x v / n ,
-   ql_matrix(8*7+0) <= ql_shift;
-   ql_matrix(8*7+1) <= ql_ctrl;
-   ql_matrix(8*7+2) <= ql_alt;
-   ql_matrix(8*7+3) <= not key_pressed_n(m65_x);
-   ql_matrix(8*7+4) <= not key_pressed_n(m65_v);
-   ql_matrix(8*7+5) <= not key_pressed_n(m65_slash);
-   ql_matrix(8*7+6) <= not key_pressed_n(m65_n);
-   ql_matrix(8*7+7) <= not key_pressed_n(m65_comma);
+   ql_matrix_real(8*7+0) <= ql_shift;
+   ql_matrix_real(8*7+1) <= ql_ctrl;
+   ql_matrix_real(8*7+2) <= ql_alt;
+   ql_matrix_real(8*7+3) <= not key_pressed_n(m65_x);
+   ql_matrix_real(8*7+4) <= not key_pressed_n(m65_v);
+   ql_matrix_real(8*7+5) <= not key_pressed_n(m65_slash);
+   ql_matrix_real(8*7+6) <= not key_pressed_n(m65_n);
+   ql_matrix_real(8*7+7) <= not key_pressed_n(m65_comma);
+
+   -- QL4M65 TEMPORARY TEST (M1021, see DBG_FORCE_IDLE_MATRIX declaration above)
+   ql_matrix <= (others => '0') when DBG_FORCE_IDLE_MATRIX else ql_matrix_real;
 
    ---------------------------------------------------------------------------
    -- QL4M65 TEMPORARY DEBUG AID (M1020): sticky "this matrix byte (row) has
