@@ -245,16 +245,12 @@ architecture beh of keyboard is
    signal ql_matrix_real : std_logic_vector(63 downto 0);
    signal ql_matrix      : std_logic_vector(63 downto 0);
 
-   -- QL4M65 TEMPORARY TEST (M1021): force the matrix zx8302/Minerva actually
-   -- sees to permanently idle (nothing ever pressed), regardless of the
-   -- real MEGA65 keyboard state (still computed into ql_matrix_real above,
-   -- just not used while this is true). Isolates whether Minerva's own
-   -- 8-10s no-input auto-timeout (confirmed on real QL hardware, never
-   -- observed on ours) is blocked by something in our keyboard-state
-   -- generation specifically, or by something else entirely (e.g. the
-   -- interrupt/scheduler chain) - see DECISIONES.md. Set back to false once
-   -- diagnosed.
-   constant DBG_FORCE_IDLE_MATRIX : boolean := true;
+   -- QL4M65 TEMPORARY TEST (M1021, concluded): forcing the matrix to
+   -- permanently idle did NOT make Minerva's 8-10s no-input auto-timeout
+   -- fire either - rules out our keyboard-state generation (real MEGA65 key
+   -- scan/mapping) as the blocker. See DECISIONES.md for the follow-up
+   -- investigation. Reverted to real keyboard behaviour.
+   constant DBG_FORCE_IDLE_MATRIX : boolean := false;
 
    -- IPC comdata/comctrl link (see architecture-level comment above)
    type t_cmd_state is (CMD, ROWSEL, RESPOND);
@@ -533,7 +529,18 @@ begin
                            cmd_state <= ROWSEL;
                         elsif v_shift(3 downto 0) = x"8" then     -- "read keyboard"
                            dbg_seen_flags(0) <= '1';
-                           resp_byte <= x"00";                    -- real encoding not reverse-engineered, safe stub
+                           -- QL4M65 TEMPORARY TEST (M1022): was x"00" ("safe
+                           -- stub", real encoding never reverse-engineered).
+                           -- Minerva never times out to TV mode after 8-10s
+                           -- even with the cmd-9 matrix forced fully idle
+                           -- (M1021) - testing whether x"00" is actually
+                           -- being misread as "a real queued key event"
+                           -- (e.g. scancode 0) rather than "queue empty",
+                           -- which would explain a permanently-reset
+                           -- countdown independent of real key state. Revert
+                           -- to x"00" once this experiment concludes either
+                           -- way - see DECISIONES.md.
+                           resp_byte <= x"FF";
                            cmd_state <= RESPOND;
                         elsif v_shift(3 downto 0) = x"6" or v_shift(3 downto 0) = x"7" then
                            dbg_seen_flags(2) <= '1';
