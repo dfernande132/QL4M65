@@ -680,6 +680,11 @@ begin
          clk_main_i      => clk_main_i,
          reset_i         => reset,
 
+         -- QL4M65 (M1025): the real 11MHz IPC clock-enable, already
+         -- generated above (FRACT_11M) but previously only fed to zx8302,
+         -- which never actually uses its own ce_11m input.
+         ce_11m_i        => ce_11m,
+
          key_num_i       => kb_key_num_i,
          key_pressed_n_i => kb_key_pressed_n_i,
 

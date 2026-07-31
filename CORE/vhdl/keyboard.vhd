@@ -94,6 +94,15 @@ entity keyboard is
       clk_main_i       : in  std_logic;   -- QL core clock (84 MHz, main_clk)
       reset_i          : in  std_logic;
 
+      -- QL4M65 (M1025): the real 11MHz IPC crystal's clock-enable, already
+      -- generated in main.vhd (FRACT_11M) and fed to zx8302 - but zx8302.v
+      -- itself never uses its own ce_11m input (dangling since the embedded
+      -- "ipc" instance that used to consume it was removed - see
+      -- doc/m2m/exceptions.md). Used here instead to pace comctrl at a
+      -- speed derived from the real crystal, replacing the arbitrary
+      -- ~656kHz clk_main_i/128 divider from M1001-M1024.
+      ce_11m_i         : in  std_logic;
+
       -- M2M's MEGA65 keyboard interface (same convention as C64MEGA65/AExp
       -- keyboard.vhd): key_num_i cycles 0..79 at 1kHz, key_pressed_n_i is the
       -- debounced, low-active "is this key pressed now" answer.
@@ -251,6 +260,19 @@ architecture beh of keyboard is
    -- scan/mapping) as the blocker. See DECISIONES.md for the follow-up
    -- investigation. Reverted to real keyboard behaviour.
    constant DBG_FORCE_IDLE_MATRIX : boolean := false;
+
+   -- QL4M65 (M1025): comctrl now paced from the real 11MHz IPC clock-enable
+   -- (ce_11m_i) instead of an arbitrary clk_main_i/128 divider (~656kHz,
+   -- M1001-M1024). The real 8049 strobes comctrl (its WR_n pin) via MOVX
+   -- instructions inside the bit receive/transmit routines (Anexo B.5) -
+   -- MOVX takes 2 machine cycles, and one 8049 machine cycle is 15 crystal
+   -- periods, so one strobe edge corresponds to roughly 2*15=30 crystal
+   -- periods. Toggle comctrl every 30 ce_11m_i pulses (~183kHz full pulse
+   -- rate) as a faithful approximation, instead of a from-scratch guess -
+   -- see DECISIONES.md for the full reasoning and what's still an
+   -- approximation (the real routine also has a variable-length "wait for
+   -- line idle" polling loop before each strobe, not modelled here).
+   constant CE11M_PER_EDGE : natural := 30;
 
    -- IPC comdata/comctrl link (see architecture-level comment above)
    -- SETIPL added (M1023): command C ("set P2.3") receives one more nibble
@@ -461,10 +483,6 @@ begin
    -- the confidence level of each part of this)
    ---------------------------------------------------------------------------
 
-   -- Free-running comctrl strobe: toggle level every 64 main_clk cycles
-   -- (84 MHz/128 =~ 656 kHz full pulse rate - arbitrary but comfortably fast
-   -- with clean margins; rtl/zx8302.v only needs clean edges, not a specific
-   -- rate, since it has no baud-rate concept of its own, see header comment).
    comctrl_gen : process (clk_main_i)
    begin
       if rising_edge(clk_main_i) then
@@ -474,12 +492,16 @@ begin
             edge_pulse <= '0';
          else
             edge_pulse <= '0';
-            phase_cnt  <= phase_cnt + 1;
-            if phase_cnt = 0 then
-               if comctrl_r = '1' then
-                  edge_pulse <= '1';   -- about to fall: this IS the falling edge
+            if ce_11m_i = '1' then
+               if phase_cnt = CE11M_PER_EDGE - 1 then
+                  phase_cnt <= (others => '0');
+                  if comctrl_r = '1' then
+                     edge_pulse <= '1';   -- about to fall: this IS the falling edge
+                  end if;
+                  comctrl_r <= not comctrl_r;
+               else
+                  phase_cnt <= phase_cnt + 1;
                end if;
-               comctrl_r <= not comctrl_r;
             end if;
          end if;
       end if;
