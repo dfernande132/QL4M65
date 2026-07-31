@@ -108,12 +108,18 @@ entity keyboard is
       audio_o          : out std_logic;                    -- IPC-generated audio: not implemented, unused in milestone 1
       ipl_o            : out std_logic_vector(1 downto 0); -- IPC interrupt-priority lines: not implemented, tied to "no IRQ"
 
-      -- QL4M65 TEMPORARY DEBUG AID (M1018): expose what's actually coming
-      -- through the comdata/comctrl link, to check whether Minerva is
-      -- really talking to us at all and with which command (see main.vhd
-      -- for how these get displayed; doc/m2m/exceptions.md for the revert).
+      -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019): expose what's actually
+      -- coming through the comdata/comctrl link, to check whether Minerva
+      -- is really talking to us at all and with which command (see
+      -- main.vhd for how these get displayed; doc/m2m/exceptions.md for
+      -- the revert). M1018 showed CMD "6"/"7" (serial receive, not
+      -- keyboard-related) dominating - repurposed the "last ROWSEL" digit
+      -- (M1019) into a STICKY "ever seen" flag for commands 8/9 (and
+      -- anything else) specifically, since a once-per-second "last value"
+      -- sample would statistically favour whatever's most frequent and
+      -- could hide a rare cmd 8/9 entirely.
       dbg_last_cmd_o     : out std_logic_vector(3 downto 0); -- last CMD nibble seen (CMD state)
-      dbg_last_rowsel_o  : out std_logic_vector(3 downto 0); -- last ROWSEL nibble seen (ROWSEL state)
+      dbg_seen_flags_o   : out std_logic_vector(3 downto 0); -- bit0=cmd8 ever seen, bit1=cmd9 ever seen, bit2=cmd6/7 ever seen, bit3=any other cmd ever seen (all sticky since reset)
       dbg_cmd_count_o    : out std_logic_vector(7 downto 0)  -- free-running count of CMD nibbles received
    );
 end entity keyboard;
@@ -243,10 +249,10 @@ architecture beh of keyboard is
    signal resp_byte  : std_logic_vector(7 downto 0) := (others => '1');
    signal cmd_state  : t_cmd_state := CMD;
 
-   -- QL4M65 TEMPORARY DEBUG AID (M1018)
-   signal dbg_last_cmd    : std_logic_vector(3 downto 0) := (others => '0');
-   signal dbg_last_rowsel : std_logic_vector(3 downto 0) := (others => '0');
-   signal dbg_cmd_count   : unsigned(7 downto 0) := (others => '0');
+   -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019)
+   signal dbg_last_cmd   : std_logic_vector(3 downto 0) := (others => '0');
+   signal dbg_seen_flags : std_logic_vector(3 downto 0) := (others => '0');
+   signal dbg_cmd_count  : unsigned(7 downto 0) := (others => '0');
 
 begin
 
@@ -453,9 +459,9 @@ begin
             shift_in   <= (others => '0');
             resp_byte  <= (others => '1');
             cmd_state  <= CMD;
-            dbg_last_cmd    <= (others => '0');
-            dbg_last_rowsel <= (others => '0');
-            dbg_cmd_count   <= (others => '0');
+            dbg_last_cmd   <= (others => '0');
+            dbg_seen_flags <= (others => '0');
+            dbg_cmd_count  <= (others => '0');
          elsif edge_pulse = '1' then
             edge_phase <= not edge_phase;
 
@@ -481,18 +487,23 @@ begin
                         dbg_last_cmd  <= v_shift(3 downto 0);
                         dbg_cmd_count <= dbg_cmd_count + 1;
                         if v_shift(3 downto 0) = x"9" then       -- "keyrow"
+                           dbg_seen_flags(1) <= '1';
                            cmd_state <= ROWSEL;
                         elsif v_shift(3 downto 0) = x"8" then     -- "read keyboard"
+                           dbg_seen_flags(0) <= '1';
                            resp_byte <= x"00";                    -- real encoding not reverse-engineered, safe stub
                            cmd_state <= RESPOND;
+                        elsif v_shift(3 downto 0) = x"6" or v_shift(3 downto 0) = x"7" then
+                           dbg_seen_flags(2) <= '1';
+                           cmd_state <= CMD;
                         else                                      -- any other command: passive ACK
+                           dbg_seen_flags(3) <= '1';
                            cmd_state <= CMD;
                         end if;
 
                      -- row-select nibble: its low 3 bits choose which of
                      -- the 8 ql_matrix bytes to answer with next
                      when ROWSEL =>
-                        dbg_last_rowsel <= '0' & v_shift(2 downto 0);
                         case to_integer(unsigned(v_shift(2 downto 0))) is
                            when 0 => resp_byte <= ql_matrix( 7 downto  0);
                            when 1 => resp_byte <= ql_matrix(15 downto  8);
@@ -526,9 +537,9 @@ begin
    audio_o <= '0';
    ipl_o   <= "00";
 
-   -- QL4M65 TEMPORARY DEBUG AID (M1018)
-   dbg_last_cmd_o    <= dbg_last_cmd;
-   dbg_last_rowsel_o <= dbg_last_rowsel;
-   dbg_cmd_count_o   <= std_logic_vector(dbg_cmd_count);
+   -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019)
+   dbg_last_cmd_o   <= dbg_last_cmd;
+   dbg_seen_flags_o <= dbg_seen_flags;
+   dbg_cmd_count_o  <= std_logic_vector(dbg_cmd_count);
 
 end architecture beh;

@@ -175,10 +175,11 @@ signal dbg_pixel_on   : std_logic;
 signal dbg_vs_prev      : std_logic := '0';
 signal dbg_vs_count     : natural range 0 to 63 := 0;
 
--- digits 0-3: last_cmd(1) & last_rowsel(1) & cmd_count(2), latched once
--- per second (~50 vsync pulses).
+-- digits 0-3: last_cmd(1) & seen_flags(1, bit0=cmd8 bit1=cmd9 bit2=cmd6/7
+-- bit3=other, all sticky since reset) & cmd_count(2), latched once per
+-- second (~50 vsync pulses).
 signal dbg_kbd_last_cmd    : std_logic_vector(3 downto 0);
-signal dbg_kbd_last_rowsel : std_logic_vector(3 downto 0);
+signal dbg_kbd_seen_flags  : std_logic_vector(3 downto 0);
 signal dbg_kbd_cmd_count   : std_logic_vector(7 downto 0);
 signal dbg_kbd_latched     : std_logic_vector(15 downto 0) := (others => '0');
 
@@ -548,7 +549,7 @@ begin
             if dbg_vs_prev = '0' and zx_vs = '1' then  -- vsync rising edge
                if dbg_vs_count = 49 then
                   dbg_vs_count     <= 0;
-                  dbg_kbd_latched  <= dbg_kbd_last_cmd & dbg_kbd_last_rowsel & dbg_kbd_cmd_count;
+                  dbg_kbd_latched  <= dbg_kbd_last_cmd & dbg_kbd_seen_flags & dbg_kbd_cmd_count;
                else
                   dbg_vs_count <= dbg_vs_count + 1;
                end if;
@@ -687,10 +688,10 @@ begin
          audio_o         => ipc_audio,
          ipl_o           => ipc_ipl,
 
-         -- QL4M65 TEMPORARY DEBUG AID (M1018, see signal declarations above)
-         dbg_last_cmd_o    => dbg_kbd_last_cmd,
-         dbg_last_rowsel_o => dbg_kbd_last_rowsel,
-         dbg_cmd_count_o   => dbg_kbd_cmd_count
+         -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019, see signal declarations above)
+         dbg_last_cmd_o   => dbg_kbd_last_cmd,
+         dbg_seen_flags_o => dbg_kbd_seen_flags,
+         dbg_cmd_count_o  => dbg_kbd_cmd_count
       ); -- i_keyboard
 
 end architecture synthesis;
