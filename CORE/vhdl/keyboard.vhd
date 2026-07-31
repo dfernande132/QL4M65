@@ -562,7 +562,22 @@ begin
                            resp_byte <= x"00";
                            cmd_state <= RESPOND;
                         elsif v_shift(3 downto 0) = x"C" then     -- "set P2.3" (= ipl[1])
-                           cmd_state <= SETIPL;
+                           -- M1024 TEMPORARY REVERT: M1023 implemented this
+                           -- for real (SETIPL state, ipl1_reg driving
+                           -- ipl_o(1)) but the very next hardware test
+                           -- regressed badly - Minerva now hangs earlier,
+                           -- non-deterministically (different point on
+                           -- every reset). Suspected cause: once Minerva
+                           -- sets P2.3=1, nothing may be clearing it back in
+                           -- the way real hardware expects, leaving ipl[1]
+                           -- permanently asserted - a level-sensitive 68000
+                           -- interrupt that never clears would re-trigger
+                           -- constantly, timing-dependent, explaining the
+                           -- non-determinism. Reverted to passive ACK
+                           -- (command 1's fix is kept, tested separately -
+                           -- "one variable at a time"). See DECISIONES.md.
+                           dbg_seen_flags(3) <= '1';
+                           cmd_state <= CMD;
                         elsif v_shift(3 downto 0) = x"6" or v_shift(3 downto 0) = x"7" then
                            dbg_seen_flags(2) <= '1';
                            cmd_state <= CMD;
@@ -571,9 +586,11 @@ begin
                            cmd_state <= CMD;
                         end if;
 
-                     -- QL4M65 (M1023): the parameter nibble's bit 0 chooses
-                     -- ORL P2,#08h (set) vs ANL P2,#F7h (clear) in the real
-                     -- ROM (0x02C5-0x02CD) - no response is transmitted.
+                     -- QL4M65 (M1023, currently unreachable - see the M1024
+                     -- revert note on command C above): the parameter
+                     -- nibble's bit 0 chooses ORL P2,#08h (set) vs
+                     -- ANL P2,#F7h (clear) in the real ROM (0x02C5-0x02CD) -
+                     -- no response is transmitted.
                      when SETIPL =>
                         ipl1_reg  <= v_shift(0);
                         cmd_state <= CMD;
