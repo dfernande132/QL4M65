@@ -14,12 +14,16 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-02, sesión M1047 — MILESTONE 1 CERRADO)
+## 0. Estado actual del proyecto (actualizado: 2026-08-02, sesión M1048 — MILESTONE 1 CERRADO)
 
-**MILESTONE 1 CERRADO Y CONFIRMADO POR EL USUARIO.** Tras el arranque
-end-to-end conseguido en `M1040` (resumen del tramo `M1029`-`M1040` más
-abajo), la sesión `M1042`-`M1047` cerró el hito con una tanda de pulido
-sustancial, probada a fondo en hardware real:
+**MILESTONE 1 CERRADO, CONFIRMADO POR EL USUARIO Y PUBLICADO EN GITHUB**
+(`https://github.com/dfernande132/QL4M65`, commits `2a67d6d` y `f71cc16`).
+Tras el arranque end-to-end conseguido en `M1040` (resumen del tramo
+`M1029`-`M1040` más abajo), la sesión `M1042`-`M1048` cerró el hito con una
+tanda de pulido sustancial, probada a fondo en hardware real. Último
+arreglo, `M1048`: la tecla `:` del MEGA65 seguía escribiendo `'` (resto sin
+revisar de antes del rediseño de teclado) - corregido, y con eso el usuario
+confirmó el cierre definitivo.
 
 - **Causa raíz real del cuelgue "hay que hacer un hard reset al cambiar de
   ROM" encontrada y arreglada (`M1045`)**: no era la ROM vieja quedándose en
@@ -45,7 +49,7 @@ sustancial, probada a fondo en hardware real:
   enganchado al proyecto - arreglado, ahora se reaplica en cada build desde
   `build_core.tcl` y ya no puede desaparecer silenciosamente otra vez.
 
-Detalle técnico completo de las 6 compilaciones (`M1042`-`M1047`) en
+Detalle técnico completo de las 7 compilaciones (`M1042`-`M1048`) en
 `DECISIONES.md`. **Próxima compilación: `M2001`** - arranca Milestone 2, que
 pasa a ser **microdrive virtual** en vez de ampliación de memoria/velocidad
 (reordenado con el usuario al cierre de este hito: el microdrive permite
