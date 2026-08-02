@@ -296,7 +296,8 @@ begin
                    or  (not key_pressed_n(m65_comma) and mega_ctrl)          -- "~"
                    or  (not key_pressed_n(m65_equal) and mega_ctrl)          -- "_"
                    or  (not key_pressed_n(m65_dot) and mega_ctrl)            -- "|"
-                   or  (not key_pressed_n(m65_arrow_up));                   -- "^" (was QL-native Shift+6)
+                   or  (not key_pressed_n(m65_arrow_up))                    -- "^" (was QL-native Shift+6)
+                   or  (not key_pressed_n(m65_colon) and not shift and not mega_ctrl); -- ":" (MEGA65's own colon key)
 
    ql_shift_force0 <= (not key_pressed_n(m65_7) and shift)                                    -- "'" (was QL-native Shift+7's "&")
                    or  (not key_pressed_n(m65_colon) and shift and not mega_ctrl)              -- "["
@@ -362,8 +363,7 @@ begin
    ql_matrix(8*2+5) <= (not key_pressed_n(m65_gbp))                          -- GBP (incl. its own native Shift -> "~")
                     or (not key_pressed_n(m65_comma) and mega_ctrl);         -- "~" (MEGA65 Ctrl+,)
    ql_matrix(8*2+6) <= not key_pressed_n(m65_m);
-   ql_matrix(8*2+7) <= (not key_pressed_n(m65_colon) and not shift and not mega_ctrl) -- "'" (MEGA65 colon, unmodified)
-                    or (not key_pressed_n(m65_2) and shift)                 -- '"' (MEGA65 Shift+2)
+   ql_matrix(8*2+7) <= (not key_pressed_n(m65_2) and shift)                 -- '"' (MEGA65 Shift+2)
                     or (not key_pressed_n(m65_7) and shift);                -- "'" (MEGA65 Shift+7)
 
    -- byte 3: "[" Caps k s f "=" g ;
@@ -375,7 +375,8 @@ begin
    ql_matrix(8*3+5) <= (not key_pressed_n(m65_equal) and not mega_ctrl)      -- "=" (incl. its own native Shift -> "+")
                     or (not key_pressed_n(m65_plus));                       -- "+" (MEGA65's own dedicated + key)
    ql_matrix(8*3+6) <= not key_pressed_n(m65_g);
-   ql_matrix(8*3+7) <= not key_pressed_n(m65_semicolon) and not shift and not mega_ctrl;
+   ql_matrix(8*3+7) <= (not key_pressed_n(m65_semicolon) and not shift and not mega_ctrl) -- ";"
+                    or (not key_pressed_n(m65_colon) and not shift and not mega_ctrl);    -- ":" (MEGA65 colon, unmodified)
 
    -- byte 4: l 3 h 1 a p d j
    ql_matrix(8*4+0) <= not key_pressed_n(m65_l);

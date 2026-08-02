@@ -54,7 +54,6 @@ receive MEGA65 symbols. Anything that doesn't fit is an orphan (Table D).
 | `-` (m65_minus) | QL `-` key, unshifted | MEGA65's own legend already is `-` |
 | `=` (m65_equal, unshifted) | QL `=` key, unshifted | MEGA65's own legend already is `=` |
 | £ (m65_gbp) | QL Pound key | dedicated-to-dedicated, both sides agree |
-| `'` via **Shift+Colon** (m65_colon + shift) | QL apostrophe key, QL-shifted | already gives `"` today — `ql_shift` already reflects real MEGA65 shift whenever no override applies, so this falls out for free. **Being replaced per the new design** (see Table B) so Shift+2 becomes the one true way to get `"`, not a second accidental path. |
 | m65_left_crsr / m65_horz_crsr (right) / m65_up_crsr / m65_vert_crsr (down) | QL Left/Right/Up/Down | confirmed (user): 1:1, cursor-to-cursor, key to key. NOT to be confused with `m65_arrow_left`/`m65_arrow_up`, the separate PETSCII-symbol keys used elsewhere in this doc (Tables B/D) |
 | RET/SPACE/TAB/ESC/CAPS/CTRL/ALT/SHIFT/F1-F5 | dedicated QL keys | already 1:1 |
 
@@ -80,10 +79,12 @@ key_pressed_n(m65_f3)`).
 | Shift+`:` (m65_colon) | QL apostrophe-key, ql_shift=0 (unaffected — see Table A) | QL `[`-key bit | **0** (QL-unshifted = `[`; rationale: MEGA65's own Shift+`:` legend is `(`, already redundant since Shift+8 covers `(` above — free real estate for the two QL keys right of P, `[`/`]`) |
 | Shift+`;` (m65_semicolon) | QL `;`, unaffected (see Table A) | QL `]`-key bit | **0** (QL-unshifted = `]`; same rationale — MEGA65's own Shift+`;` legend `)` is redundant since Shift+9 covers `)` above) |
 | Shift+`@` (m65_at + shift) | nothing (unused combo — unshifted `@` is spoken for above) | QL ESC-key bit | **1** (confirmed, user: QL Shift+ESC = `©`, was orphaned — real QL keycap shows `©` above ESC) |
+| `:` (m65_colon, unshifted) | QL apostrophe-key, ql_shift=0 → `'` (stale leftover from before the redesign, never reconsidered — **bug, found in hardware testing after M1047**) | QL `;`-key bit | **1** (QL-shifted = `:`, matching MEGA65's own unshifted legend; the real QL's `:` was always Shift+`;` on the physical key right of L) |
 
-Unshifted `:` and `;` (m65_colon, m65_semicolon, no MEGA65 shift held) are
-**unchanged** — they still drive the QL apostrophe-key and QL `;` exactly
-as in Table A. Only the *shifted* combos above are new/redirected. This
+Unshifted `;` (m65_semicolon, no MEGA65 shift/ctrl held) is unchanged —
+still drives the QL `;` key exactly as in Table A. Unshifted `:`
+(m65_colon) no longer touches the apostrophe-key at all (see the fix row
+above) — apostrophe stays fully reachable via Shift+7 regardless. This
 resolves Table D's `[`/`]` orphans (moved out of Table D below) —
 `m65_arrow_left` becomes free/idle once this lands (`m65_arrow_up` does
 NOT stay idle — see Table D, it gets reassigned to `^`).
