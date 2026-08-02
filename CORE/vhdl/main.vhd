@@ -141,68 +141,6 @@ signal zx_vblank    : std_logic;
 signal ce_pix       : std_logic;
 
 ---------------------------------------------------------------------------
--- QL4M65 TEMPORARY DEBUG AID (M1027): cpu_addr/keyboard-command traces
--- (M1016-M1026) already did their job - source-level tracing (Minerva's
--- own GPL sources, see DECISIONES.md) pinned the F1-F4 timeout down to
--- ss/int2.asm's frame-interrupt branch, which increments a system variable
--- (sv_pollm) whenever it sees irq_pending's bit 3 (frame/vsync) set on its
--- own, per inc/pc's real hardware bit layout (bit4=external, bit3=frame,
--- bit2=transmit, bit1=interface, bit0=gap). Direct empirical check this
--- time: snoop the CPU's own read of zx8302's status/irq register
--- (cpu_addr matching zx8302_sel/zx8302_addr="10", the same address
--- ss_int2's "move.w (a3),d7" reads) and see what pattern actually shows up
--- - clean bit3-only ("frame"), or something else/mixed that would make the
--- real ROM's bit-shift dispatch (lsl.b #4,d7 / bcs.s exint / bmi.s frint)
--- take the wrong branch and never touch sv_pollm at all. Remove this whole
--- block (signals, i_dbg_font instance, the h_cnt_o/v_cnt_o ports on
--- zx8301, the video_red/green/blue_o override) once diagnosed - see
--- doc/m2m/exceptions.md.
----------------------------------------------------------------------------
-
-constant DBG_FONT_FILE : string  := "../font/Anikki-16x16-m2m.rom";
-constant DBG_DX        : natural := 8;
-constant DBG_DY        : natural := 8;
-constant DBG_DIGITS    : natural := 6;
-
-signal dbg_h_cnt      : std_logic_vector(9 downto 0);
-signal dbg_v_cnt      : std_logic_vector(9 downto 0);
-signal dbg_active     : std_logic;
-signal dbg_digit_idx  : integer;
-signal dbg_x_in_char  : integer;
-signal dbg_y_in_char  : integer;
-signal dbg_nibble     : std_logic_vector(3 downto 0);
-signal dbg_ascii      : std_logic_vector(7 downto 0);
-signal dbg_font_addr  : std_logic_vector(11 downto 0);
-signal dbg_font_data  : std_logic_vector(15 downto 0);
-signal dbg_pixel_on   : std_logic;
-
-signal dbg_vs_prev      : std_logic := '0';
-signal dbg_vs_count     : natural range 0 to 63 := 0;
-
--- QL4M65 (M1028): the snoop condition below (zx8302_sel/addr match, cpu_rd,
--- cpu_dtack) very likely stays true for several clk_main_i cycles per real
--- completed CPU bus transaction (cpu_dtack doesn't pulse for just one
--- cycle) - counting on the LEVEL rather than the RISING EDGE would count
--- every real access several times over, inflating and randomising the
--- rate depending on exactly how many cycles dtack happens to stay up each
--- time. Same class of bug M1014 already fixed once for a different
--- counter - fixed here the same way, with a "seen" edge-detect register.
-signal dbg_irqp_seen       : std_logic;
-signal dbg_irqp_seen_prev  : std_logic := '0';
-
--- digits 0-1: last irq_pending value seen on a completed CPU read of
--- zx8302's status/irq register (5 meaningful bits, shown as 2 hex digits),
--- latched once per second alongside the counters below.
--- digits 2-3: free-running count (8-bit) of reads where irq_pending was
--- EXACTLY "01000" (bit3 only = clean "frame" pattern) since the last latch.
--- digits 4-5: free-running count (8-bit) of reads where irq_pending was
--- anything else (mixed/other pattern) since the last latch.
-signal dbg_irqp_last       : std_logic_vector(4 downto 0) := (others => '0');
-signal dbg_irqp_frame_cnt  : unsigned(7 downto 0) := (others => '0');
-signal dbg_irqp_other_cnt  : unsigned(7 downto 0) := (others => '0');
-signal dbg_irqp_latched    : std_logic_vector(23 downto 0) := (others => '0');
-
----------------------------------------------------------------------------
 -- QL4M65: ZX8302 (internal I/O) signals
 ---------------------------------------------------------------------------
 
@@ -211,13 +149,21 @@ signal zx8302_addr  : std_logic_vector(1 downto 0);
 signal zx8302_dout  : std_logic_vector(15 downto 0);
 signal audio_bit    : std_logic;                      -- ZX8302's single-bit beeper output
 
--- IPC link to keyboard.vhd (replaces the embedded 8049 emulation - see
--- rtl/zx8302.v's header note and CoreQL/doc/m2m/exceptions.md)
-signal ipc_comctrl       : std_logic;                    -- keyboard.vhd -> zx8302
-signal ipc_comdata_zx2kb : std_logic;                    -- zx8302's own outgoing bit -> keyboard.vhd
-signal ipc_comdata_kb2zx : std_logic;                    -- keyboard.vhd's own outgoing bit -> zx8302
-signal ipc_ipl           : std_logic_vector(1 downto 0);  -- keyboard.vhd -> zx8302
-signal ipc_audio         : std_logic;                     -- keyboard.vhd -> zx8302
+-- IPC link to ipc.vhd (QL4M65 M1031: the real emulated 8049, T48 core +
+-- real firmware ROM - replaces both the embedded 8049 emulation removed
+-- from zx8302.v AND keyboard.vhd's own hand-rolled M1018-M1030 protocol
+-- FSM; see rtl/zx8302.v's header note and CoreQL/doc/m2m/exceptions.md)
+signal ipc_comctrl       : std_logic;                    -- ipc.vhd -> zx8302
+signal ipc_comdata_zx2kb : std_logic;                    -- zx8302's own outgoing bit -> ipc.vhd
+signal ipc_comdata_kb2zx : std_logic;                    -- ipc.vhd's own outgoing bit -> zx8302
+signal ipc_ipl           : std_logic_vector(1 downto 0);  -- ipc.vhd -> zx8302
+signal ipc_audio         : std_logic;                     -- ipc.vhd -> zx8302
+
+-- QL4M65 (M1031): the MEGA65 keyboard matrix, produced by keyboard.vhd
+-- (now just a MEGA65-key -> QL-matrix translator, see its header) and fed
+-- to ipc.vhd's P1-selected data-bus-read logic - exactly the interface
+-- rtl/ipc.v itself expects from rtl/keyboard.v.
+signal ql_matrix : std_logic_vector(63 downto 0);
 
 ---------------------------------------------------------------------------
 -- QL4M65: internal clock enables, derived from clk_main_i (84.000000 MHz)
@@ -538,110 +484,8 @@ begin
          hs      => zx_hs,
          vs      => zx_vs,
          HBlank  => zx_hblank,
-         VBlank  => zx_vblank,
-
-         -- QL4M65 TEMPORARY DEBUG AID (M1016, see signal declarations above)
-         h_cnt_o => dbg_h_cnt,
-         v_cnt_o => dbg_v_cnt
+         VBlank  => zx_vblank
       ); -- i_zx8301
-
-   ---------------------------------------------------------------------------
-   -- QL4M65 TEMPORARY DEBUG AID (M1018): on-screen hex readout of the
-   -- keyboard IPC command info (see signal declarations above)
-   ---------------------------------------------------------------------------
-
-   dbg_active    <= '1' when unsigned(dbg_v_cnt) >= DBG_DY and unsigned(dbg_v_cnt) < DBG_DY + 16 and
-                             unsigned(dbg_h_cnt) >= DBG_DX and unsigned(dbg_h_cnt) < DBG_DX + DBG_DIGITS * 16
-                     else '0';
-
-   dbg_digit_idx <= (to_integer(unsigned(dbg_h_cnt)) - DBG_DX) / 16;
-   dbg_x_in_char <= (to_integer(unsigned(dbg_h_cnt)) - DBG_DX) mod 16;
-   dbg_y_in_char <= to_integer(unsigned(dbg_v_cnt)) - DBG_DY;
-
-   dbg_irqp_seen <= '1' when (zx8302_sel = '1' and zx8302_addr = "10" and
-                              cpu_rd = '1' and cpu_dtack = '1') else '0';
-
-   -- QL4M65 TEMPORARY DEBUG AID (M1027): continuously snoop the CPU's own
-   -- reads of zx8302's status/irq register ($18020/$18021, cpu_addr(5)='1'
-   -- and cpu_addr(1)='0' per zx8302_addr's own decode) - the exact same
-   -- register ss_int2's "move.w (a3),d7" reads in real Minerva. Gated on
-   -- cpu_dtack so each real completed bus cycle is counted exactly once.
-   -- Combined with the once-per-second vsync latch in a single process
-   -- (two separate processes both driving dbg_irqp_frame_cnt/other_cnt -
-   -- one incrementing, one resetting - is an illegal multiple-driver
-   -- conflict in VHDL).
-   dbg_latch : process (clk_main_i)
-   begin
-      if rising_edge(clk_main_i) then
-         if reset = '1' then
-            dbg_irqp_last      <= (others => '0');
-            dbg_irqp_frame_cnt <= (others => '0');
-            dbg_irqp_other_cnt <= (others => '0');
-            dbg_irqp_seen_prev <= '0';
-         else
-            -- QL4M65 (M1028): edge-detect - only count the RISING edge of
-            -- the snoop condition, not every cycle it happens to stay true.
-            dbg_irqp_seen_prev <= dbg_irqp_seen;
-            if dbg_irqp_seen = '1' and dbg_irqp_seen_prev = '0' then
-               dbg_irqp_last <= zx8302_dout(4 downto 0);
-               if zx8302_dout(4 downto 0) = "01000" then  -- bit3 only = clean "frame"
-                  dbg_irqp_frame_cnt <= dbg_irqp_frame_cnt + 1;
-               else
-                  dbg_irqp_other_cnt <= dbg_irqp_other_cnt + 1;
-               end if;
-            end if;
-
-            dbg_vs_prev <= zx_vs;
-            if dbg_vs_prev = '0' and zx_vs = '1' then  -- vsync rising edge
-               if dbg_vs_count = 49 then
-                  dbg_vs_count      <= 0;
-                  dbg_irqp_latched  <= "000" & dbg_irqp_last &
-                                        std_logic_vector(dbg_irqp_frame_cnt) &
-                                        std_logic_vector(dbg_irqp_other_cnt);
-                  dbg_irqp_frame_cnt <= (others => '0');
-                  dbg_irqp_other_cnt <= (others => '0');
-               else
-                  dbg_vs_count <= dbg_vs_count + 1;
-               end if;
-            end if;
-         end if;
-      end if;
-   end process dbg_latch;
-
-   -- digits 0-1: last irq_pending value; digits 2-3: clean-frame count/sec;
-   -- digits 4-5: other-pattern count/sec
-   with dbg_digit_idx select dbg_nibble <=
-      dbg_irqp_latched(23 downto 20) when 0,
-      dbg_irqp_latched(19 downto 16) when 1,
-      dbg_irqp_latched(15 downto 12) when 2,
-      dbg_irqp_latched(11 downto  8) when 3,
-      dbg_irqp_latched( 7 downto  4) when 4,
-      dbg_irqp_latched( 3 downto  0) when others;
-
-   dbg_ascii <= x"3" & dbg_nibble when unsigned(dbg_nibble) <= 9 else
-                std_logic_vector(resize(unsigned(dbg_nibble), 8) - 10 + 65); -- 'A'..'F'
-
-   dbg_font_addr <= std_logic_vector(to_unsigned(to_integer(unsigned(dbg_ascii)) * 16 + dbg_y_in_char, 12))
-                       when dbg_active = '1' else (others => '0');
-
-   i_dbg_font : entity work.ram_init
-      generic map (
-         G_ADDR_WIDTH   => 12,
-         G_DATA_WIDTH   => 16,
-         G_ROM_PRELOAD  => true,
-         G_ROM_FILE     => DBG_FONT_FILE,
-         G_ROM_FILE_HEX => false
-      )
-      port map (
-         clock_i   => clk_main_i,
-         clen_i    => '1',
-         address_i => dbg_font_addr,
-         data_i    => (others => '0'),
-         wren_i    => '0',
-         q_o       => dbg_font_data
-      ); -- i_dbg_font
-
-   dbg_pixel_on <= dbg_font_data(15 - dbg_x_in_char) when dbg_active = '1' else '0';
 
    -- video_ce_o: divides clk_main_i into the core's native pre-scandoubler
    -- pixel clock; video_ce_ovl_o: same rate for milestone 1 (no separate
@@ -650,17 +494,9 @@ begin
    video_ce_o     <= ce_pix;
    video_ce_ovl_o <= video_ce_o;
 
-   -- QL4M65 TEMPORARY DEBUG AID (M1016): yellow hex text on solid black,
-   -- composited on top of the QL's own video. Passes normal video through
-   -- unchanged outside the box (dbg_active='0').
-   video_red_o    <= x"FF" when dbg_active = '1' and dbg_pixel_on = '1' else
-                      x"00" when dbg_active = '1' else
-                      (others => video_r);
-   video_green_o  <= x"FF" when dbg_active = '1' and dbg_pixel_on = '1' else
-                      x"00" when dbg_active = '1' else
-                      (others => video_g);
-   video_blue_o   <= x"00" when dbg_active = '1' else
-                      (others => video_b);
+   video_red_o    <= (others => video_r);
+   video_green_o  <= (others => video_g);
+   video_blue_o   <= (others => video_b);
    video_vs_o     <= zx_vs;
    video_hs_o     <= zx_hs;
    video_hblank_o <= zx_hblank;
@@ -694,11 +530,25 @@ begin
 
          vs            => zx_vs,
 
-         -- IPC link (see keyboard.vhd)
+         -- IPC link (see ipc.vhd)
          ipc_comctrl_i => ipc_comctrl,
          ipc_comdata_o => ipc_comdata_zx2kb,
          ipc_comdata_i => ipc_comdata_kb2zx,
-         ipc_ipl_i     => ipc_ipl,
+
+         -- QL4M65: the real 8049 (ipc.vhd) can assert ipl_o[1] as part of
+         -- its own protocol (signalling a pending keyboard event) - but
+         -- nothing in this port ever completes the exchange that would
+         -- make it lower again, so a genuine assertion can latch
+         -- permanently. Combined with zx8302.v's own ipl OR (any pending
+         -- internal irq OR the external ipc's line raises Level 2), a
+         -- stuck-high ipl[1] is a level-sensitive interrupt storm that
+         -- starves the CPU of real execution time (every RTE immediately
+         -- re-enters it). Left unconnected here (tied to "00") - the real
+         -- fix for what this was blocking (SuperBASIC never reaching the
+         -- keyboard) turned out to be unrelated: see zx8302.v's mdv_gap
+         -- comment. See DECISIONES.md's M1031-M1040 sections for the full
+         -- investigation.
+         ipc_ipl_i     => "00",
          ipc_audio_i   => ipc_audio,
 
          cep           => ce_bus_p,
@@ -720,10 +570,9 @@ begin
    audio_right_o <= to_signed(16#7FFF#, 16) when audio_bit = '1' else to_signed(0, 16);
 
    ---------------------------------------------------------------------------
-   -- QL4M65: keyboard - MEGA65-native, wired for real to the ZX8302's IPC
-   -- link (see rtl/zx8302.v's header note and keyboard.vhd's own header for
-   -- the disassembly-verified protocol details, still pending
-   -- hardware/simulation validation)
+   -- QL4M65: keyboard - MEGA65-native translation to the QL's 8x8 matrix
+   -- (see keyboard.vhd's own header). No IPC protocol here anymore - that's
+   -- ipc.vhd below (QL4M65 M1031).
    ---------------------------------------------------------------------------
 
    i_keyboard : entity work.keyboard
@@ -731,28 +580,35 @@ begin
          clk_main_i      => clk_main_i,
          reset_i         => reset,
 
-         -- QL4M65 (M1025): the real 11MHz IPC clock-enable, already
-         -- generated above (FRACT_11M) but previously only fed to zx8302,
-         -- which never actually uses its own ce_11m input.
-         ce_11m_i        => ce_11m,
-
          key_num_i       => kb_key_num_i,
          key_pressed_n_i => kb_key_pressed_n_i,
 
-         comctrl_o       => ipc_comctrl,
-         comdata_i       => ipc_comdata_zx2kb,
-         comdata_o       => ipc_comdata_kb2zx,
-         audio_o         => ipc_audio,
-         ipl_o           => ipc_ipl,
-
-         -- QL4M65 (M1027): the keyboard-command debug digits (M1018-M1026)
-         -- already answered what they set out to - not shown anymore, but
-         -- keyboard.vhd's debug ports are left in place in case they're
-         -- useful again later.
-         dbg_last_cmd_o    => open,
-         dbg_seen_flags_o  => open,
-         dbg_matrix_seen_o => open
+         ql_matrix_o     => ql_matrix
       ); -- i_keyboard
+
+   ---------------------------------------------------------------------------
+   -- QL4M65 (M1031): IPC - the real emulated Intel 8049 (T48 core + real
+   -- firmware ROM, see ipc.vhd's own header for the full rationale and
+   -- DECISIONES.md for the investigation that led here). Replaces
+   -- keyboard.vhd's M1018-M1030 hand-rolled comdata/comctrl protocol FSM.
+   ---------------------------------------------------------------------------
+
+   i_ipc : entity work.ipc
+      port map (
+         clk_main_i  => clk_main_i,
+         reset_i     => reset,
+
+         -- same real 11MHz IPC clock-enable keyboard.vhd used to consume
+         ce_11m_i    => ce_11m,
+
+         ql_matrix_i => ql_matrix,
+
+         comctrl_o   => ipc_comctrl,
+         comdata_i   => ipc_comdata_zx2kb,
+         comdata_o   => ipc_comdata_kb2zx,
+         audio_o     => ipc_audio,
+         ipl_o       => ipc_ipl
+      ); -- i_ipc
 
 end architecture synthesis;
 

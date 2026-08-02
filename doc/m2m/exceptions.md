@@ -8,62 +8,13 @@ changes described here.
 MiSTer core QL_MiSTer
 ----------------------
 
-### TEMPORARY (M1016, re-added after being removed in M1015): `rtl/zx8301.v` exposes `h_cnt_o`/`v_cnt_o` again
-
-M1007-M1014 used a temporary on-screen hex readout to diagnose a
-reproducible post-RAM-test "hang". That investigation concluded (see
-`DECISIONES.md`, "LA CAUSA REAL DEL CUELGUE/LENTITUD"): the ROM buffer was
-simply never being loaded (the manual "ROM:%s" OSD menu load is required
-every time), so the CPU was executing a blank buffer. With Minerva actually
-loaded, the core boots at normal speed - the overlay was removed in M1015.
-
-New problem found right after (M1015 hardware test): with Minerva (or an
-original QL ROM, "mge") properly loaded, the boot reaches the splash logo
-and then stalls - the F1/F2 info screen that should appear ~1 second later
-on real hardware never shows, and the keyboard doesn't respond at all. Both
-ROMs stall at the same point, hinting at a common IPC/hardware dependency
-rather than a per-ROM bug. Re-added a minimal (6-digit, cpu_addr only, no
-bus-rate/seconds/PC-verify counters this time - those already answered
-their M1007-M1014 questions) version of the same overlay technique to see
-empirically whether the CPU is stuck in a narrow polling loop and, if so,
-where.
-
-**Revert again once diagnosed**: remove `h_cnt_o`/`v_cnt_o` from
-`zx8301.v`, and the "QL4M65 TEMPORARY DEBUG AID (M1016)" block in
-`main.vhd` (signal declarations, the `i_dbg_font` instance, the
-`video_red_o`/`green_o`/`blue_o` overlay logic, and the `h_cnt_o`/`v_cnt_o`
-port map entries on `i_zx8301`).
-
-### TEMPORARY (M1018): `keyboard.vhd` exposes `dbg_last_cmd_o`/`dbg_last_rowsel_o`/`dbg_cmd_count_o`
-
-M1017 fixed the IPL polarity bug (see `DECISIONES.md`) - Minerva now boots
-properly and reaches the F1/F2/F3/F4 info screen, but the keyboard still
-doesn't respond to any key. Added three debug-only output ports to
-`keyboard.vhd`: the last CMD nibble it received on the comdata/comctrl
-link, the last ROWSEL nibble (if any), and a free-running count of CMD
-nibbles received since reset - wired into the same M1016 on-screen overlay
-in `main.vhd` (digits 6-9) to see empirically whether Minerva is sending
-recognisable IPC commands at all, and which ones, instead of guessing at
-the comdata/comctrl protocol's timing.
-
-**Revert once diagnosed**: remove `dbg_last_cmd_o`/`dbg_last_rowsel_o`/
-`dbg_cmd_count_o` from `keyboard.vhd` (entity ports, the `dbg_*` signals,
-the assignments in `ipc_fsm` and at the bottom of the architecture), and
-the corresponding `dbg_kbd_*` signals/wiring/digits in `main.vhd`.
-
-### Removed the embedded "ipc" instance from `rtl/zx8302.v`
+### Removed the embedded "ipc" instance from `rtl/zx8302.v` - replaced by `ipc.vhd` (the real 8049), not by a hand-rolled protocol
 
 The original `zx8302.v` instantiates `ipc` (an emulation of the QL's real
 Intel 8049 IPC microcontroller, itself instantiating `rtl/keyboard.v` +
 `rtl/T48/`) directly inside itself, with `comdata`/`comctrl`/`audio`/`ipl`
-as purely internal wires never reaching the top level.
-
-QL4M65 replaces the whole `keyboard.v + ipc.v + rtl/T48/` chain with a
-MEGA65-native `keyboard.vhd` that speaks the `comdata`/`comctrl` protocol
-directly (same architectural choice as C64MEGA65's CIA1 keyboard matrix and
-AExp's CIA-A keyboard protocol - see `CoreQL/.research/PORTING-PLAN.md`,
-decision #2). For `keyboard.vhd` to plug in as a sibling instance in
-`main.vhd` instead of a child of `zx8302`, `zx8302.v` was modified to:
+as purely internal wires never reaching the top level. `zx8302.v` was
+modified to:
 
 * Remove the internal `ipc ipc (...)` instantiation and its associated wire
   declarations (`ipc_comctrl`, `ipc_comdata_out`, `ipc_ipl`).
@@ -75,17 +26,50 @@ decision #2). For `keyboard.vhd` to plug in as a sibling instance in
   outgoing bit), `ipc_ipl_i` (in, 2 bits), `ipc_audio_i` (in). `audio` is
   still a top-level output, now driven by `assign audio = ipc_audio_i;`
   instead of being wired straight through from the removed `ipc` instance.
+* `comdata_reg`'s reset value is `4'b1111` (idle-high), not the original
+  `4'b0000` - the real firmware's own receive loop treats a low line as
+  "the CPU wants to talk right now", so an idle-low reset value let it
+  misread reset garbage as a spurious transfer request every time. See
+  `DECISIONES.md`'s `M1033` section.
 
-When updating from a newer upstream `zx8302.v`, re-apply this same
-surgery: find wherever `ipc ipc (...)` is instantiated, delete it and its
-private wires, and re-expose the same five signals as ports with the
-`ipc_*_i`/`ipc_*_o` names above so `main.vhd`'s wiring to `keyboard.vhd`
-doesn't need to change.
+**What plugs into those five ports**: `CORE/vhdl/ipc.vhd` - a straight
+structural VHDL port of `rtl/ipc.v`. It instantiates `t8049_notri` (from
+`CORE/QL_MiSTer/rtl/T48/`, added to the Vivado project **unmodified** - see
+below) so the REAL emulated Intel 8049, running the real firmware ROM
+(`ipc8049-hermes.hex`), handles the entire comdata/comctrl protocol -
+no protocol logic of QL4M65's own. `ipc.vhd`'s ports (`comctrl_o`/
+`comdata_i`/`comdata_o`/`audio_o`/`ipl_o`) map straight onto `zx8302.v`'s
+`ipc_*_i`/`ipc_*_o` ports with no further translation. `CORE/vhdl/
+keyboard.vhd` only does the MEGA65-key -> QL-8x8-matrix translation
+(`ql_matrix_o`, same byte/bit layout as `rtl/keyboard.v`'s "matrix") and
+feeds `ipc.vhd` directly - it does not touch the IPC link at all. (An
+earlier, abandoned attempt at a from-scratch hand-rolled comdata/comctrl
+protocol lived in `keyboard.vhd` before this - see `DECISIONES.md`'s
+`M1031` section if that history is ever relevant again.)
 
-Files that stay in the repository but are excluded from the Vivado
-compile list because of this (not deleted, per the project's own
-convention - see `doc/m2m/example-file-headers.md`): `rtl/keyboard.v`,
-`rtl/ipc.v`, `rtl/T48/*`.
+Files that stay in the repository but excluded from the Vivado compile
+list (not deleted, per the project's own convention - see
+`doc/m2m/example-file-headers.md`): `rtl/keyboard.v` and `rtl/ipc.v` (their
+logic is re-implemented in `CORE/vhdl/keyboard.vhd` and `CORE/vhdl/ipc.vhd`
+respectively). `rtl/T48/*` is **not** excluded - all 27 of its VHDL files
+are added to the Vivado project, unmodified, via `build_core.tcl` (file
+list taken verbatim from `rtl/T48/T8049.qip`, the original project's own
+compile list - not guessed). The one T48-adjacent file that stays excluded
+is `rtl/rom_t49.vhd` (an Altera `altsyncram` megafunction wizard file, same
+class of problem as `dpram.v` below) - replaced by `CORE/vhdl/
+ipc_rom_t49.vhd`, a Vivado-clean "rom_t49" entity (same name/ports) backed
+by `M2M/vhdl/ram_init.vhd`, loaded from `CORE/vhdl/ipc8049-hermes.rom` (a
+flat, one-byte-per-line hex dump of `rtl/ipc8049-hermes.hex` - the
+Hermes-patched community firmware, not the plain original).
+
+When updating from a newer upstream `zx8302.v`: re-apply the `ipc`-removal
+surgery and the `comdata_reg` reset-value change (find wherever
+`ipc ipc (...)` is instantiated, delete it and its private wires, re-expose
+the same five signals as ports with the `ipc_*_i`/`ipc_*_o` names above).
+`ipc.vhd`/`keyboard.vhd`/`ipc_rom_t49.vhd` don't need to change unless the
+ports themselves change. When updating from a newer upstream `rtl/T48/`:
+re-run the same "take the file list from `T8049.qip`, exclude
+`rom_t49.vhd`" procedure in `build_core.tcl`.
 
 ### `rtl/dpram.v` / `rtl/mgc_rom/mgc_rom.v` - not modified, not used
 
@@ -100,51 +84,73 @@ full reasoning and the AExp reference pattern this follows).
 itself is implemented (not part of any of the three defined milestones
 yet).
 
-### Removed the embedded "mdv" (microdrive) instance from `rtl/zx8302.v`
+### Removed the embedded "mdv" (microdrive) instance from `rtl/zx8302.v` - but `mdv_gap` is NOT just tied off
 
-Same problem as `ipc`, found the hard way: `zx8302.v` instantiates `mdv`
-(`rtl/mdv.v`) directly, and `mdv.v` itself instantiates `dpram` (see above)
-for its own internal buffer - so even though milestone 1 doesn't use
-microdrive at all, leaving the `mdv` instance in place would pull the
-unsynthesizable `dpram` into the Vivado build transitively, just to sit
-unused.
+Same problem as `ipc`: `zx8302.v` instantiates `mdv` (`rtl/mdv.v`)
+directly, and `mdv.v` itself instantiates `dpram` (see above) for its own
+internal buffer - so even though no milestone implements real microdrive
+storage, leaving the `mdv` instance in place would pull the unsynthesizable
+`dpram` into the Vivado build transitively, just to sit unused.
 
-Tied `mdv_gap`/`mdv_tx_empty`/`mdv_rx_ready`/`mdv_byte` to a "no drive
-present" state (`0`/`1`/`0`/`0x00`) instead of instantiating `mdv`.
-`mdv_sel` (drive selection from `mctrl`) and `led` are untouched - harmless
-without a real drive behind them.
+`mdv_tx_empty`/`mdv_rx_ready`/`mdv_byte` are tied to a "no drive present"
+state (`1`/`0`/`0x00`) instead of instantiating `mdv` - genuinely unused,
+milestone 3 territory. **`mdv_gap` is different and NOT just tied off**:
+it generates a periodic ~125ms pulse whenever any microdrive is selected
+(`mdv_sel != 0`). This is load-bearing, not cosmetic: QDOS's own boot
+sequence (any ROM - Minerva, MGE) looks for a boot file on `mdv1_` right
+after the F1-F4 screen resolves, and the code path that detects "no medium
+present" and lets boot continue can ONLY be reached via a real gap
+interrupt - with `mdv_gap` permanently low, that interrupt never fires
+even once and QDOS hangs forever waiting for it. QDOS's own downstream
+polling loops already have generous (~0.5s) software timeouts and converge
+cleanly to "no medium found" on their own once the chain is started - see
+`DECISIONES.md`'s `M1040` section for the full investigation (confirmed
+byte-for-byte against both a real ROM disassembly and Minerva's GPL
+source).
+
+`mdv_sel` (drive selection from `mctrl`) and `led` are untouched.
 
 When milestone 3 (microdrive) is implemented: re-instantiate `mdv`, and
 give it a Vivado-clean `dpram` (same treatment `ql_rom`/`vram` already
 got - see `DECISIONES.md` Anexo A) rather than trying to synthesize the
-original `dpram.v`.
+original `dpram.v` - and reconsider whether the `mdv_gap` pulse generator
+above is still needed once real gap-detection timing exists.
 
 Files that stay in the repository but are excluded from the Vivado
 compile list because of this (not deleted): `rtl/mdv.v`.
 
-### Fixed the `ipl` assignment in `rtl/zx8302.v` (interrupt lines)
+### The `ipl` assignment in `rtl/zx8302.v` (interrupt lines)
 
-`assign ipl = { ipc_ipl_i[1] && (irq_pending[4:0] == 0), ipc_ipl_i[0] };`
-ANDs the external ipc's `ipl[1]` line with "no irq pending" - the opposite
-of its own comment ("any pending irq raises ipl to 2"). With the real
-embedded `ipc` (removed, see above), `ipc_ipl_i[1]` apparently defaulted
-high whenever the ipc had nothing else to report, so this acted as a
-defensive clamp against a genuine ipc signal. QL4M65's external stand-in
-(`keyboard.vhd`) never implements the real ipc's serial poll-and-relay
-protocol for zx8302's own interrupts (only its own keyboard commands 8/9),
-so it permanently drives `ipc_ipl_i` to `"00"` - meaning this line silenced
-`ipl[1]` unconditionally, including `zx8302`'s own `vsync_irq` (the ~50Hz
-frame interrupt Minerva/QDOS's scheduler depends on). Root-caused as the
-leading suspect for the reproducible post-RAM-test hang seen in every
-M1001-M1005 hardware test (see `DECISIONES.md`).
+`assign ipl = { ipc_ipl_i[1] || (irq_pending[4:0] != 0), ipc_ipl_i[0] };` -
+OR, not AND. Any zx8302-internal pending irq (xint/vsync/gap/intri, see
+below) can raise `ipl[1]` on its own, independent of the external ipc. This
+matters because `vsync_irq` (the ~50Hz tick the entire QDOS scheduler
+depends on) must be able to reach the CPU regardless of what the external
+ipc's own `ipl_i` line is doing - AND was tried twice (this project's very
+first hang, and again once the real 8049 was wired in) and both times it
+silenced `vsync_irq` whenever `ipc_ipl_i` happened to be low (i.e. almost
+always), freezing the whole system. See `DECISIONES.md`'s `M1006`/
+`M1031`-`M1037` sections for the full investigation.
 
-Changed the operator to OR + not-equal:
-`assign ipl = { ipc_ipl_i[1] || (irq_pending[4:0] != 0), ipc_ipl_i[0] };`
-so any zx8302-internal pending irq (xint/vsync/gap) can raise `ipl[1]` on
-its own, independent of the external ipc - matching the comment's literal
-intent. When updating from a newer upstream `zx8302.v`, re-apply this same
-one-line change if the `ipc`-removal surgery above is also re-applied
-(the external `ipc_ipl_i` port only exists because of that surgery).
+`main.vhd` currently ties `ipc_ipl_i` to `"00"` (see its own comment on the
+`i_zx8302` instantiation) because the real 8049 can assert `ipl_o[1]`
+without anything in this port ever completing the exchange that would make
+it lower again - with that permanently unconnected, this OR effectively
+just passes through `zx8302`'s own internal `irq_pending`.
+
+### New: "interface" interrupt (`intri`, bit1 of `irq_pending`) in `rtl/zx8302.v`
+
+Real QL hardware has an interrupt that fires whenever a data transfer with
+the IPC completes (`pc.intri`, per Minerva's own `inc/pc`) - the original
+`zx8302.v` never implemented it (hardcoded `1'b0` since this project's very
+first port). Added: `intri_irq` fires once `ipc_busy` transitions to idle
+(a real comdata/comctrl exchange with the external IPC just completed),
+cleared via `irq_ack[1]` (a bit already reserved in the interrupt-ack
+register, unused before this). It turned out not to be what was blocking
+SuperBASIC's own keyboard read (see `DECISIONES.md`'s `M1038`/`M1039`
+sections - the real blocker was the microdrive boot-file search above),
+but it is a genuine, previously-missing piece of real hardware behaviour,
+kept as a correctness improvement.
 
 MiSTer2MEGA65
 -------------

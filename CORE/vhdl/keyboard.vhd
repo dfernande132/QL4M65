@@ -1,59 +1,28 @@
 ---------------------------------------------------------------------------------------------------------
 -- Sinclair QL for MEGA65 (QL4M65)
 --
--- MEGA65 keyboard -> ZX8302 IPC link
+-- MEGA65 keyboard -> QL 8x8 keyboard matrix
 --
--- Replaces rtl/keyboard.v + rtl/ipc.v + rtl/T48/ (which emulates the QL's real
--- Intel 8049 IPC microcontroller) with a MEGA65-native translator that speaks
--- the ZX8302's comdata/comctrl serial link directly - the same architectural
--- choice as C64MEGA65 (drives the CIA1 matrix directly instead of emulating
--- PS/2) and AExp (synthesizes the CIA-A protocol directly instead of
--- emulating the Amiga's keyboard MCU).
+-- Reuses the exact byte/bit layout of the original rtl/keyboard.v's "matrix"
+-- output, just fed from M2M's key_num_i/key_pressed_n_i instead of ps2_key -
+-- this is exactly the same interface rtl/ipc.v itself expects from
+-- rtl/keyboard.v (a one-hot P1 row select reading back one matrix byte,
+-- see ipc.vhd).
 --
--- This file was built in two commits:
---   1) MEGA65 key -> QL 8x8 keyboard matrix. Reuses the exact byte/bit layout
---      of the original rtl/keyboard.v's "matrix" output, just fed from M2M's
---      key_num_i/key_pressed_n_i instead of ps2_key, so the IPC protocol
---      logic below can serve it exactly as rtl/ipc.v's P1-select/data-bus-
---      read logic expected from the real 8049.
---   2) The comdata/comctrl IPC protocol logic (THIS COMMIT) that serves this
---      matrix to the ZX8302 in place of the 8049. Bit-level framing is HIGH
---      confidence, verified against rtl/zx8302.v: comctrl is a free-running
---      strobe WE generate (the ZX8302 is a passive clock slave to it), and
---      each 1-bit transfer takes exactly 2 of our falling edges (1st just
---      consumes the CPU's Start bit, 2nd is the real bidirectional
---      exchange).
---
---      Byte/command-level semantics were originally a low-confidence guess
---      from public QL community documentation, then corrected by actually
---      disassembling rtl/ipc8049.hex (the real IPC ROM MiSTer's T48 core
---      executes) with a from-scratch MCS-48 disassembler built from
---      github.com/jblang/d52's opcode tables. Verified findings:
---        - The command dispatch (address 0x020B, `jmpp @a`) is a genuine
---          16-entry jump table keyed by a 4-BIT NIBBLE, not a byte - the
---          command value is received by a single call to the nibble-receive
---          routine at 0x074F. Commands 2/3, 4/5 and 6/7 share handlers in
---          pairs (consistent with symmetric "open/close/receive ser1 vs
---          ser2" commands); 8 and 9 are distinct, consistent with "read
---          keyboard" and "keyrow".
---        - Command 9 ("keyrow", address 0x0276): receives ONE MORE NIBBLE
---          (low 3 bits = row 0-7), builds a one-hot mask, reads the
---          matching kbd_matrix byte, and answers with a full BYTE (two
---          nibbles, high nibble first) - confirms the ROWSEL/RESPOND shape
---          below, but as nibble+nibble+byte, not byte+byte+byte.
---        - Bit order is MSB-first throughout (nibble reception via
---          repeated RLC at 0x0750-ish; byte transmission via JB7-then-
---          rotate at 0x0762), not LSB-first as first assumed.
---        - Command 8 ("read keyboard") turned out to service an internal
---          keyboard-event QUEUE (RAM 0x2B/0x2C onward), not a direct matrix
---          read - replicating it exactly would need reverse-engineering the
---          scan/interrupt routine that fills that queue, which has not been
---          done; left as the same safe 0x00 stub as before.
---      PENDING VALIDATION (real hardware/simulation) before main.vhd wires
---      this entity in for real (milestone 1's M1001 build) - this is now
---      grounded in the actual ROM instead of forum summaries, but a
---      hand-written disassembler is itself unverified until it's been
---      seen working against real hardware.
+-- QL4M65 (M1031): this file used to ALSO implement the ZX8302 comdata/comctrl
+-- IPC protocol by hand (M1001-M1030), reverse-engineered from a from-scratch
+-- disassembly of rtl/ipc8049.hex. That turned out to be the wrong approach:
+-- real Minerva never even calls the one command that reimplementation got
+-- right (9, "keyrow") - everything is gated behind command 1's status byte
+-- bit 0 ("keyboard event pending"), which was always answered clear, and the
+-- real keyboard read (command 8) is a stateful event QUEUE that was never
+-- implemented at all. Rather than re-derive that whole protocol by hand a
+-- second time, the IPC is now the REAL emulated Intel 8049 (see ipc.vhd),
+-- running the real firmware ROM - exactly what rtl/ipc.v does. This file's
+-- job shrank back to just the keyboard-matrix translation (part 1 of the
+-- original two-commit design); all comdata/comctrl/command logic (part 2)
+-- was removed. See DECISIONES.md for the full investigation and the M1029/
+-- M1030/M1031 history.
 --
 -- Key mapping notes (decided together with the user in chat, flagging the
 -- non-obvious ones so they are easy to find and revisit):
@@ -94,50 +63,15 @@ entity keyboard is
       clk_main_i       : in  std_logic;   -- QL core clock (84 MHz, main_clk)
       reset_i          : in  std_logic;
 
-      -- QL4M65 (M1025): the real 11MHz IPC crystal's clock-enable, already
-      -- generated in main.vhd (FRACT_11M) and fed to zx8302 - but zx8302.v
-      -- itself never uses its own ce_11m input (dangling since the embedded
-      -- "ipc" instance that used to consume it was removed - see
-      -- doc/m2m/exceptions.md). Used here instead to pace comctrl at a
-      -- speed derived from the real crystal, replacing the arbitrary
-      -- ~656kHz clk_main_i/128 divider from M1001-M1024.
-      ce_11m_i         : in  std_logic;
-
       -- M2M's MEGA65 keyboard interface (same convention as C64MEGA65/AExp
       -- keyboard.vhd): key_num_i cycles 0..79 at 1kHz, key_pressed_n_i is the
       -- debounced, low-active "is this key pressed now" answer.
       key_num_i        : in  integer range 0 to 79;
       key_pressed_n_i  : in  std_logic;
 
-      -- ZX8302 IPC serial link (replaces rtl/ipc.v's ports of the same
-      -- name/direction, see rtl/zx8302.v for the framing this must match)
-      comctrl_o        : out std_logic;                    -- strobe toward the ZX8302, free-running
-      comdata_i        : in  std_logic;                    -- the ZX8302's own raw outgoing bit (rtl/zx8302.v's ipc_comdata_in)
-      comdata_o        : out std_logic;                    -- '1' = released, '0' = driven low
-      audio_o          : out std_logic;                    -- IPC-generated audio: not implemented, unused in milestone 1
-      ipl_o            : out std_logic_vector(1 downto 0); -- IPC interrupt-priority lines: not implemented, tied to "no IRQ"
-
-      -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019): expose what's actually
-      -- coming through the comdata/comctrl link, to check whether Minerva
-      -- is really talking to us at all and with which command (see
-      -- main.vhd for how these get displayed; doc/m2m/exceptions.md for
-      -- the revert). M1018 showed CMD "6"/"7" (serial receive, not
-      -- keyboard-related) dominating - repurposed the "last ROWSEL" digit
-      -- (M1019) into a STICKY "ever seen" flag for commands 8/9 (and
-      -- anything else) specifically, since a once-per-second "last value"
-      -- sample would statistically favour whatever's most frequent and
-      -- could hide a rare cmd 8/9 entirely.
-      dbg_last_cmd_o     : out std_logic_vector(3 downto 0); -- last CMD nibble seen (CMD state)
-      dbg_seen_flags_o   : out std_logic_vector(3 downto 0); -- bit0=cmd8 ever seen, bit1=cmd9 ever seen, bit2=cmd6/7 ever seen, bit3=any other cmd ever seen (all sticky since reset)
-
-      -- QL4M65 TEMPORARY DEBUG AID (M1020): the real QL confirms holding
-      -- ANY key down forever also prevents Minerva's own 8-10s "no key ->
-      -- auto TV mode" timeout from ever firing - matching exactly what we
-      -- see (never times out). Prime suspect: a phantom/stuck-high bit in
-      -- ql_matrix even though nothing is actually pressed. Sticky, one bit
-      -- per matrix byte (row): sees a byte go non-idle ('/= "00000000"')
-      -- even once since reset.
-      dbg_matrix_seen_o  : out std_logic_vector(7 downto 0)
+      -- The QL's 8x8 keyboard matrix (see ipc.vhd, which feeds this to the
+      -- real emulated 8049's P1-selected data bus exactly as rtl/ipc.v does)
+      ql_matrix_o      : out std_logic_vector(63 downto 0)
    );
 end entity keyboard;
 
@@ -251,57 +185,7 @@ architecture beh of keyboard is
 
    -- the QL's 8x8 keyboard matrix: bit(8*byte + pos), same addressing as
    -- rtl/ipc.v's one-hot P1 byte-select into this 64-bit value
-   signal ql_matrix_real : std_logic_vector(63 downto 0);
-   signal ql_matrix      : std_logic_vector(63 downto 0);
-
-   -- QL4M65 TEMPORARY TEST (M1021, concluded): forcing the matrix to
-   -- permanently idle did NOT make Minerva's 8-10s no-input auto-timeout
-   -- fire either - rules out our keyboard-state generation (real MEGA65 key
-   -- scan/mapping) as the blocker. See DECISIONES.md for the follow-up
-   -- investigation. Reverted to real keyboard behaviour.
-   constant DBG_FORCE_IDLE_MATRIX : boolean := false;
-
-   -- QL4M65 (M1025): comctrl now paced from the real 11MHz IPC clock-enable
-   -- (ce_11m_i) instead of an arbitrary clk_main_i/128 divider (~656kHz,
-   -- M1001-M1024). The real 8049 strobes comctrl (its WR_n pin) via MOVX
-   -- instructions inside the bit receive/transmit routines (Anexo B.5) -
-   -- MOVX takes 2 machine cycles, and one 8049 machine cycle is 15 crystal
-   -- periods, so one strobe edge corresponds to roughly 2*15=30 crystal
-   -- periods. Toggle comctrl every 30 ce_11m_i pulses (~183kHz full pulse
-   -- rate) as a faithful approximation, instead of a from-scratch guess -
-   -- see DECISIONES.md for the full reasoning and what's still an
-   -- approximation (the real routine also has a variable-length "wait for
-   -- line idle" polling loop before each strobe, not modelled here).
-   constant CE11M_PER_EDGE : natural := 30;
-
-   -- IPC comdata/comctrl link (see architecture-level comment above)
-   -- SETIPL added (M1023): command C ("set P2.3") receives one more nibble
-   -- parameter after the command nibble, same shape as ROWSEL, but doesn't
-   -- transmit anything back - see the ipc8049.hex disassembly at 0x02C3 in
-   -- DECISIONES.md.
-   type t_cmd_state is (CMD, ROWSEL, RESPOND, SETIPL);
-
-   signal comctrl_r  : std_logic := '1';
-   signal phase_cnt  : unsigned(5 downto 0) := (others => '0');
-   signal edge_pulse : std_logic := '0';
-   signal edge_phase : std_logic := '0';   -- '0' before edge 1, '1' before edge 2
-
-   signal bit_cnt    : unsigned(2 downto 0) := (others => '0');
-   signal shift_in   : std_logic_vector(7 downto 0) := (others => '0');
-   signal resp_byte  : std_logic_vector(7 downto 0) := (others => '1');
-   signal cmd_state  : t_cmd_state := CMD;
-
-   -- QL4M65 (M1023): real IPC's "set/clear P2.3" state (command C), which
-   -- ipc.v wires directly to ipl[1] (ipl = t8049_p2_o[3:2]). Disassembled
-   -- rtl/ipc8049.hex at 0x02C3: receives one nibble, bit0 of it decides
-   -- ORL P2,#08h (set) vs ANL P2,#F7h (clear). Never implemented before -
-   -- ipl_o was hardcoded "00" regardless of what Minerva asked for.
-   signal ipl1_reg : std_logic := '0';
-
-   -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019/M1020)
-   signal dbg_last_cmd    : std_logic_vector(3 downto 0) := (others => '0');
-   signal dbg_seen_flags  : std_logic_vector(3 downto 0) := (others => '0');
-   signal dbg_matrix_seen : std_logic_vector(7 downto 0) := (others => '0');
+   signal ql_matrix : std_logic_vector(63 downto 0);
 
 begin
 
@@ -370,295 +254,90 @@ begin
    -- MEGA65 key -> QL keyboard matrix
    --
    -- Byte/bit layout copied from rtl/keyboard.v's "matrix" output, unchanged
-   -- so the IPC protocol logic below can serve it exactly as rtl/ipc.v's
-   -- P1-select/data-bus-read logic expected from the real 8049.
+   -- so ipc.vhd can serve it exactly as rtl/ipc.v's P1-select/data-bus-read
+   -- logic expects from the real 8049.
    ---------------------------------------------------------------------------
 
    -- byte 0: F4 F1 "5" F2 F3 F5 "4" "7"
-   ql_matrix_real(8*0+0) <= ql_f4;
-   ql_matrix_real(8*0+1) <= ql_f1;
-   ql_matrix_real(8*0+2) <= not key_pressed_n(m65_5);
-   ql_matrix_real(8*0+3) <= ql_f2;
-   ql_matrix_real(8*0+4) <= ql_f3;
-   ql_matrix_real(8*0+5) <= ql_f5;
-   ql_matrix_real(8*0+6) <= not key_pressed_n(m65_4);
-   ql_matrix_real(8*0+7) <= not key_pressed_n(m65_7);
+   ql_matrix(8*0+0) <= ql_f4;
+   ql_matrix(8*0+1) <= ql_f1;
+   ql_matrix(8*0+2) <= not key_pressed_n(m65_5);
+   ql_matrix(8*0+3) <= ql_f2;
+   ql_matrix(8*0+4) <= ql_f3;
+   ql_matrix(8*0+5) <= ql_f5;
+   ql_matrix(8*0+6) <= not key_pressed_n(m65_4);
+   ql_matrix(8*0+7) <= not key_pressed_n(m65_7);
 
    -- byte 1: Ret Left Up Esc Right "\" Space Down
-   ql_matrix_real(8*1+0) <= not key_pressed_n(m65_return);
-   ql_matrix_real(8*1+1) <= (not key_pressed_n(m65_left_crsr)) or ins_del_left;
-   ql_matrix_real(8*1+2) <= not key_pressed_n(m65_up_crsr);
-   ql_matrix_real(8*1+3) <= not key_pressed_n(m65_esc);
-   ql_matrix_real(8*1+4) <= not key_pressed_n(m65_horz_crsr);   -- QL Right
-   ql_matrix_real(8*1+5) <= not key_pressed_n(m65_no_scrl);     -- QL "\"
-   ql_matrix_real(8*1+6) <= not key_pressed_n(m65_space);
-   ql_matrix_real(8*1+7) <= not key_pressed_n(m65_vert_crsr);   -- QL Down
+   ql_matrix(8*1+0) <= not key_pressed_n(m65_return);
+   ql_matrix(8*1+1) <= (not key_pressed_n(m65_left_crsr)) or ins_del_left;
+   ql_matrix(8*1+2) <= not key_pressed_n(m65_up_crsr);
+   ql_matrix(8*1+3) <= not key_pressed_n(m65_esc);
+   ql_matrix(8*1+4) <= not key_pressed_n(m65_horz_crsr);   -- QL Right
+   ql_matrix(8*1+5) <= not key_pressed_n(m65_no_scrl);     -- QL "\"
+   ql_matrix(8*1+6) <= not key_pressed_n(m65_space);
+   ql_matrix(8*1+7) <= not key_pressed_n(m65_vert_crsr);   -- QL Down
 
    -- byte 2: "]" z . c b "GBP" m '
-   ql_matrix_real(8*2+0) <= not key_pressed_n(m65_arrow_up);    -- QL "]"
-   ql_matrix_real(8*2+1) <= not key_pressed_n(m65_z);
-   ql_matrix_real(8*2+2) <= not key_pressed_n(m65_dot);
-   ql_matrix_real(8*2+3) <= not key_pressed_n(m65_c);
-   ql_matrix_real(8*2+4) <= not key_pressed_n(m65_b);
-   ql_matrix_real(8*2+5) <= not key_pressed_n(m65_gbp);
-   ql_matrix_real(8*2+6) <= not key_pressed_n(m65_m);
-   ql_matrix_real(8*2+7) <= not key_pressed_n(m65_colon);       -- QL "'"
+   ql_matrix(8*2+0) <= not key_pressed_n(m65_arrow_up);    -- QL "]"
+   ql_matrix(8*2+1) <= not key_pressed_n(m65_z);
+   ql_matrix(8*2+2) <= not key_pressed_n(m65_dot);
+   ql_matrix(8*2+3) <= not key_pressed_n(m65_c);
+   ql_matrix(8*2+4) <= not key_pressed_n(m65_b);
+   ql_matrix(8*2+5) <= not key_pressed_n(m65_gbp);
+   ql_matrix(8*2+6) <= not key_pressed_n(m65_m);
+   ql_matrix(8*2+7) <= not key_pressed_n(m65_colon);       -- QL "'"
 
    -- byte 3: "[" Caps k s f "=" g ;
-   ql_matrix_real(8*3+0) <= not key_pressed_n(m65_arrow_left);  -- QL "["
-   ql_matrix_real(8*3+1) <= not key_pressed_n(m65_capslock);
-   ql_matrix_real(8*3+2) <= not key_pressed_n(m65_k);
-   ql_matrix_real(8*3+3) <= not key_pressed_n(m65_s);
-   ql_matrix_real(8*3+4) <= not key_pressed_n(m65_f);
-   ql_matrix_real(8*3+5) <= not key_pressed_n(m65_equal);
-   ql_matrix_real(8*3+6) <= not key_pressed_n(m65_g);
-   ql_matrix_real(8*3+7) <= not key_pressed_n(m65_semicolon);
+   ql_matrix(8*3+0) <= not key_pressed_n(m65_arrow_left);  -- QL "["
+   ql_matrix(8*3+1) <= not key_pressed_n(m65_capslock);
+   ql_matrix(8*3+2) <= not key_pressed_n(m65_k);
+   ql_matrix(8*3+3) <= not key_pressed_n(m65_s);
+   ql_matrix(8*3+4) <= not key_pressed_n(m65_f);
+   ql_matrix(8*3+5) <= not key_pressed_n(m65_equal);
+   ql_matrix(8*3+6) <= not key_pressed_n(m65_g);
+   ql_matrix(8*3+7) <= not key_pressed_n(m65_semicolon);
 
    -- byte 4: l 3 h 1 a p d j
-   ql_matrix_real(8*4+0) <= not key_pressed_n(m65_l);
-   ql_matrix_real(8*4+1) <= not key_pressed_n(m65_3);
-   ql_matrix_real(8*4+2) <= not key_pressed_n(m65_h);
-   ql_matrix_real(8*4+3) <= not key_pressed_n(m65_1);
-   ql_matrix_real(8*4+4) <= not key_pressed_n(m65_a);
-   ql_matrix_real(8*4+5) <= not key_pressed_n(m65_p);
-   ql_matrix_real(8*4+6) <= not key_pressed_n(m65_d);
-   ql_matrix_real(8*4+7) <= not key_pressed_n(m65_j);
+   ql_matrix(8*4+0) <= not key_pressed_n(m65_l);
+   ql_matrix(8*4+1) <= not key_pressed_n(m65_3);
+   ql_matrix(8*4+2) <= not key_pressed_n(m65_h);
+   ql_matrix(8*4+3) <= not key_pressed_n(m65_1);
+   ql_matrix(8*4+4) <= not key_pressed_n(m65_a);
+   ql_matrix(8*4+5) <= not key_pressed_n(m65_p);
+   ql_matrix(8*4+6) <= not key_pressed_n(m65_d);
+   ql_matrix(8*4+7) <= not key_pressed_n(m65_j);
 
    -- byte 5: 9 w i Tab r "-" y o
-   ql_matrix_real(8*5+0) <= not key_pressed_n(m65_9);
-   ql_matrix_real(8*5+1) <= not key_pressed_n(m65_w);
-   ql_matrix_real(8*5+2) <= not key_pressed_n(m65_i);
-   ql_matrix_real(8*5+3) <= not key_pressed_n(m65_tab);
-   ql_matrix_real(8*5+4) <= not key_pressed_n(m65_r);
-   ql_matrix_real(8*5+5) <= not key_pressed_n(m65_minus);
-   ql_matrix_real(8*5+6) <= not key_pressed_n(m65_y);
-   ql_matrix_real(8*5+7) <= not key_pressed_n(m65_o);
+   ql_matrix(8*5+0) <= not key_pressed_n(m65_9);
+   ql_matrix(8*5+1) <= not key_pressed_n(m65_w);
+   ql_matrix(8*5+2) <= not key_pressed_n(m65_i);
+   ql_matrix(8*5+3) <= not key_pressed_n(m65_tab);
+   ql_matrix(8*5+4) <= not key_pressed_n(m65_r);
+   ql_matrix(8*5+5) <= not key_pressed_n(m65_minus);
+   ql_matrix(8*5+6) <= not key_pressed_n(m65_y);
+   ql_matrix(8*5+7) <= not key_pressed_n(m65_o);
 
    -- byte 6: 8 2 6 q e 0 t u
-   ql_matrix_real(8*6+0) <= not key_pressed_n(m65_8);
-   ql_matrix_real(8*6+1) <= not key_pressed_n(m65_2);
-   ql_matrix_real(8*6+2) <= not key_pressed_n(m65_6);
-   ql_matrix_real(8*6+3) <= not key_pressed_n(m65_q);
-   ql_matrix_real(8*6+4) <= not key_pressed_n(m65_e);
-   ql_matrix_real(8*6+5) <= not key_pressed_n(m65_0);
-   ql_matrix_real(8*6+6) <= not key_pressed_n(m65_t);
-   ql_matrix_real(8*6+7) <= not key_pressed_n(m65_u);
+   ql_matrix(8*6+0) <= not key_pressed_n(m65_8);
+   ql_matrix(8*6+1) <= not key_pressed_n(m65_2);
+   ql_matrix(8*6+2) <= not key_pressed_n(m65_6);
+   ql_matrix(8*6+3) <= not key_pressed_n(m65_q);
+   ql_matrix(8*6+4) <= not key_pressed_n(m65_e);
+   ql_matrix(8*6+5) <= not key_pressed_n(m65_0);
+   ql_matrix(8*6+6) <= not key_pressed_n(m65_t);
+   ql_matrix(8*6+7) <= not key_pressed_n(m65_u);
 
    -- byte 7: Shift Ctrl Alt x v / n ,
-   ql_matrix_real(8*7+0) <= ql_shift;
-   ql_matrix_real(8*7+1) <= ql_ctrl;
-   ql_matrix_real(8*7+2) <= ql_alt;
-   ql_matrix_real(8*7+3) <= not key_pressed_n(m65_x);
-   ql_matrix_real(8*7+4) <= not key_pressed_n(m65_v);
-   ql_matrix_real(8*7+5) <= not key_pressed_n(m65_slash);
-   ql_matrix_real(8*7+6) <= not key_pressed_n(m65_n);
-   ql_matrix_real(8*7+7) <= not key_pressed_n(m65_comma);
+   ql_matrix(8*7+0) <= ql_shift;
+   ql_matrix(8*7+1) <= ql_ctrl;
+   ql_matrix(8*7+2) <= ql_alt;
+   ql_matrix(8*7+3) <= not key_pressed_n(m65_x);
+   ql_matrix(8*7+4) <= not key_pressed_n(m65_v);
+   ql_matrix(8*7+5) <= not key_pressed_n(m65_slash);
+   ql_matrix(8*7+6) <= not key_pressed_n(m65_n);
+   ql_matrix(8*7+7) <= not key_pressed_n(m65_comma);
 
-   -- QL4M65 TEMPORARY TEST (M1021, see DBG_FORCE_IDLE_MATRIX declaration above)
-   ql_matrix <= (others => '0') when DBG_FORCE_IDLE_MATRIX else ql_matrix_real;
-
-   ---------------------------------------------------------------------------
-   -- QL4M65 TEMPORARY DEBUG AID (M1020): sticky "this matrix byte (row) has
-   -- shown at least one bit set" per row, continuously monitored (not tied
-   -- to the IPC exchange at all) - checks for a phantom/stuck-pressed key
-   -- independent of whether keyboard.vhd is even being asked for it.
-   ---------------------------------------------------------------------------
-   dbg_matrix_watch : process (clk_main_i)
-   begin
-      if rising_edge(clk_main_i) then
-         if reset_i = '1' then
-            dbg_matrix_seen <= (others => '0');
-         else
-            for b in 0 to 7 loop
-               if ql_matrix(8*b+7 downto 8*b) /= "00000000" then
-                  dbg_matrix_seen(b) <= '1';
-               end if;
-            end loop;
-         end if;
-      end if;
-   end process dbg_matrix_watch;
-
-   ---------------------------------------------------------------------------
-   -- IPC comdata/comctrl protocol (see architecture-level comment above for
-   -- the confidence level of each part of this)
-   ---------------------------------------------------------------------------
-
-   comctrl_gen : process (clk_main_i)
-   begin
-      if rising_edge(clk_main_i) then
-         if reset_i = '1' then
-            phase_cnt  <= (others => '0');
-            comctrl_r  <= '1';
-            edge_pulse <= '0';
-         else
-            edge_pulse <= '0';
-            if ce_11m_i = '1' then
-               if phase_cnt = CE11M_PER_EDGE - 1 then
-                  phase_cnt <= (others => '0');
-                  if comctrl_r = '1' then
-                     edge_pulse <= '1';   -- about to fall: this IS the falling edge
-                  end if;
-                  comctrl_r <= not comctrl_r;
-               else
-                  phase_cnt <= phase_cnt + 1;
-               end if;
-            end if;
-         end if;
-      end if;
-   end process comctrl_gen;
-
-   comctrl_o <= comctrl_r;
-
-   -- Bit/unit/command tracking, advanced once per edge_pulse that lands on
-   -- "edge 2" (the real bidirectional data exchange; edge 1 only consumes
-   -- the CPU's Start bit and carries no information, see rtl/zx8302.v).
-   --
-   -- Unit length depends on state: CMD and ROWSEL are single 4-bit nibbles
-   -- (verified: rtl/ipc8049.hex receives the command and the keyrow
-   -- row-select each via one call to its 4-bit nibble-receive routine),
-   -- RESPOND is a full 8-bit byte (two nibbles, high nibble first, in the
-   -- real ROM). Bits are MSB-first throughout (verified in the ROM's
-   -- receive/transmit routines), so both directions shift left with the new
-   -- bit entering at the LSB - after N shifts, the first bit received/sent
-   -- ends up as the most significant bit of the N-bit unit.
-   ipc_fsm : process (clk_main_i)
-      variable v_shift  : std_logic_vector(7 downto 0);
-      variable v_unitlen : natural range 4 to 8;
-   begin
-      if rising_edge(clk_main_i) then
-         if reset_i = '1' then
-            edge_phase <= '0';
-            bit_cnt    <= (others => '0');
-            shift_in   <= (others => '0');
-            resp_byte  <= (others => '1');
-            cmd_state  <= CMD;
-            ipl1_reg   <= '0';
-            dbg_last_cmd   <= (others => '0');
-            dbg_seen_flags <= (others => '0');
-         elsif edge_pulse = '1' then
-            edge_phase <= not edge_phase;
-
-            if edge_phase = '1' then   -- this pulse is edge 2: the real exchange
-               if cmd_state = RESPOND then
-                  v_unitlen := 8;
-               else
-                  v_unitlen := 4;   -- CMD and ROWSEL are both single nibbles
-               end if;
-
-               if cmd_state /= RESPOND then
-                  -- receiving: MSB-first, shift left, new bit enters at LSB
-                  v_shift := shift_in(6 downto 0) & comdata_i;
-                  shift_in <= v_shift;
-               end if;
-
-               if bit_cnt = v_unitlen - 1 then
-                  bit_cnt <= (others => '0');
-
-                  case cmd_state is
-                     -- command nibble ends up in shift_in(3 downto 0)
-                     when CMD =>
-                        dbg_last_cmd <= v_shift(3 downto 0);
-                        if v_shift(3 downto 0) = x"9" then       -- "keyrow"
-                           dbg_seen_flags(1) <= '1';
-                           cmd_state <= ROWSEL;
-                        elsif v_shift(3 downto 0) = x"8" then     -- "read keyboard"
-                           dbg_seen_flags(0) <= '1';
-                           -- M1022 TEMPORARY TEST (concluded, reverted): tried
-                           -- x"FF" instead of x"00" for this stub, on the
-                           -- theory that Minerva might misread x"00" as a
-                           -- real queued key event rather than "queue
-                           -- empty". No change in behaviour - ruled out. Real
-                           -- encoding still not reverse-engineered.
-                           resp_byte <= x"00";
-                           cmd_state <= RESPOND;
-                        elsif v_shift(3 downto 0) = x"1" then     -- "interrupt status"
-                           -- QL4M65 (M1023): disassembled at 0x0228 - builds
-                           -- a status byte from P2.6, an internal "network"
-                           -- flag (RAM 0x20) and two more flags for pending
-                           -- ser1/ser2 conditions (RAM 0x4C/0x4D), then
-                           -- transmits it. We have none of that real
-                           -- hardware (no RS232, no network) - answer with
-                           -- no flags set (x"00") instead of never
-                           -- transmitting anything at all (which read as
-                           -- all-1s garbage to the CPU before this fix).
-                           resp_byte <= x"00";
-                           cmd_state <= RESPOND;
-                        elsif v_shift(3 downto 0) = x"C" then     -- "set P2.3" (= ipl[1])
-                           -- M1024 TEMPORARY REVERT: M1023 implemented this
-                           -- for real (SETIPL state, ipl1_reg driving
-                           -- ipl_o(1)) but the very next hardware test
-                           -- regressed badly - Minerva now hangs earlier,
-                           -- non-deterministically (different point on
-                           -- every reset). Suspected cause: once Minerva
-                           -- sets P2.3=1, nothing may be clearing it back in
-                           -- the way real hardware expects, leaving ipl[1]
-                           -- permanently asserted - a level-sensitive 68000
-                           -- interrupt that never clears would re-trigger
-                           -- constantly, timing-dependent, explaining the
-                           -- non-determinism. Reverted to passive ACK
-                           -- (command 1's fix is kept, tested separately -
-                           -- "one variable at a time"). See DECISIONES.md.
-                           dbg_seen_flags(3) <= '1';
-                           cmd_state <= CMD;
-                        elsif v_shift(3 downto 0) = x"6" or v_shift(3 downto 0) = x"7" then
-                           dbg_seen_flags(2) <= '1';
-                           cmd_state <= CMD;
-                        else                                      -- any other command: passive ACK
-                           dbg_seen_flags(3) <= '1';
-                           cmd_state <= CMD;
-                        end if;
-
-                     -- QL4M65 (M1023, currently unreachable - see the M1024
-                     -- revert note on command C above): the parameter
-                     -- nibble's bit 0 chooses ORL P2,#08h (set) vs
-                     -- ANL P2,#F7h (clear) in the real ROM (0x02C5-0x02CD) -
-                     -- no response is transmitted.
-                     when SETIPL =>
-                        ipl1_reg  <= v_shift(0);
-                        cmd_state <= CMD;
-
-                     -- row-select nibble: its low 3 bits choose which of
-                     -- the 8 ql_matrix bytes to answer with next
-                     when ROWSEL =>
-                        case to_integer(unsigned(v_shift(2 downto 0))) is
-                           when 0 => resp_byte <= ql_matrix( 7 downto  0);
-                           when 1 => resp_byte <= ql_matrix(15 downto  8);
-                           when 2 => resp_byte <= ql_matrix(23 downto 16);
-                           when 3 => resp_byte <= ql_matrix(31 downto 24);
-                           when 4 => resp_byte <= ql_matrix(39 downto 32);
-                           when 5 => resp_byte <= ql_matrix(47 downto 40);
-                           when 6 => resp_byte <= ql_matrix(55 downto 48);
-                           when others => resp_byte <= ql_matrix(63 downto 56);
-                        end case;
-                        cmd_state <= RESPOND;
-
-                     when RESPOND =>
-                        cmd_state <= CMD;
-                  end case;
-               else
-                  bit_cnt <= bit_cnt + 1;
-               end if;
-            end if;
-         end if;
-      end if;
-   end process ipc_fsm;
-
-   -- Drive our answer bit only while actually responding, MSB-first (bit 7
-   -- first); passive (released) otherwise, so we never interfere with a
-   -- command/parameter nibble we don't recognise.
-   comdata_o <= resp_byte(7 - to_integer(bit_cnt)) when cmd_state = RESPOND else '1';
-
-   -- Not implemented: no IPC-driven audio in milestone 1.
-   audio_o <= '0';
-
-   -- QL4M65 (M1023): ipl(1) = P2.3, now genuinely driven by the "set P2.3"
-   -- command (0xC) - see ipl1_reg above. ipl(0) = P2.2: no command was
-   -- found that controls it independently, left at '0' (unimplemented).
-   ipl_o <= ipl1_reg & '0';
-
-   -- QL4M65 TEMPORARY DEBUG AID (M1018/M1019/M1020)
-   dbg_last_cmd_o    <= dbg_last_cmd;
-   dbg_seen_flags_o  <= dbg_seen_flags;
-   dbg_matrix_seen_o <= dbg_matrix_seen;
+   ql_matrix_o <= ql_matrix;
 
 end architecture beh;

@@ -14,7 +14,67 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-07-28, sesión M1001)
+## 0. Estado actual del proyecto (actualizado: 2026-08-01, sesión M1040)
+
+**HITO: el QL arranca por completo en el MEGA65 - Minerva y MGE llegan al
+BASIC con teclado funcionando.** Tras la investigación `M1029`-`M1040`
+(resumen abajo), el core pasa el chequeo de RAM, muestra el logo, llega a
+la pantalla F1-F4, hace el timeout de 10s (o responde a F1/F2/F5) con
+normalidad, y entra en SuperBASIC con el teclado respondiendo. Primer
+arranque end-to-end de todo el proyecto. Detalle técnico completo en
+`DECISIONES.md`, secciones `M1029` a `M1040`.
+
+**Resumen del tramo `M1029`-`M1040` (el teclado/IPC, de raíz a resuelto):**
+1. `M1029`/`M1030`: `keyboard.vhd` generaba `comctrl` como oscilador libre
+   nunca sincronizado con la CPU - corrompía el primer comando real de
+   cualquier ROM. Arreglado (reactivo, disparado por el bit de arranque
+   real).
+2. **Redirección clave del usuario**: en vez de seguir puliendo la FSM de
+   protocolo hecha a mano, comparar cómo entrega MiSTer/MiST el teclado al
+   IPC real - reveló que Minerva nunca llama al comando que sí
+   implementamos (`9`, "keyrow") y siempre pide el comando `1` (estado)
+   antes que nada, saltándose el teclado si su bit "hay datos pendientes"
+   no está puesto (que nuestra FSM nunca ponía).
+3. `M1031`: sustituido el `keyboard.vhd` hecho a mano por el 8049 real
+   (núcleo T48, VHDL puro, sin modificar, del propio repo) ejecutando el
+   firmware real (`ipc8049-hermes.hex`) - `ipc.vhd` nuevo, puerto
+   estructural de `rtl/ipc.v`. `keyboard.vhd` se queda solo con la
+   traducción MEGA65→matriz QL.
+4. `M1032`-`M1034`: instrumentación (P1/P2 del 8049, luego traza de
+   `cpu_addr`) para localizar por qué Minerva seguía sin arrancar -
+   desensamblado real (con `capstone`, contra el `Minerva197_rom` de
+   verdad) confirmó que la CPU estaba atrapada en el propio planificador
+   de QDOS (`ss_reshd`/`ss_dljob`), sin encontrar nunca un trabajo listo.
+5. `M1035`: confirmado que la causa era `ipl[1]` del 8049 real quedándose
+   permanentemente asserted (nada en el sistema lo bajaba de nuevo) -
+   forzar `ipc_ipl_i` a `"00"` desatascó el arranque por completo (se
+   mantiene así; ver `zx8302.v`/`main.vhd`).
+6. `M1036`/`M1037`: intento de arreglo más fino (`OR`→`AND` en `zx8302.v`
+   con `ipc_ipl_i` real reconectado) - **regresión real**, revertido:
+   `AND` bloquea `vsync_irq` casi siempre (el mismo bug de `M1001`-`M1005`
+   reintroducido). Vuelta a la configuración de `M1035`.
+7. `M1038`/`M1039`: implementada la interrupción "interface" (`intri`,
+   bit1) que faltaba en `zx8302.v` desde el principio del proyecto -
+   mejora real de fidelidad al hardware, pero no era la pieza que
+   bloqueaba el teclado del BASIC.
+8. **`M1040`, el arreglo real**: a petición del usuario, comparar qué
+   implementa MiSTer que nosotros no - el microdrive. Confirmado, byte a
+   byte contra el código fuente real de Minerva, que el arranque de
+   SuperBASIC busca un fichero de arranque en `mdv1_` y se queda esperando
+   para siempre una interrupción "gap" que `zx8302.v` nunca generaba
+   (`mdv_gap` fijo a `0` desde `M1001`). Arreglado con un generador de
+   pulso periódico de `mdv_gap` - no hace falta microdrive real, los
+   propios timeouts de QDOS convergen solos a "sin soporte" en cuanto
+   reciben el primer pulso.
+
+**Limpieza post-hito (`M1041`)**: retirado el overlay de depuración
+temporal (`M1016`-`M1039`, ya agotado - toda la información que podía dar
+ya se usó), los puertos de depuración de `ipc.vhd`/`zx8301.v`, y
+condensados los comentarios históricos en `zx8302.v` que quedaron
+obsoletos tras encontrarse la causa real. Ver `doc/m2m/exceptions.md` para
+el estado final de cada cambio respecto al MiSTer original.
+
+## 0.1 Estado histórico (hasta M1001, sección original sin tocar)
 
 **`M1001` conseguido.** `main.vhd` ya instancia el core QL real: `fx68k`
 (CPU) + `zx8301` (vídeo) + `zx8302` (E/S, modificado para exponer el enlace
@@ -58,14 +118,27 @@ razonamiento y verificación byte a byte contra el fichero real en
 - El recorte residual de ~1 carácter en el menú OSD: confirmado en otro
   monitor HDMI que se ve perfecto - es overscan del monitor de pruebas
   original, no un bug del core. Aparcado definitivamente, no se toca.
-- `M1016`/`M1017`: encontrada y corregida (pendiente de confirmar en
-  hardware) la causa de que Minerva/ROMs originales se queden colgadas tras
-  el logo - faltaba invertir `cpu_ipl` antes de `IPL0n`/`IPL1n`/`IPL2n` en
-  `main.vhd` (`fx68k` trata esos pines como activos a nivel bajo de
-  verdad). Ver `DECISIONES.md` para el diagnóstico completo.
-- Validar el protocolo IPC del teclado (`keyboard.vhd`) contra
-  hardware/simulación real — sigue basado en un desensamblado propio no
-  contrastado externamente (Anexo B de `DECISIONES.md`).
+- `M1016`/`M1017`: **confirmado en hardware.** Faltaba invertir `cpu_ipl`
+  antes de `IPL0n`/`IPL1n`/`IPL2n` en `main.vhd` (`fx68k` trata esos pines
+  como activos a nivel bajo de verdad). Con el arreglo, Minerva llega por
+  primera vez a la pantalla real F1/F2/F3/F4. Ver `DECISIONES.md` para el
+  diagnóstico completo.
+- **`M1018`-`M1028`: investigación del bloqueo en la pantalla F1-F4** (ni
+  pulsación ni timeout de ~10s avanzan, en NINGUNA ROM). Descartado:
+  teclas fantasma, basura de padding de ROM, codificación de la respuesta
+  del comando 8, desajuste de temporización de `comctrl` frente al reloj
+  real de 11MHz. Investigación del planificador de QDOS (`sv_pollm`,
+  `ss_tlist`/`ss_reshd`) inconclusa (`M1027`/`M1028`).
+- **`M1029`: causa encontrada y arreglo aplicado (pendiente de probar en
+  hardware).** `comctrl_gen` en `keyboard.vhd` generaba `comctrl_o` como un
+  oscilador libre, nunca sincronizado con las escrituras reales de la CPU
+  a IPCWR - durante los silencios entre sondeos de teclado se colaban
+  miles de flancos "fantasma" que la máquina de estados de comandos
+  interpretaba como bits reales, corrompiendo el primer comando real de
+  cualquier ROM. Arreglado: `comctrl_o` ahora es reactivo, solo genera sus
+  2 flancos por bit al detectar el bit de arranque real de la CPU
+  (`comdata_i` 1->0). Ver `DECISIONES.md` sección `M1029` para el análisis
+  completo.
 - Pasar la RAM principal de BRAM a HyperRAM de verdad (decisión explícita de
   esta sesión: BRAM primero para bajar el riesgo de esta compilación,
   HyperRAM después si el core arranca bien en hardware).

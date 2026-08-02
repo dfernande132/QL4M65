@@ -7,6 +7,8 @@ set_param general.maxThreads 8
 open_project {E:/QL_MEGA65/Fase0/CoreQL/CORE/CORE-R6.xpr}
 
 set core_ql_dir {E:/QL_MEGA65/Fase0/CoreQL/CORE/QL_MiSTer}
+set core_vhdl_dir {E:/QL_MEGA65/Fase0/CoreQL/CORE/vhdl}
+set t48_dir "$core_ql_dir/rtl/T48"
 
 add_files -norecurse -fileset sources_1 [list \
     "$core_ql_dir/rtl/fx68k/fx68k.sv" \
@@ -17,6 +19,47 @@ add_files -norecurse -fileset sources_1 [list \
     "$core_ql_dir/rtl/zx8301.v" \
     "$core_ql_dir/rtl/zx8302.v" \
     "$core_ql_dir/rtl/ql_timing.sv" \
+]
+
+# QL4M65 (M1031): the real emulated IPC (Intel 8049) - T48 core (OpenCores
+# project, plain VHDL, 100% unmodified) replacing keyboard.vhd's own
+# M1018-M1030 hand-rolled comdata/comctrl protocol FSM. File list taken
+# verbatim from the original project's own compile list
+# (rtl/T48/T8049.qip) - not guessed. ipc.vhd/ipc_rom_t49.vhd are QL4M65's
+# own new glue files (see their headers); ipc_rom_t49.vhd provides a
+# Vivado-clean "rom_t49" so t49_rom-struct-a.vhd (below, unmodified) never
+# sees the Altera-only rtl/rom_t49.vhd this project doesn't add.
+add_files -norecurse -fileset sources_1 [list \
+    "$t48_dir/t49_rom-struct-a.vhd" \
+    "$t48_dir/system/t49_rom-e.vhd" \
+    "$t48_dir/system/generic_ram_ena.vhd" \
+    "$t48_dir/decoder_pack-p.vhd" \
+    "$t48_dir/timer.vhd" \
+    "$t48_dir/t48_core_comp_pack-p.vhd" \
+    "$t48_dir/t48_pack-p.vhd" \
+    "$t48_dir/t48_comp_pack-p.vhd" \
+    "$t48_dir/psw.vhd" \
+    "$t48_dir/pmem_ctrl_pack-p.vhd" \
+    "$t48_dir/pmem_ctrl.vhd" \
+    "$t48_dir/p2.vhd" \
+    "$t48_dir/p1.vhd" \
+    "$t48_dir/opc_table.vhd" \
+    "$t48_dir/opc_decoder.vhd" \
+    "$t48_dir/int.vhd" \
+    "$t48_dir/decoder.vhd" \
+    "$t48_dir/db_bus.vhd" \
+    "$t48_dir/clock_ctrl.vhd" \
+    "$t48_dir/bus_mux.vhd" \
+    "$t48_dir/alu_pack-p.vhd" \
+    "$t48_dir/dmem_ctrl.vhd" \
+    "$t48_dir/dmem_ctrl_pack-p.vhd" \
+    "$t48_dir/cond_branch_pack-p.vhd" \
+    "$t48_dir/cond_branch.vhd" \
+    "$t48_dir/alu.vhd" \
+    "$t48_dir/t48_core.vhd" \
+    "$t48_dir/t8049_notri.vhd" \
+    "$core_vhdl_dir/ipc_rom_t49.vhd" \
+    "$core_vhdl_dir/ipc.vhd" \
 ]
 
 set_property file_type SystemVerilog [get_files "$core_ql_dir/rtl/fx68k/fx68k.sv"]

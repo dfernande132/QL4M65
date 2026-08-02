@@ -6,6 +6,8 @@ CORE/.Xil
 CORE/vivado*.jou
 CORE/vivado*.log
 CORE/vivado_pid*
+CORE/*.jou
+CORE/*.log
 CORE/*ip_user_files
 CORE/webtalk*.*
 CORE/m2m-rom/*.def
