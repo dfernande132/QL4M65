@@ -84,6 +84,7 @@ type WHS_RECORD_ARRAY_TYPE is array (0 to WHS_RECORDS - 1) of WHS_RECORD_TYPE;
 constant SCR_WELCOME : string :=
 
    "Sinclair QL for MEGA65 (QL4M65)\n" &
+   "Desarrollado por dfsantos (2026)\n\n\n" &
    "Milestone 1 - MEGA65 port in progress\n\n" &
 
    "Based on MiSTer-devel/QL_MiSTer\n" &
@@ -272,9 +273,13 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 --             otherwise you will experience visual glitches.
 -- QL4M65: milestone 1's Options menu is minimal per the CONF_STR table in
 -- PORTING-PLAN.md - almost everything is fixed in code (scandoubler, scale,
--- CPU speed, RAM size); the only real menu items are loading the system ROM
--- and closing the menu (Reset is a dedicated M2M key, not an Options item).
-constant OPTM_SIZE         : natural := 4;  -- amount of items including empty lines:
+-- CPU speed, RAM size). One flat menu (no real submenu navigation): "ROM"
+-- is a plain non-selectable section heading (OPTM_G_TEXT) directly above
+-- its three items, all visible on screen at once. SPEED/RAM/Microdrive
+-- section headings will be added the same way exactly when each feature
+-- lands in a later milestone, rather than as empty placeholders now.
+-- Reset is a dedicated M2M key, not an Options item.
+constant OPTM_SIZE         : natural := 8;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -285,26 +290,43 @@ constant OPTM_SIZE         : natural := 4;  -- amount of items including empty l
 -- 23 chars made the box ~51% of the screen width for a menu whose only real
 -- content is "ROM:%s"/"Close Menu" (11 chars each); 18 leaves margin for a
 -- longer loaded ROM filename while looking proportioned like AExp/C64MEGA65's
--- own Options menus (confirmed via M1005 hardware test screenshots).
-constant OPTM_DX           : natural := 18;
-constant OPTM_DY           : natural := 4;
+-- own Options menus (confirmed via M1005 hardware test screenshots). Widened
+-- to 20 for the Main/Back ROM redesign: " Extract Back ROM" is the longest
+-- label now (18 chars), still comfortably inside 20 with a little margin.
+-- No submenus here, so OPTM_DY = OPTM_SIZE (all 8 lines always visible).
+constant OPTM_DX           : natural := 20;
+constant OPTM_DY           : natural := 8;
 
 -- QL4M65 M1006: added a "Sinclair QL" headline (OPTM_G_HEADLINE - shown in a
 -- brighter/yellow color by the framework), same pattern as AExp's "Amiga 500"
--- and C64MEGA65's own headline.
+-- and C64MEGA65's own headline. "ROM" (OPTM_G_TEXT, plain non-highlighted,
+-- non-selectable label - confirmed with user: only the top headline gets
+-- the bright color) sits directly above its three items, all in one flat,
+-- always-fully-visible menu - no submenu navigation. Main ROM/Back ROM
+-- order here must match C_CRTROMS_MAN's array order in globals.vhd (Main =
+-- rom 0, Back = rom 1), since OPTM_G_LOAD_ROM's "first occurrence = rom 0,
+-- second = rom 1" numbering is purely positional. "Extract Back ROM" is a
+-- momentary action (no file browser), same pattern AExp uses for its
+-- "Reload Screen Config" item.
 constant OPTM_ITEMS        : string :=
 
-   " Sinclair QL\n"         &    -- headline
-   " ROM:%s\n"              &    -- load the QL system ROM (Minerva)
-   "\n"                     &
-   " Close Menu\n";
+   " Sinclair QL\n"         &    -- 0: headline
+   "\n"                     &    -- 1: separator
+   " ROM\n"                 &    -- 2: section heading (plain text, not selectable)
+   " Main ROM:%s\n"         &    -- 3: load the QL system ROM (Minerva, MGE, JS...), 48K
+   " Back ROM:%s\n"         &    -- 4: load the QL extension ROM (TK2, Pascal...), 16K
+   " Extract Back ROM\n"    &    -- 5: clear the 16K Back ROM slot (momentary action)
+   "\n"                     &    -- 6: separator
+   " Close Menu\n";               -- 7: close menu
 
 -- define your own constants here and choose meaningful names
 -- make sure that your first group uses the value 1 (0 means "no menu item", such as text and line),
 -- and be aware that you can only have a maximum of 254 groups (255 means "Close Menu");
 -- also make sure that your group numbers are monotonic increasing (e.g. 1, 2, 3, 4, ...)
 -- single-select items and therefore also drive mount items need to have unique identifiers
-constant OPTM_G_ROM        : integer := 1;
+constant OPTM_G_MAINROM         : integer := 1;
+constant OPTM_G_BACKROM         : integer := 2;
+constant OPTM_G_BACKROM_EXTRACT : integer := 3;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -312,10 +334,14 @@ type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC-
 -- define your menu groups: which menu items are belonging together to form a group?
 -- where are separator lines? which items should be selected by default?
 -- make sure that you have exactly the same amount of entries here than in OPTM_ITEMS and defined by OPTM_SIZE
-constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_HEADLINE,                          -- Sinclair QL (headline)
-                                             OPTM_G_ROM + OPTM_G_LOAD_ROM + OPTM_G_START, -- ROM:%s, cursor start position
-                                             OPTM_G_LINE,                              -- Line
-                                             OPTM_G_CLOSE                              -- Close Menu
+constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_HEADLINE,                                 -- 0: Sinclair QL (headline)
+                                             OPTM_G_LINE,                                     -- 1: separator
+                                             OPTM_G_TEXT,                                     -- 2: ROM (section heading)
+                                             OPTM_G_MAINROM + OPTM_G_LOAD_ROM + OPTM_G_START, -- 3: Main ROM:%s, cursor start position
+                                             OPTM_G_BACKROM + OPTM_G_LOAD_ROM,                -- 4: Back ROM:%s
+                                             OPTM_G_BACKROM_EXTRACT + OPTM_G_SINGLESEL,       -- 5: Extract Back ROM (momentary action)
+                                             OPTM_G_LINE,                                     -- 6: separator
+                                             OPTM_G_CLOSE                                     -- 7: Close Menu
                                            );
 
 --------------------------------------------------------------------------------------------------------------------

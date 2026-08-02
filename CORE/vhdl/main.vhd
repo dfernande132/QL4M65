@@ -70,8 +70,9 @@ entity main is
       pot2_x_i                : in  std_logic_vector(7 downto 0);
       pot2_y_i                : in  std_logic_vector(7 downto 0);
 
-      -- QL4M65: system ROM (Minerva), 32K x 16-bit words, loaded by the
-      -- QNICE Shell via mega65.vhd's ql_rom_u/l (C_DEV_QL_MINERVA).
+      -- QL4M65: system ROM (Main 48K + Back 16K), 32K x 16-bit words total,
+      -- loaded by the QNICE Shell via mega65.vhd's ql_rom_u/l
+      -- (C_DEV_QL_MAINROM/C_DEV_QL_BACKROM).
       ql_rom_addr_o           : out std_logic_vector(14 downto 0);
       ql_rom_data_i           : in  std_logic_vector(15 downto 0)
    );

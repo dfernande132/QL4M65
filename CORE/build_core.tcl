@@ -6,9 +6,27 @@ set_param general.maxThreads 8
 
 open_project {E:/QL_MEGA65/Fase0/CoreQL/CORE/CORE-R6.xpr}
 
+# QL4M65: re-applied on every build (not just set once by hand in the
+# .xpr) so it can never silently go missing again - see synth_pre.tcl's
+# own header comment for why this is needed at all (M1042 finding).
+set_property STEPS.SYNTH_DESIGN.TCL.PRE {E:/QL_MEGA65/Fase0/CoreQL/CORE/m2m-rom/synth_pre.tcl} [get_runs synth_1]
+
 set core_ql_dir {E:/QL_MEGA65/Fase0/CoreQL/CORE/QL_MiSTer}
 set core_vhdl_dir {E:/QL_MEGA65/Fase0/CoreQL/CORE/vhdl}
 set t48_dir "$core_ql_dir/rtl/T48"
+
+# QL4M65: the generic M2M CSR/"parse status" protocol handler
+# (M2M/vhdl/qnice_csr.vhd) - never needed before this project implemented
+# it (see mega65.vhd's i_main_csr/i_back_csr and DECISIONES.md for why
+# manual ROM loading always hung QNICE solid without it). Not part of the
+# project's original file list since it was never used until now. Needs
+# VHDL2008 (reads its own 'out' ports, e.g. qnice_data_o <= ... &
+# qnice_req_status_o - legal in 2008, not in 93), same as several other
+# framework files already in this project.
+add_files -norecurse -fileset sources_1 [list \
+    "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/qnice_csr.vhd" \
+]
+set_property file_type {VHDL 2008} [get_files "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/qnice_csr.vhd"]
 
 add_files -norecurse -fileset sources_1 [list \
     "$core_ql_dir/rtl/fx68k/fx68k.sv" \

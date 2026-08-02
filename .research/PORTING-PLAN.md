@@ -14,7 +14,47 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-01, sesión M1040)
+## 0. Estado actual del proyecto (actualizado: 2026-08-02, sesión M1047 — MILESTONE 1 CERRADO)
+
+**MILESTONE 1 CERRADO Y CONFIRMADO POR EL USUARIO.** Tras el arranque
+end-to-end conseguido en `M1040` (resumen del tramo `M1029`-`M1040` más
+abajo), la sesión `M1042`-`M1047` cerró el hito con una tanda de pulido
+sustancial, probada a fondo en hardware real:
+
+- **Causa raíz real del cuelgue "hay que hacer un hard reset al cambiar de
+  ROM" encontrada y arreglada (`M1045`)**: no era la ROM vieja quedándose en
+  la CPU, era que QNICE mismo se quedaba colgado de verdad (bucle infinito
+  sin timeout) porque nuestro dispositivo de carga manual nunca implementó
+  el protocolo CSR genérico del framework (`M2M/vhdl/qnice_csr.vhd`) que el
+  firmware necesita para saber que un fichero terminó de cargarse. Bug
+  presente desde que existe la carga manual de ROM, no introducido esta
+  sesión - ver `DECISIONES.md` sección `M1042`-`M1047` para el detalle
+  completo y la comparación con `AExp/CORE/vhdl/adf_mount_wrapper.vhd`, que
+  sí lo implementa.
+- **Main ROM (48K) + Back ROM (16K) como dos slots de tamaño fijo**
+  (`C_DEV_QL_MAINROM`/`C_DEV_QL_BACKROM`), auto-carga desde
+  `/ql4m65/main.rom`+`/ql4m65/back.rom`, acción "Extract Back ROM", y reset
+  automático del core tras cualquier carga/extracción manual por menú -
+  cierra por completo los items (a)/(b) pendientes de `M1041`.
+- **Rediseño completo del mapeo de teclado** a "distribución MEGA65
+  nativa" (lo que pone en la tecla del MEGA65 es lo que sale en la QL, no lo
+  que tiene el QL real en esa combinación) - diseñado tecla a tecla con el
+  usuario contrastando fotos reales de ambos teclados, documentado en
+  `.research/keyboard-mapping-design.md`.
+- El fichero de pre-síntesis de Vivado (`synth_pre.tcl`) nunca estuvo
+  enganchado al proyecto - arreglado, ahora se reaplica en cada build desde
+  `build_core.tcl` y ya no puede desaparecer silenciosamente otra vez.
+
+Detalle técnico completo de las 6 compilaciones (`M1042`-`M1047`) en
+`DECISIONES.md`. **Próxima compilación: `M2001`** - arranca Milestone 2, que
+pasa a ser **microdrive virtual** en vez de ampliación de memoria/velocidad
+(reordenado con el usuario al cierre de este hito: el microdrive permite
+probar software real del QL sin ampliar cuanto antes, con menos riesgo
+arquitectónico que migrar a HyperRAM; ver sección 7 para el detalle de la
+reordenación). La numeración de builds pasa de `M1xxx` a `M2xxx` para
+marcar el cambio de milestone.
+
+## 0.2 Resumen histórico: cómo se llegó al arranque completo (`M1029`-`M1040`, cerrado 2026-08-01)
 
 **HITO: el QL arranca por completo en el MEGA65 - Minerva y MGE llegan al
 BASIC con teclado funcionando.** Tras la investigación `M1029`-`M1040`
@@ -419,7 +459,25 @@ Fase 3 parcial, Fases 5-7 en curso (bloqueante actual: instanciar
 `fx68k`/`zx8301`/`zx8302` y la lógica de bus en `main.vhd`, la compilación
 `M1001`), Fases 8-12 pendientes.
 
-### Milestone 2 — Ampliación de memoria y velocidad
+### Milestone 2 — Microdrive virtual (reordenado 2026-08-02, cierre de Milestone 1)
+
+**Reordenación explícita respecto al plan original** (que tenía aquí la
+ampliación de memoria/velocidad, ver Milestone 3 más abajo): tras la
+experiencia de `M1029`-`M1047`, se prioriza el microdrive virtual (`.MDV`,
+formato QLAY, vía `vdrives.vhd`/FAT32 de QNICE — mismo patrón "vdrives" que
+ya usan otros cores M2M, por ejemplo el ADF de AExp) porque permite empezar a
+probar software real del QL (no solo ROMs/BASIC sintéticos) sin depender de
+ampliar memoria primero, y porque la razón original para hacer memoria antes
+("evitar rehacer el camino de RAM si se construye primero sobre BRAM") ya no
+aplica — Milestone 1 acabó construyéndose sobre BRAM de todas formas y así
+es como arranca hoy. El microdrive es además un trabajo más autocontenido
+(protocolo de montaje de imagen ya resuelto por el framework) frente a la
+migración a HyperRAM, que toca timing de memoria compartida con vídeo/DMA y
+tiene un riesgo abierto ya anotado en la decisión pendiente 6 (compatibilidad
+de `ql_timing.sv` con la latencia real de HyperRAM). Es el hito más parecido
+en espíritu al "floppy mount + Workbench boot" del port del Amiga.
+
+### Milestone 3 — Ampliación de memoria y velocidad (antes Milestone 2)
 
 Los tres tamaños de RAM del requisito inicial (128k/640k/4096k, todos sobre
 HyperRAM) seleccionables desde el menú OSD, más los modos de velocidad de CPU
@@ -428,14 +486,14 @@ múltiplos del reloj base (sección 3), así que es principalmente exponer las
 opciones de `config.vhd` y verificar que la HyperRAM aguanta el ancho de banda
 a la velocidad más alta ("Full", 84 MHz de bus).
 
-### Milestone 3 — Almacenamiento
+### Milestone 4 — Almacenamiento adicional (antes parte de Milestone 3)
 
-Acceso a disco: microdrive (`.MDV`, formato QLAY) y QL-SD (imágenes QXL.WIN vía
-`vdrives.vhd`/FAT32 de QNICE). Es el hito más parecido en espíritu al "floppy
-mount + Workbench boot" del port del Amiga.
+QL-SD (imágenes QXL.WIN vía `vdrives.vhd`/FAT32 de QNICE, mismo mecanismo que
+el microdrive de Milestone 2 pero para el almacenamiento moderno tipo disco
+duro).
 
 (GoldCard/SMSQE y el ratón quedan sin hito asignado todavía — se revisará
-cuando los tres milestones anteriores estén cerrados.)
+cuando los milestones anteriores estén cerrados.)
 
 ## 8. Decisiones pendientes (para el usuario o para el arranque de Fase 4/5 en Claude Code)
 
@@ -551,3 +609,25 @@ CoreQL/
 
 Nada de esto es todavía un repositorio git propio (no hay `.git` en `CoreQL/`).
 Es una copia de trabajo local, tal como se decidió en este hilo.
+
+---
+
+## 10. Referencias externas
+
+Documentación externa relevante para el hardware original del QL, a consultar
+cuando haga falta el detalle de bajo nivel (registros exactos, esquemas,
+matriz de teclado, temporización de microdrives, etc.) que no viene en el
+código fuente del core MiSTer:
+
+- **QL Service Manual (Manual de Servicio del QL)** — Thorn (EMI) Datatech
+  Ltd. para Sinclair Research Ltd., octubre de 1985. Versión HTML en
+  castellano: https://sinclairql.speccy.org/manuales/qlsm/
+  Contenido relevante para este proyecto: descripción del sistema (CPU
+  MC68008, IPC Intel 8049, organización de memoria, control de periféricos
+  ZX8301/ZX8302/IC28, microdrives), diagramas de bloques, esquema del circuito
+  (Issue 5 e Issue 6), diagrama de la matriz del teclado y detección de fallos
+  en microdrives. Especialmente útil para contrastar el comportamiento real
+  del IPC 8049 y de la matriz de teclado contra lo que asumimos al escribir
+  `keyboard.vhd` (sección 5 y decisión 2 de este documento), y para el mapa de
+  memoria y la semántica exacta de ZX8301/ZX8302 si el código del core deja
+  dudas.

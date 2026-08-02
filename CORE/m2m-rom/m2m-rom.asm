@@ -144,9 +144,95 @@ PREP_START      INCRB
 ; Output:
 ;   R8: 0=OK, else pointer to string with error message
 ;   R9: 0=OK, else error code
+;
+; QL4M65: "Main ROM:%s"/"Back ROM:%s" (OPTM_G_MAINROM/OPTM_G_BACKROM,
+; config.vhd) are manual CRT/ROM loads - options.asm's OPTM_CB_SEL already
+; ran HANDLE_MOUNTING (the actual file load into the QNICE device buffer)
+; before calling us, so by the time we get here the new ROM is already
+; sitting in ql_rom_u/l. Without a reset, the CPU keeps running against
+; the old ROM's now-stale BRAM contents (previously required a manual ~2s
+; hard reset - and worse, before M2M/vhdl/qnice_csr.vhd was wired up in
+; mega65.vhd, QNICE itself hung solid on every manual load and a hard
+; reset was the ONLY way out - see DECISIONES.md). Pulse the core reset
+; via M2M$CSR the same way the boot sequence itself un-resets the core
+; (shell.asm START_CONNECT) - reset_manager.vhd stretches this to the
+; hardware-guaranteed minimum duration (RESET_COUNTER, config.vhd), so a
+; short WAIT333MS here is enough headroom. Confirmed on real hardware
+; (M1044): this core-only reset does not disturb the freshly-loaded ROM
+; bytes in BRAM - only a *physical* hard reset re-runs CRTROM_AUTOLOAD
+; and would revert to whatever's on the SD card, which is expected.
+;
+; "Extract Back ROM" (OPTM_G_BACKROM_EXTRACT) is a momentary action, no
+; file browser involved: zero the 16K Back ROM device directly
+; (CLEAR_BACK_ROM below), then reset the same way, so the cleared ROM
+; takes effect immediately, same as a normal load. Two cosmetic fixes
+; on top (found in testing): CRTROM_MAN_LDF only gets cleared by a real
+; file load, so "Back ROM:%s" would otherwise keep showing the just-
+; extracted ROM's stale name instead of reverting to "<Load>"; and
+; being a plain OPTM_G_SINGLESEL item, "Extract Back ROM" would show a
+; persistent "=" mark once triggered (same issue AExp's own "Reload
+; Screen Config" momentary action guards against, same fix applied here:
+; M2M$FORCE_MENU clears the selection, OPTM_SHOW repaints every label,
+; OPTM_SELECT restores the cursor highlight).
 OSM_SEL_POST    INCRB
-                XOR     R8, R8
+
+                CMP     OPTM_G_MAINROM, R8
+                RBRA    _OSM_SP_RESET, Z
+                CMP     OPTM_G_BACKROM, R8
+                RBRA    _OSM_SP_RESET, Z
+                CMP     OPTM_G_BACKROM_EXTRACT, R8
+                RBRA    _OSM_SP_RET, !Z
+
+                RSUB    CLEAR_BACK_ROM, 1
+
+                MOVE    CRTROM_MAN_LDF, R0
+                ADD     1, R0                   ; Back ROM = manual CRT/ROM #1
+                MOVE    0, @R0                  ; "not loaded" -> "%s" shows <Load>
+
+                MOVE    OPTM_CUR_SEL, R8
+                MOVE    @R8, R8
+                XOR     R9, R9                  ; 0 = unselected
+                RSUB    M2M$FORCE_MENU, 1
+                RSUB    OPTM_SHOW, 1
+                MOVE    OPTM_CUR_SEL, R8
+                MOVE    @R8, R8
+                MOVE    OPTM_SEL_SEL, R9
+                RSUB    OPTM_SELECT, 1
+
+_OSM_SP_RESET   MOVE    M2M$CSR, R0
+                OR      M2M$CSR_RESET, @R0
+                RSUB    WAIT333MS, 1
+                AND     M2M$CSR_UN_RESET, @R0
+
+_OSM_SP_RET     XOR     R8, R8
                 XOR     R9, R9
+                DECRB
+                RET
+
+; CLEAR_BACK_ROM: zeroes the entire 16K Back ROM device (C_DEV_QL_BACKROM)
+; via the normal QNICE byte window (M2M$RAMROM_DEV/4KWIN/DATA) - no file,
+; no parse step, this isn't a load, just a direct write of 4 windows x
+; 4096 zero bytes. Trashes R0-R3; called from OSM_SEL_POST above only.
+CLEAR_BACK_ROM  INCRB
+
+                MOVE    M2M$RAMROM_DEV, R0
+                MOVE    C_DEV_QL_BACKROM, @R0
+
+                XOR     R1, R1                  ; R1: window number 0..3
+_CBR_NXTWN      MOVE    M2M$RAMROM_4KWIN, R0
+                MOVE    R1, @R0
+
+                MOVE    M2M$RAMROM_DATA, R2     ; R2: write pointer
+                MOVE    M2M$RAMROM_DATA, R3
+                ADD     0x1000, R3              ; R3: end of this window
+_CBR_NXTB       MOVE    0, @R2++
+                CMP     R3, R2
+                RBRA    _CBR_NXTB, !Z
+
+                ADD     1, R1
+                CMP     4, R1
+                RBRA    _CBR_NXTWN, !Z
+
                 DECRB
                 RET
 
@@ -184,6 +270,17 @@ CUSTOM_MSG      XOR     R8, R8
 ; ----------------------------------------------------------------------------
 
 ; Add your core specific constants and strings here
+
+; Mirrors config.vhd's OPTM_G_MAINROM/OPTM_G_BACKROM/OPTM_G_BACKROM_EXTRACT
+; (the "Main ROM:%s"/"Back ROM:%s"/"Extract Back ROM" menu items' group
+; IDs) - used by OSM_SEL_POST above. Keep in sync if config.vhd ever
+; changes these.
+OPTM_G_MAINROM         .EQU 1
+OPTM_G_BACKROM         .EQU 2
+OPTM_G_BACKROM_EXTRACT .EQU 3
+
+; Mirrors globals.vhd's C_DEV_QL_BACKROM - used by CLEAR_BACK_ROM above.
+C_DEV_QL_BACKROM       .EQU 0x0102
 
 ; This needs to be the last thing before the "Variables" sections starts
 END_OF_ROM      .DW 0

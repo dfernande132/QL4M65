@@ -6,28 +6,53 @@ A port of the **Sinclair QL** to the **MEGA65**, built on top of the
 based on the [MiSTer-devel/QL_MiSTer](https://github.com/MiSTer-devel/QL_MiSTer)
 core (68008/`fx68k` CPU, `zx8301` video ULA, `zx8302` I/O ULA).
 
-**Current status: work in progress, Milestone 1, does not boot to a usable
-state yet.** The core synthesizes and runs on real MEGA65 R6 hardware - the
-RAM-check pattern (the color noise a real QL shows during its self-test)
-appears correctly, proving the CPU is executing genuine Minerva ROM code -
-but execution becomes extremely slow shortly afterwards, well before
-reaching Minerva's identification screen. Root cause is under active
-investigation. See `.research/PORTING-PLAN.md` and `DECISIONES.md` (in the
-parent directory) for the full, detailed log of what has been tried so far.
+**Current status: Milestone 1 complete.** The QL boots end-to-end on real
+MEGA65 R6 hardware: RAM check, boot logo, F1-F4 screen, 10-second timeout
+(or F1/F2/F5 response), and into SuperBASIC with a working keyboard - both
+Minerva and MGE tested. System ROM loads either automatically from a fixed
+SD card path at boot or manually via the Shell's Options menu, with the core
+auto-resetting itself after any manual ROM change. See
+`.research/PORTING-PLAN.md` and `DECISIONES.md` (in the parent directory)
+for the full, detailed log of the whole investigation and every decision
+made along the way.
 
 Milestone 1 scope
 -----------------
 
 - Native QL CPU speed (no QL/16MHz/24MHz/Full speed switch yet)
 - PAL video only
-- 128 KB RAM (implemented in FPGA BRAM for now; HyperRAM planned for later)
-- Manual system ROM loading (Minerva) via the Shell's Options menu
-- Keyboard (MEGA65 keys mapped to the QL's matrix, replacing the real
-  hardware's Intel 8049 IPC microcontroller with a MEGA65-native
-  translator)
+- 128 KB RAM (implemented in FPGA BRAM for now; HyperRAM planned for a later
+  milestone)
+- System ROM: **Main ROM** (48 KB - Minerva, MGE, JS...) and **Back ROM**
+  (16 KB - TK2, Pascal...) as two independent, fixed-size slots. Each
+  auto-loads at boot from a fixed SD card path (`/ql4m65/main.rom` /
+  `/ql4m65/back.rom`, both optional) and can also be changed at any time via
+  the Shell's Options menu ("Main ROM:%s" / "Back ROM:%s" / "Extract Back
+  ROM" to clear the Back ROM slot) - the core resets itself automatically
+  after any manual change, no hard reset needed.
+- Keyboard: MEGA65 keys mapped to the QL's matrix (replacing the real
+  hardware's Intel 8049 IPC microcontroller with a real emulated one running
+  the real community-patched firmware, `ipc.vhd`), using a deliberately
+  MEGA65-native symbol layout - whatever's silkscreened on a MEGA65 key is
+  what it types on the QL, not necessarily what the real Sinclair QL
+  keyboard has in that position. Full key-by-key rationale in
+  `.research/keyboard-mapping-design.md`.
 
-Not yet in scope for Milestone 1: microdrive (`.MDV`), QL-SD (`QXL.WIN`),
-mouse, or GoldCard/SMSQ,E support - these are planned for later milestones.
+Not yet in scope for Milestone 1: microdrive (`.MDV`, planned as Milestone
+2), QL-SD (`QXL.WIN`), memory/CPU-speed expansion, mouse, or
+GoldCard/SMSQ,E support - these are planned for later milestones (see
+`.research/PORTING-PLAN.md` section 7 for the current milestone order).
+
+Getting the compiled core
+--------------------------
+
+This repository is source only - no compiled `.cor` file and no system ROM
+(Minerva/MGE/JS are copyrighted Sinclair/AMS software, not redistributable
+here). A ready-to-use Milestone 1 `.cor` for MEGA65 R6 is available in the
+[MEGA65 community on Discord](https://discord.com/channels/719326990221574164/1177364456896999485)
+- ask there if you'd like a copy. Building it yourself from source requires
+your own copy of a QL system ROM placed on the SD card (see Milestone 1
+scope above).
 
 Repository layout
 ------------------

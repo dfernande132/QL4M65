@@ -21,6 +21,7 @@ library work;
 use work.globals.all;
 use work.types_pkg.all;
 use work.video_modes_pkg.all;
+use work.qnice_csr_pkg.all;
 
 library xpm;
 use xpm.vcomponents.all;
@@ -235,7 +236,7 @@ signal main_clk               : std_logic;               -- Core main clock
 signal main_rst               : std_logic;
 
 ---------------------------------------------------------------------------------------------
--- QL4M65: system ROM (Minerva) - QNICE write (manual load), core read-only
+-- QL4M65: system ROM (Main 48K + Back 16K) - QNICE write (manual/auto load), core read-only
 ---------------------------------------------------------------------------------------------
 
 signal qnice_rom_we_u         : std_logic;
@@ -246,6 +247,63 @@ signal qnice_rom_q_l          : std_logic_vector(7 downto 0);
 signal main_rom_addr          : std_logic_vector(14 downto 0);
 signal main_rom_q_u           : std_logic_vector(7 downto 0);
 signal main_rom_q_l           : std_logic_vector(7 downto 0);
+
+-- QL4M65: Main/Back ROM CSR (4k window 0xFFFF) + "always answer" size-check
+-- FSMs - see globals.vhd's C_DEV_QL_MAINROM/BACKROM comment. Neither device
+-- ever implemented this M2M protocol before, which is why manual ROM
+-- loading has always hung QNICE solid (no timeout on the firmware's poll
+-- loop) - not a new bug, present since manual loading was first added; see
+-- DECISIONES.md. Modeled on AExp's adf_mount_wrapper.vhd, simplified: no
+-- HyperRAM/iterative validation needed, just one fixed-size comparison.
+constant C_MAINROM_BYTES      : natural := 49152;                 -- 48 KB exactly
+constant C_BACKROM_BYTES      : natural := 16384;                 -- 16 KB exactly
+constant C_BACKROM_WORD_OFFS  : natural := C_MAINROM_BYTES / 2;   -- 24576 words into ql_rom_u/l
+
+-- 21 chars each: 19 text chars + the literal 2-char "\n" the Shell's printer interprets
+constant C_ROM_ERROR_STRINGS : string_vector(0 to 15) := (
+  "OK                 \n",
+  "Wrong ROM size     \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n",
+  "OK                 \n");
+
+type t_rom_val_state is (VS_IDLE, VS_DONE);
+
+signal main_ce                : std_logic;
+signal main_csr_active        : std_logic;
+signal main_csr_data          : std_logic_vector(15 downto 0);
+signal main_csr_wait          : std_logic;
+signal main_req_status        : std_logic_vector( 3 downto 0);
+signal main_req_length        : std_logic_vector(22 downto 0);
+signal main_resp_status       : std_logic_vector( 3 downto 0) := C_CSR_RESP_IDLE;
+signal main_resp_error        : std_logic_vector( 3 downto 0) := x"0";
+signal main_val_state         : t_rom_val_state := VS_IDLE;
+
+signal back_ce                : std_logic;
+signal back_csr_active        : std_logic;
+signal back_csr_data          : std_logic_vector(15 downto 0);
+signal back_csr_wait          : std_logic;
+signal back_req_status        : std_logic_vector( 3 downto 0);
+signal back_req_length        : std_logic_vector(22 downto 0);
+signal back_resp_status       : std_logic_vector( 3 downto 0) := C_CSR_RESP_IDLE;
+signal back_resp_error        : std_logic_vector( 3 downto 0) := x"0";
+signal back_val_state         : t_rom_val_state := VS_IDLE;
+
+-- shared BRAM address bus: Main passes qnice_dev_addr_i through unmodified,
+-- Back adds C_BACKROM_WORD_OFFS so its own device-local address 0 lands
+-- 48 KB into the same physical ql_rom_u/l instances
+signal rom_addr_b             : std_logic_vector(14 downto 0);
 
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
@@ -442,37 +500,196 @@ begin
       qnice_rom_we_u       <= '0';
       qnice_rom_we_l       <= '0';
 
+      main_ce              <= '0';
+      back_ce              <= '0';
+
       case qnice_dev_id_i is
 
-         -- QL4M65: manual loading of the system ROM (Minerva), reserved in
-         -- globals.vhd as C_CRTROMS_MAN's one entry. qnice_dev_addr_i is a
-         -- byte address into the 64KB ROM image; bit 0 selects the byte lane
-         -- (even=high byte, odd=low byte), same pattern as AExp's
-         -- kick_rom_u/l for its Kickstart ROM.
-         when C_DEV_QL_MINERVA =>
-            qnice_rom_we_u <= qnice_dev_ce_i and qnice_dev_we_i and not qnice_dev_addr_i(0);
-            qnice_rom_we_l <= qnice_dev_ce_i and qnice_dev_we_i and     qnice_dev_addr_i(0);
-            if qnice_dev_addr_i(0) = '0' then
-               qnice_dev_data_o <= x"00" & qnice_rom_q_u;
+         -- QL4M65: manual/auto loading of the Main ROM (48KB, $000000-
+         -- $00BFFF) and Back ROM (16KB, $00C000-$00FFFF), reserved in
+         -- globals.vhd as C_CRTROMS_MAN's/C_CRTROMS_AUTO's two entries.
+         -- qnice_dev_addr_i is a byte address into each device's own linear
+         -- space; bit 0 selects the byte lane (even=high byte, odd=low
+         -- byte), same pattern as AExp's kick_rom_u/l. Both devices share
+         -- the same physical ql_rom_u/l BRAM below (see rom_addr_b's mux) -
+         -- window 0xFFFF on either one is the M2M CSR/size-check protocol
+         -- (qnice_csr instances below), excluded here via *_csr_active so
+         -- it never aliases onto a real ROM address.
+         when C_DEV_QL_MAINROM =>
+            main_ce <= qnice_dev_ce_i;
+            if main_csr_active = '1' then
+               qnice_dev_data_o <= main_csr_data;
+               qnice_dev_wait_o <= main_csr_wait;
             else
-               qnice_dev_data_o <= x"00" & qnice_rom_q_l;
+               qnice_rom_we_u <= qnice_dev_ce_i and qnice_dev_we_i and not qnice_dev_addr_i(0);
+               qnice_rom_we_l <= qnice_dev_ce_i and qnice_dev_we_i and     qnice_dev_addr_i(0);
+               if qnice_dev_addr_i(0) = '0' then
+                  qnice_dev_data_o <= x"00" & qnice_rom_q_u;
+               else
+                  qnice_dev_data_o <= x"00" & qnice_rom_q_l;
+               end if;
+            end if;
+
+         when C_DEV_QL_BACKROM =>
+            back_ce <= qnice_dev_ce_i;
+            if back_csr_active = '1' then
+               qnice_dev_data_o <= back_csr_data;
+               qnice_dev_wait_o <= back_csr_wait;
+            else
+               qnice_rom_we_u <= qnice_dev_ce_i and qnice_dev_we_i and not qnice_dev_addr_i(0);
+               qnice_rom_we_l <= qnice_dev_ce_i and qnice_dev_we_i and     qnice_dev_addr_i(0);
+               if qnice_dev_addr_i(0) = '0' then
+                  qnice_dev_data_o <= x"00" & qnice_rom_q_u;
+               else
+                  qnice_dev_data_o <= x"00" & qnice_rom_q_l;
+               end if;
             end if;
 
          when others => null;
       end case;
    end process core_specific_devices;
 
+   -- shared BRAM address bus: Back's device-local address gets offset by
+   -- 48 KB so it lands in the upper half of the same ql_rom_u/l instances
+   -- Main already addresses directly. Don't-care (never written/read) while
+   -- either device's CSR window is active.
+   rom_addr_b <= std_logic_vector(unsigned(qnice_dev_addr_i(15 downto 1)) + C_BACKROM_WORD_OFFS)
+                    when back_ce = '1' else
+                 qnice_dev_addr_i(15 downto 1);
+
+   ---------------------------------------------------------------------------------------------
+   -- QL4M65: Main/Back ROM CSR (window 0xFFFF) + size-check "parser" FSMs
+   --
+   -- HANDLE_CRTROM_M (M2M/rom/crts-and-roms.asm) busy-waits with NO timeout
+   -- for whichever device it just loaded to answer READY/ERROR here - see
+   -- the signal declarations above and DECISIONES.md for why this was
+   -- missing entirely before (every manual ROM load hung QNICE solid).
+   ---------------------------------------------------------------------------------------------
+
+   i_main_csr : entity work.qnice_csr
+      generic map (
+         G_ERROR_STRINGS => C_ROM_ERROR_STRINGS
+      )
+      port map (
+         qnice_clk_i          => qnice_clk_i,
+         qnice_rst_i          => qnice_rst_i,
+         qnice_addr_i         => qnice_dev_addr_i,
+         qnice_data_i         => qnice_dev_data_i,
+         qnice_ce_i           => main_ce,
+         qnice_we_i           => qnice_dev_we_i,
+         qnice_data_o         => main_csr_data,
+         qnice_wait_o         => main_csr_wait,
+         qnice_csr_o          => main_csr_active,
+         qnice_req_status_o   => main_req_status,
+         qnice_req_length_o   => main_req_length,
+         qnice_resp_status_i  => main_resp_status,
+         qnice_resp_error_i   => main_resp_error,
+         qnice_resp_address_i => (others => '0')
+      ); -- i_main_csr
+
+   p_main_size_check : process (qnice_clk_i)
+   begin
+      if falling_edge(qnice_clk_i) then
+         case main_val_state is
+            when VS_IDLE =>
+               if main_req_status = C_CSR_REQ_OK then
+                  if unsigned(main_req_length) = C_MAINROM_BYTES then
+                     main_resp_status <= C_CSR_RESP_READY;
+                     main_resp_error  <= x"0";
+                  else
+                     main_resp_status <= C_CSR_RESP_ERROR;
+                     main_resp_error  <= x"1";
+                  end if;
+                  main_val_state <= VS_DONE;
+               else
+                  main_resp_status <= C_CSR_RESP_IDLE;
+                  main_resp_error  <= x"0";
+               end if;
+
+            when VS_DONE =>
+               if main_req_status /= C_CSR_REQ_OK then
+                  main_resp_status <= C_CSR_RESP_IDLE;
+                  main_resp_error  <= x"0";
+                  main_val_state   <= VS_IDLE;
+               end if;
+         end case;
+
+         if qnice_rst_i = '1' then
+            main_val_state   <= VS_IDLE;
+            main_resp_status <= C_CSR_RESP_IDLE;
+            main_resp_error  <= x"0";
+         end if;
+      end if;
+   end process p_main_size_check;
+
+   i_back_csr : entity work.qnice_csr
+      generic map (
+         G_ERROR_STRINGS => C_ROM_ERROR_STRINGS
+      )
+      port map (
+         qnice_clk_i          => qnice_clk_i,
+         qnice_rst_i          => qnice_rst_i,
+         qnice_addr_i         => qnice_dev_addr_i,
+         qnice_data_i         => qnice_dev_data_i,
+         qnice_ce_i           => back_ce,
+         qnice_we_i           => qnice_dev_we_i,
+         qnice_data_o         => back_csr_data,
+         qnice_wait_o         => back_csr_wait,
+         qnice_csr_o          => back_csr_active,
+         qnice_req_status_o   => back_req_status,
+         qnice_req_length_o   => back_req_length,
+         qnice_resp_status_i  => back_resp_status,
+         qnice_resp_error_i   => back_resp_error,
+         qnice_resp_address_i => (others => '0')
+      ); -- i_back_csr
+
+   p_back_size_check : process (qnice_clk_i)
+   begin
+      if falling_edge(qnice_clk_i) then
+         case back_val_state is
+            when VS_IDLE =>
+               if back_req_status = C_CSR_REQ_OK then
+                  if unsigned(back_req_length) = C_BACKROM_BYTES then
+                     back_resp_status <= C_CSR_RESP_READY;
+                     back_resp_error  <= x"0";
+                  else
+                     back_resp_status <= C_CSR_RESP_ERROR;
+                     back_resp_error  <= x"1";
+                  end if;
+                  back_val_state <= VS_DONE;
+               else
+                  back_resp_status <= C_CSR_RESP_IDLE;
+                  back_resp_error  <= x"0";
+               end if;
+
+            when VS_DONE =>
+               if back_req_status /= C_CSR_REQ_OK then
+                  back_resp_status <= C_CSR_RESP_IDLE;
+                  back_resp_error  <= x"0";
+                  back_val_state   <= VS_IDLE;
+               end if;
+         end case;
+
+         if qnice_rst_i = '1' then
+            back_val_state   <= VS_IDLE;
+            back_resp_status <= C_CSR_RESP_IDLE;
+            back_resp_error  <= x"0";
+         end if;
+      end if;
+   end process p_back_size_check;
+
    ---------------------------------------------------------------------------------------------
    -- Dual Clocks
    ---------------------------------------------------------------------------------------------
 
-   -- QL4M65: system ROM (Minerva, 64KB = 32K words x 16 bit, matching the
-   -- original core's "dpram #(15) ql_rom" in QL.sv - QL.sv itself isn't
-   -- ported, but the RAM shape is the same). Read-only from the core side
-   -- (wren_a fixed '0'); written only by the QNICE Shell during the manual
-   -- "ROM:%s" load (config.vhd/globals.vhd). Split into two 8-bit lanes,
-   -- same pattern as AExp's kick_rom_u/l, since the QNICE ROM loader writes
-   -- one byte at a time.
+   -- QL4M65: system ROM (Main 48K + Back 16K = 64KB = 32K words x 16 bit
+   -- total, matching the original core's "dpram #(15) ql_rom" in QL.sv -
+   -- QL.sv itself isn't ported, but the RAM shape is the same). Read-only
+   -- from the core side (wren_a fixed '0'); written only by the QNICE Shell
+   -- during manual/auto loads of either slot (config.vhd/globals.vhd) - see
+   -- rom_addr_b above for how both devices share this single instance.
+   -- Split into two 8-bit lanes, same pattern as AExp's kick_rom_u/l, since
+   -- the QNICE ROM loader writes one byte at a time.
    ql_rom_u : entity work.dualport_2clk_ram
       generic map (
          ADDR_WIDTH => 15,
@@ -487,7 +704,7 @@ begin
          q_a       => main_rom_q_u,
 
          clock_b   => qnice_clk_i,
-         address_b => qnice_dev_addr_i(15 downto 1),
+         address_b => rom_addr_b,
          data_b    => qnice_dev_data_i(7 downto 0),
          wren_b    => qnice_rom_we_u,
          q_b       => qnice_rom_q_u
@@ -507,7 +724,7 @@ begin
          q_a       => main_rom_q_l,
 
          clock_b   => qnice_clk_i,
-         address_b => qnice_dev_addr_i(15 downto 1),
+         address_b => rom_addr_b,
          data_b    => qnice_dev_data_i(7 downto 0),
          wren_b    => qnice_rom_we_l,
          q_b       => qnice_rom_q_l

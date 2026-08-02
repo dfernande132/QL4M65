@@ -135,17 +135,31 @@ constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 --       else it is a 4k window in HyperRAM or in SDRAM
 -- In case we are loading to a QNICE device, then the control and status register is located at the 4k window 0xFFFF.
 -- @TODO: See @TODO for more details about the control and status register
--- QL4M65: one manually loadable ROM (Minerva), routed to a dedicated QNICE device
--- (not directly to HyperRAM - see AExp's globals.vhd for why: the HyperRAM CRTROM
--- type's CSR handshake has no responder for manual loads). The device-side RAM
--- buffer that actually receives these bytes is ql_rom_u/l in mega65.vhd (Dual
--- Clocks section) - a plain dualport_2clk_ram pair, same pattern as AExp's own
--- Kickstart BRAM; the CPU's read path in main.vhd is a direct combinational
--- ql_rom_addr_o/ql_rom_data_i, not a batched/QNICE-mediated access.
-constant C_DEV_QL_MINERVA        : std_logic_vector(15 downto 0) := x"0101";
+-- QL4M65: two manually loadable ROMs, each routed to its own dedicated QNICE
+-- device (not directly to HyperRAM - see AExp's globals.vhd for why: the
+-- HyperRAM CRTROM type's CSR handshake has no responder for manual loads):
+--   * C_DEV_QL_MAINROM: the QL system ROM's low 48 KB ($000000-$00BFFF -
+--     Minerva, MGE, JS...), exactly one physical chip's worth on a real QL.
+--   * C_DEV_QL_BACKROM: the extension ROM's 16 KB ($00C000-$00FFFF - TK2,
+--     Pascal...), a second, independent physical chip on a real QL.
+-- Both are fixed-size slots (48 KB / 16 KB exactly) - see mega65.vhd's CSR/
+-- size-check FSMs (DECISIONES.md) for why a variable-size single slot was
+-- abandoned: a wrong-size load left stale bytes in the untouched remainder,
+-- and (separately, more importantly) neither device ever answered the M2M
+-- CSR "parse status" protocol at all, hanging QNICE solid on every manual
+-- load - not a new bug, present since manual loading was first implemented.
+-- Both devices share the same physical ql_rom_u/l BRAM in mega65.vhd (Dual
+-- Clocks section, a plain dualport_2clk_ram pair, same pattern as AExp's own
+-- Kickstart BRAM) - C_DEV_QL_BACKROM's writes land 48 KB further into it.
+-- The CPU's read path in main.vhd is a direct combinational
+-- ql_rom_addr_o/ql_rom_data_i spanning the whole 64 KB, not a batched/
+-- QNICE-mediated access.
+constant C_DEV_QL_MAINROM        : std_logic_vector(15 downto 0) := x"0101";
+constant C_DEV_QL_BACKROM        : std_logic_vector(15 downto 0) := x"0102";
 
-constant C_CRTROMS_MAN_NUM       : natural := 1;                                       -- amount of manually loadable ROMs and carts; maximum is 16
-constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_DEV_QL_MINERVA,
+constant C_CRTROMS_MAN_NUM       : natural := 2;                                       -- amount of manually loadable ROMs and carts; maximum is 16
+constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_DEV_QL_MAINROM,
+                                                         C_CRTROMTYPE_DEVICE, C_DEV_QL_BACKROM,
                                                          x"EEEE");                     -- Always finish the array using x"EEEE"
 
 -- Automatically loaded ROMs: These ROMs are loaded before the core starts
@@ -166,10 +180,24 @@ constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_
 --               b) Don't forget to zero-terminate each of your substrings of C_CRTROMS_AUTO_NAMES by adding "& ENDSTR;"
 --               c) Don't forget to finish the C_CRTROMS_AUTO array with x"EEEE"
 
--- M2M framework constants
-constant C_CRTROMS_AUTO_NUM      : natural := 0;                                       -- Amount of automatically loadable ROMs and carts, maximum is 16
-constant C_CRTROMS_AUTO_NAMES    : string  := "" & ENDSTR;
-constant C_CRTROMS_AUTO          : crtrom_buf_array := ( x"EEEE", x"EEEE", x"EEEE", x"EEEE",
+-- QL4M65: auto-load both ROMs from fixed SD card paths at boot, into the
+-- same two QNICE devices the manual "Main ROM:%s"/"Back ROM:%s" menu items
+-- use - either mechanism can supply/replace either ROM. Both OPTIONAL, not
+-- MANDATORY: if a file is missing, the firmware logs it and continues (no
+-- fatal error screen) - if only main.rom exists, only Main loads and Back
+-- stays cleared; the manual menu items remain the fallback either way.
+constant MAIN_ROM_NAME            : string := "/ql4m65/main.rom" & ENDSTR;
+constant MAIN_ROM_NAME_START      : std_logic_vector(15 downto 0) := x"0000";
+constant BACK_ROM_NAME            : string := "/ql4m65/back.rom" & ENDSTR;
+constant BACK_ROM_NAME_START      : std_logic_vector(15 downto 0) :=
+   std_logic_vector(to_unsigned(MAIN_ROM_NAME'length, 16));
+
+constant C_CRTROMS_AUTO_NUM      : natural := 2;                                       -- Amount of automatically loadable ROMs and carts, maximum is 16
+constant C_CRTROMS_AUTO_NAMES    : string  := MAIN_ROM_NAME & BACK_ROM_NAME;
+constant C_CRTROMS_AUTO          : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_DEV_QL_MAINROM,
+                                                         C_CRTROMTYPE_OPTIONAL, MAIN_ROM_NAME_START,
+                                                         C_CRTROMTYPE_DEVICE, C_DEV_QL_BACKROM,
+                                                         C_CRTROMTYPE_OPTIONAL, BACK_ROM_NAME_START,
                                                          x"EEEE");                     -- Always finish the array using x"EEEE"
 
 ----------------------------------------------------------------------------------------------------------
