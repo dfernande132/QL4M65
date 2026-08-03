@@ -128,6 +128,14 @@ constant SEL_CFG_FILE      : std_logic_vector(15 downto 0) := x"0101";
 
 -- START YOUR CONFIGURATION BELOW THIS LINE
 
+-- QL4M65 (Milestone 2, 2026-08-03): DIR_START stays at the "/ql4m65" parent
+-- folder - every manual file browse (Main ROM, Back ROM, Mount HD image)
+-- starts here regardless of which menu item opened it (the framework has
+-- no per-item start directory, see M2M/rom/selectfile.asm's _S_START).
+-- ROMs live one level down in "/ql4m65/rom/" (globals.vhd's MAIN_ROM_NAME/
+-- BACK_ROM_NAME), QL-SD storage images in "/ql4m65/storage/" - kept as two
+-- separate subfolders for SD card tidiness, symmetric one-level-down access
+-- from here for both.
 constant DIR_START         : string := "/ql4m65";
 constant CFG_FILE          : string := "/ql4m65/m2mcfg";
 

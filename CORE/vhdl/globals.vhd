@@ -209,9 +209,13 @@ constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_
 -- MANDATORY: if a file is missing, the firmware logs it and continues (no
 -- fatal error screen) - if only main.rom exists, only Main loads and Back
 -- stays cleared; the manual menu items remain the fallback either way.
-constant MAIN_ROM_NAME            : string := "/ql4m65/main.rom" & ENDSTR;
+-- QL4M65 (Milestone 2, 2026-08-03): moved from "/ql4m65/" straight into
+-- "/ql4m65/rom/" for SD card tidiness now that QL-SD storage images have
+-- their own "/ql4m65/storage/" folder too (config.vhd's DIR_START stays
+-- at the "/ql4m65" parent, so browsing for either is one level down).
+constant MAIN_ROM_NAME            : string := "/ql4m65/rom/main.rom" & ENDSTR;
 constant MAIN_ROM_NAME_START      : std_logic_vector(15 downto 0) := x"0000";
-constant BACK_ROM_NAME            : string := "/ql4m65/back.rom" & ENDSTR;
+constant BACK_ROM_NAME            : string := "/ql4m65/rom/back.rom" & ENDSTR;
 constant BACK_ROM_NAME_START      : std_logic_vector(15 downto 0) :=
    std_logic_vector(to_unsigned(MAIN_ROM_NAME'length, 16));
 

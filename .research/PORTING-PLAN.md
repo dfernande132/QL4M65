@@ -14,19 +14,35 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-03, sesión M2001 — Milestone 2 en curso)
+## 0. Estado actual del proyecto (actualizado: 2026-08-03, sesión M2002 — Milestone 2 en curso)
 
-**Milestone 2 (QL-SD) en implementación. `M2001` compila limpio (WNS=+0.282 ns,
-WHS=+0.052 ns, 0 nets sin rutar), pendiente de prueba en hardware real.**
-Instanciados `qlromext.v`+`sd_card.sv` (decodificación de dirección y DTACK
-en `main.vhd`) + `vdrives.vhd` (VDNUM=1) + un buffer de imagen montada
-respaldado por HyperRAM (fase 1: ~4MB, para una imagen de prueba de 3-4MB
-del usuario - las QXL.WIN reales de ~50MB quedan para una fase 2 de
-streaming real, aparcada). Menú "STORAGE"/"Mount HD image" añadido.
-Detalle técnico completo en `DECISIONES.md`, sección "Milestone 2 —
-implementación de QL-SD, M2001". Próximo paso: prueba en hardware de
-`M2001` (arranque normal sin regresión) y después `M2002` (montar la
-imagen de prueba de verdad).
+**Milestone 2 (QL-SD) en implementación. `M2001` confirmado en hardware
+(arranque sin regresión, menú "Mount HD image" visible). `M2002` compila
+limpio (WNS=+0.112 ns, WHS=+0.056 ns, 0 nets sin rutar), pendiente de
+prueba en hardware.** Instanciados `qlromext.v`+`sd_card.sv` (decodificación
+de dirección y DTACK en `main.vhd`) + `vdrives.vhd` (VDNUM=1) + un buffer de
+imagen montada respaldado por HyperRAM (fase 1: ~4MB, para una imagen de
+prueba de 3-4MB del usuario - las QXL.WIN reales de ~50MB quedan para una
+fase 2 de streaming real, aparcada).
+
+**Hallazgo real en la primera prueba de montaje: el mount se pierde en
+cualquier reset del core** (`vdrives.vhd` borra `drive_mounted_reg` en
+`reset_core_i` por diseño del framework; ni `shell.asm`/`vdrives.asm`
+re-anuncian un fichero ya montado tras un reset, a diferencia de MiSTer real
+donde el ARM nunca se resetea con el core). `M2002` añade el arreglo elegido
+(por partes, empezando por el más simple): `OSM_SEL_POST`
+(`CORE/m2m-rom/m2m-rom.asm`) ahora también resetea el core tras "Mount HD
+image:%s", mismo mecanismo que ya usa Main/Back ROM desde `M1045` - funciona
+porque el montaje real (y el latch de `csd_size`/`csd_sdhc` en `sd_card.sv`)
+ya ocurrió antes del reset. Detalle técnico completo en `DECISIONES.md`,
+sección "Milestone 2 — implementación de QL-SD, M2001" (M2001 y M2002 están
+documentados en la misma sección).
+
+**Reorganización de carpetas en la SD (2026-08-03):** ROMs en
+`/ql4m65/rom/`, imágenes QL-SD en `/ql4m65/storage/` (ver `globals.vhd`/
+`config.vhd`). Próximo paso: prueba en hardware de `M2002` (montar el `.win`
+de prueba, confirmar que el reset automático hace que el driver detecte la
+tarjeta).
 
 ## 0.3 Estado histórico (hasta el cierre de Milestone 1, sección sin tocar)
 
