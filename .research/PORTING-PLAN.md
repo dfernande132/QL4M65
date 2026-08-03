@@ -463,23 +463,45 @@ Fase 3 parcial, Fases 5-7 en curso (bloqueante actual: instanciar
 `fx68k`/`zx8301`/`zx8302` y la lógica de bus en `main.vhd`, la compilación
 `M1001`), Fases 8-12 pendientes.
 
-### Milestone 2 — Microdrive virtual (reordenado 2026-08-02, cierre de Milestone 1)
+### Milestone 2 — QL-SD virtual (reordenado 2026-08-02, dos veces el mismo día)
 
-**Reordenación explícita respecto al plan original** (que tenía aquí la
-ampliación de memoria/velocidad, ver Milestone 3 más abajo): tras la
-experiencia de `M1029`-`M1047`, se prioriza el microdrive virtual (`.MDV`,
-formato QLAY, vía `vdrives.vhd`/FAT32 de QNICE — mismo patrón "vdrives" que
-ya usan otros cores M2M, por ejemplo el ADF de AExp) porque permite empezar a
-probar software real del QL (no solo ROMs/BASIC sintéticos) sin depender de
-ampliar memoria primero, y porque la razón original para hacer memoria antes
-("evitar rehacer el camino de RAM si se construye primero sobre BRAM") ya no
-aplica — Milestone 1 acabó construyéndose sobre BRAM de todas formas y así
-es como arranca hoy. El microdrive es además un trabajo más autocontenido
-(protocolo de montaje de imagen ya resuelto por el framework) frente a la
-migración a HyperRAM, que toca timing de memoria compartida con vídeo/DMA y
-tiene un riesgo abierto ya anotado en la decisión pendiente 6 (compatibilidad
-de `ql_timing.sv` con la latencia real de HyperRAM). Es el hito más parecido
-en espíritu al "floppy mount + Workbench boot" del port del Amiga.
+**Segunda reordenación del mismo día**, tras comparar el coste real de
+implementación de las dos opciones de almacenamiento (ver
+`.research/microdrive-read-design.md` y `.research/qlsd-design.md`,
+ambos escritos y revisados en esta sesión):
+
+- **Microdrive (`mdv.v`)**: sin interfaz LBA/direccionable — es un replay
+  continuo de un buffer entero a 200kbit/s — no encaja con `vdrives.vhd`.
+  Necesitaría escribir de cero: soporte de escritura (no existe en el RTL
+  original), un `dpram` propio sobre HyperRAM, un árbitro N-master para el
+  Avalon `hr_core_*`, y una FSM de carga QNICE nueva.
+- **QL-SD (`qlromext.v` + `sd_card.sv`)**: ambos módulos, sin modificar,
+  hablan ya el protocolo genérico "SD" de MiSTer (`sd_lba`/`sd_rd`/`sd_wr`/
+  `sd_ack`/`sd_buff_*`) — exactamente lo que `vdrives.vhd` espera, con el
+  añadido de que `sd_card.sv` ya trae el split de reloj (`clk_sys`/
+  `clk_spi`) que encaja con el dominio QNICE/núcleo que exige `vdrives.vhd`.
+  Lectura y escritura llegan "gratis" sin RTL nuevo — solo cableado, el
+  reemplazo Vivado-limpio del `altsyncram` interno de `sd_card.sv` (mismo
+  patrón ya resuelto 2 veces), decodificado de dirección y una instancia de
+  `vdrives.vhd`.
+
+**Se elige QL-SD como objetivo real de Milestone 2** (microdrive queda
+pendiente, sin cancelar, para más adelante — su propio design doc de
+lectura sigue vigente para cuando se retome). El driver QL-SD (1.08+,
+necesario según el propio `readme.md` del core: *"Needs QL-SD driver 1.08
+or higher"*) no supone trabajo nuevo — ya existe localmente
+`releases/minerva+qlsd_ql.rom` (Minerva + driver combinados) y la
+infraestructura de M1045 (`C_DEV_QL_MAINROM`/`C_DEV_QL_BACKROM`) ya estaba
+pensada para cargar justo esto en la ROM de extensión.
+
+*(Motivo original de priorizar almacenamiento sobre memoria/velocidad,
+sigue vigente — ver razonamiento de la primera reordenación más abajo)*:
+tras la experiencia de `M1029`-`M1047`, se prioriza almacenamiento porque
+permite empezar a probar software real del QL (no solo ROMs/BASIC
+sintéticos) sin depender de ampliar memoria primero, y porque la razón
+original para hacer memoria antes ("evitar rehacer el camino de RAM si se
+construye primero sobre BRAM") ya no aplica — Milestone 1 acabó
+construyéndose sobre BRAM de todas formas y así es como arranca hoy.
 
 ### Milestone 3 — Ampliación de memoria y velocidad (antes Milestone 2)
 
@@ -490,11 +512,13 @@ múltiplos del reloj base (sección 3), así que es principalmente exponer las
 opciones de `config.vhd` y verificar que la HyperRAM aguanta el ancho de banda
 a la velocidad más alta ("Full", 84 MHz de bus).
 
-### Milestone 4 — Almacenamiento adicional (antes parte de Milestone 3)
+### Milestone 4 — Almacenamiento adicional (antes parte de Milestone 3; QL-SD se cambió a Milestone 2 el 2026-08-02)
 
-QL-SD (imágenes QXL.WIN vía `vdrives.vhd`/FAT32 de QNICE, mismo mecanismo que
-el microdrive de Milestone 2 pero para el almacenamiento moderno tipo disco
-duro).
+Microdrive virtual (`.MDV`, formato QLAY) — pendiente, no cancelado. Diseño
+de la parte de lectura ya escrito en `.research/microdrive-read-design.md`
+(HyperRAM + `dpram` propio, sin encajar con `vdrives.vhd` por no tener
+`mdv.v` interfaz LBA); la parte de escritura queda por diseñar cuando se
+retome este hito.
 
 (GoldCard/SMSQE y el ratón quedan sin hito asignado todavía — se revisará
 cuando los milestones anteriores estén cerrados.)
