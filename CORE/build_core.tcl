@@ -80,6 +80,16 @@ add_files -norecurse -fileset sources_1 [list \
     "$core_vhdl_dir/ipc.vhd" \
 ]
 
+# QL4M65 (Milestone 2, QL-SD): qlromext.v (QL-bus register interface,
+# unmodified) and sd_card.sv (SPI-slave SD emulator, modified only to
+# expose ram_a_*/ram_b_* ports instead of its original Quartus-only
+# altsyncram - see doc/m2m/exceptions.md and .research/qlsd-design.md).
+# sd_card.sv lives under sys/ in the upstream tree, not rtl/.
+add_files -norecurse -fileset sources_1 [list \
+    "$core_ql_dir/rtl/qlromext.v" \
+    "$core_ql_dir/sys/sd_card.sv" \
+]
+
 set_property file_type SystemVerilog [get_files "$core_ql_dir/rtl/fx68k/fx68k.sv"]
 set_property file_type SystemVerilog [get_files "$core_ql_dir/rtl/fx68k/fx68kAlu.sv"]
 set_property file_type SystemVerilog [get_files "$core_ql_dir/rtl/fx68k/uaddrPla.sv"]

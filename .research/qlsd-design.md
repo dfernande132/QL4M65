@@ -214,6 +214,50 @@ of "storage milestone" than microdrive, not a strict superset.
    verifying this design against the actual RTL, 2026-08-03, not part of
    the original draft).
 
+## Mount buffer: the whole image must live in RAM (found 2026-08-03, changes scope)
+
+Not in the original draft - found while implementing task 5 (vdrives.vhd
+wiring), reading `M2M/rom/shell.asm`'s `HANDLE_DRV_RD` routine directly.
+**The QNICE Shell firmware does not stream sectors from the SD card on
+demand.** On mount, and on every `sd_rd_i`, it serves bytes out of a single
+QNICE-addressable RAM device - `C_VD_BUFFER` in `globals.vhd` - that must
+hold the **entire mounted image**, addressed linearly through 4K windows
+(the routine's own comment: *"Transfer the data requested by the core from
+the linear disk image buffer"*). This is the same mechanism C64MEGA65 uses
+for D64 (`mount_buf_ram`, plain BRAM, 197 KB - fits easily) and the same
+shape AExp's `adf_mount_wrapper.vhd` uses for ADF (HyperRAM-backed, since
+AExp's BRAM is already fully utilized) - though AExp doesn't use
+`vdrives.vhd` at all (Amiga's Paula floppy controller needs raw MFM
+track access, doesn't fit the generic "SD" protocol, so AExp built a fully
+custom mount+write-back device). QL-SD's `sd_card.sv` *does* speak the
+generic protocol `vdrives.vhd` expects, so we keep using `vdrives.vhd`
+as designed - only `C_VD_BUFFER`'s RAM needs to change from the
+originally-assumed "small BRAM" to something bigger.
+
+**Real QXL.WIN images run ~50 MB (user's own working images) - too big for
+either BRAM or the MEGA65's HyperRAM (8 MB total, shared with `ascal`'s
+framebuffer, confirmed via the Porting Guide section 1.4.3).** Decided with
+the user (2026-08-03): phased approach, explicitly to avoid one large
+build that "falla por todos lados" (fails on every front) -
+
+- **Phase 1 (this milestone, tasks 9-12 in the session task list):**
+  `C_VD_BUFFER` backed by HyperRAM (not BRAM - BRAM's ~1.6 MB budget on
+  the xc7a200t doesn't leave enough headroom either), sized generously for
+  a **3-4 MB user-prepared test `.win` image** with several applications on
+  it, not for arbitrary real-world images. Built entirely from two already-
+  existing, unmodified M2M framework primitives - `M2M/vhdl/
+  qnice2hyperram.vhd` (QNICE-clock-domain byte/word window -> Avalon
+  master) and `M2M/vhdl/memory/avm_fifo.vhd` (the QNICE-clock <-> `hr_clk_i`
+  CDC bridge, same one AExp's own HyperRAM bridge and C64MEGA65's REU use).
+  No arbiter needed: QL4M65 doesn't put anything else on HyperRAM yet (main
+  RAM/ROM/VRAM are all still BRAM), so this is HyperRAM's only master.
+- **Phase 2 (future, tracked as session task 13, not started):** real
+  per-sector streaming directly from the FAT32 file on the SD card, no
+  whole-image buffer, no practical size ceiling - lets Milestone 2 mount
+  the actual ~50 MB images. No precedent for this in the local M2M
+  reference cores (C64MEGA65, AExp) - both assume the "whole image in a
+  linear buffer" model, so this will need new QNICE firmware, not just RTL.
+
 ## Build strategy (decided 2026-08-03)
 
 Split into two hardware-tested builds, same precedent as the CPU/chipset

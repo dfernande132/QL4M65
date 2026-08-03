@@ -305,6 +305,39 @@ signal back_val_state         : t_rom_val_state := VS_IDLE;
 -- 48 KB into the same physical ql_rom_u/l instances
 signal rom_addr_b             : std_logic_vector(14 downto 0);
 
+-- QL4M65 (Milestone 2, QL-SD): vdrives.vhd's own QNICE MMIO window
+-- (C_VD_DEVICE, routed straight into main.vhd - main.vhd instantiates
+-- vdrives.vhd itself, see .research/qlsd-design.md) and the HyperRAM-
+-- backed mount buffer device (C_VD_BUFFER, C_DEV_QL_QLSD_BUFFER - lives
+-- in mega65.vhd, see the qnice2hyperram/avm_fifo instances below).
+signal qnice_qlsd_ce           : std_logic;
+signal qnice_qlsd_we           : std_logic;
+signal qnice_qlsd_data_o       : std_logic_vector(15 downto 0);
+
+signal qnice_qlsdbuf_ce        : std_logic;
+signal qnice_qlsdbuf_we        : std_logic;
+signal qnice_qlsdbuf_data_o    : std_logic_vector(15 downto 0);
+signal qnice_qlsdbuf_wait      : std_logic;
+
+-- QL4M65 (Milestone 2): QL-SD mount buffer <-> qnice2hyperram.vhd (slave
+-- side, QNICE clock domain) - byte-window-to-HyperRAM-word translation
+signal qlsdbuf_hr_addr         : std_logic_vector(31 downto 0);
+signal qlsdbuf_hr_byteenable   : std_logic_vector( 1 downto 0);
+signal qlsdbuf_hr_writedata    : std_logic_vector(15 downto 0);
+signal qlsdbuf_hr_readdata     : std_logic_vector(15 downto 0);
+
+-- qnice2hyperram.vhd (master side, still QNICE clock domain) <->
+-- avm_fifo.vhd (slave side) - the CDC bridge into hr_clk_i/hr_core_*
+signal qlsdbuf_avm_write        : std_logic;
+signal qlsdbuf_avm_read         : std_logic;
+signal qlsdbuf_avm_address      : std_logic_vector(31 downto 0);
+signal qlsdbuf_avm_writedata    : std_logic_vector(15 downto 0);
+signal qlsdbuf_avm_byteenable   : std_logic_vector( 1 downto 0);
+signal qlsdbuf_avm_burstcount   : std_logic_vector( 7 downto 0);
+signal qlsdbuf_avm_readdata     : std_logic_vector(15 downto 0);
+signal qlsdbuf_avm_readdatavalid : std_logic;
+signal qlsdbuf_avm_waitrequest   : std_logic;
+
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
 ---------------------------------------------------------------------------------------------
@@ -315,12 +348,9 @@ signal rom_addr_b             : std_logic_vector(14 downto 0);
 
 begin
 
-   hr_core_write_o      <= '0';
-   hr_core_read_o       <= '0';
-   hr_core_address_o    <= (others => '0');
-   hr_core_writedata_o  <= (others => '0');
-   hr_core_byteenable_o <= (others => '0');
-   hr_core_burstcount_o <= (others => '0');
+   -- QL4M65 (Milestone 2): hr_core_* now driven by the QL-SD mount buffer
+   -- bridge below (i_qlsd_buf_cdc) - it is HyperRAM's only master in this
+   -- milestone (main RAM/ROM/VRAM are still BRAM), so no arbiter is needed.
 
    -- Tristate all expansion port drivers that we can directly control
    -- @TODO: As soon as we support modules that can act as busmaster, we need to become more flexible here
@@ -444,7 +474,20 @@ begin
 
          -- QL4M65: system ROM (Minerva), see the "Dual Clocks" section below
          ql_rom_addr_o        => main_rom_addr,
-         ql_rom_data_i        => main_rom_q_u & main_rom_q_l
+         ql_rom_data_i        => main_rom_q_u & main_rom_q_l,
+
+         -- QL4M65 (Milestone 2): vdrives.vhd's QNICE-clock-domain side,
+         -- passed straight through - main.vhd runs in the core's clock
+         -- domain and can't reach qnice_clk_i on its own (see main.vhd's
+         -- own header). C_VD_DEVICE's ce/we are gated by the dispatch in
+         -- core_specific_devices below; addr/data_i are unconditional,
+         -- same pattern as C64MEGA65's c64_qnice_addr_i.
+         qnice_clk_i          => qnice_clk_i,
+         qnice_qlsd_addr_i    => qnice_dev_addr_i,
+         qnice_qlsd_data_i    => qnice_dev_data_i,
+         qnice_qlsd_data_o    => qnice_qlsd_data_o,
+         qnice_qlsd_ce_i      => qnice_qlsd_ce,
+         qnice_qlsd_we_i      => qnice_qlsd_we
       ); -- i_main
 
    ---------------------------------------------------------------------------------------------
@@ -503,6 +546,12 @@ begin
       main_ce              <= '0';
       back_ce              <= '0';
 
+      qnice_qlsd_ce        <= '0';
+      qnice_qlsd_we        <= '0';
+
+      qnice_qlsdbuf_ce     <= '0';
+      qnice_qlsdbuf_we     <= '0';
+
       case qnice_dev_id_i is
 
          -- QL4M65: manual/auto loading of the Main ROM (48KB, $000000-
@@ -544,6 +593,25 @@ begin
                   qnice_dev_data_o <= x"00" & qnice_rom_q_l;
                end if;
             end if;
+
+         -- QL4M65 (Milestone 2): vdrives.vhd's own QNICE MMIO window -
+         -- vdrives.vhd itself lives inside main.vhd (see qlsd-design.md),
+         -- ce/we are gated here, addr/data_i reach it unconditionally
+         -- (i_main's port map above).
+         when C_VD_DEVICE =>
+            qnice_qlsd_ce     <= qnice_dev_ce_i;
+            qnice_qlsd_we     <= qnice_dev_we_i;
+            qnice_dev_data_o  <= qnice_qlsd_data_o;
+
+         -- QL4M65 (Milestone 2): the QL-SD mount buffer (whole-image
+         -- HyperRAM buffer behind C_VD_BUFFER, see qlsd-design.md's
+         -- "Mount buffer" section) - qnice2hyperram/avm_fifo instances
+         -- further below.
+         when C_DEV_QL_QLSD_BUFFER =>
+            qnice_qlsdbuf_ce  <= qnice_dev_ce_i;
+            qnice_qlsdbuf_we  <= qnice_dev_we_i;
+            qnice_dev_data_o  <= qnice_qlsdbuf_data_o;
+            qnice_dev_wait_o  <= qnice_qlsdbuf_wait;
 
          when others => null;
       end case;
@@ -733,11 +801,86 @@ begin
    ---------------------------------------------------------------------------------------
    -- Virtual drive handler
    --
-   -- QL4M65: not needed yet. Milestone 3 (microdrive .MDV / QL-SD QXL.WIN) will need
-   -- vdrives again; when that happens it likely belongs inside main.vhd rather than
-   -- here (per the template's own advice above this comment in earlier revisions), so
-   -- it is deferred rather than stubbed out now.
+   -- QL4M65 (Milestone 2): vdrives.vhd itself lives inside main.vhd (the
+   -- template's own advice, confirmed against C64MEGA65's own main.vhd -
+   -- see .research/qlsd-design.md). What's here is only the QL-SD mount
+   -- buffer (C_VD_BUFFER / C_DEV_QL_QLSD_BUFFER) - the whole-image RAM the
+   -- QNICE Shell firmware requires (see qlsd-design.md's "Mount buffer"
+   -- section), backed by HyperRAM via the framework's own unmodified
+   -- qnice2hyperram.vhd + avm_fifo.vhd. Byte-window packing: qnice_dev_addr_i
+   -- addresses ONE FILE BYTE per QNICE address (bit 0 selects even/odd byte
+   -- within a 16-bit HyperRAM word), same technique as AExp's
+   -- adf_mount_wrapper.vhd. Single HyperRAM master - nothing else in
+   -- QL4M65 uses hr_core_* yet, so no arbiter needed.
    ---------------------------------------------------------------------------------------
+
+   qlsdbuf_hr_addr <= std_logic_vector(
+      resize(unsigned(std_logic_vector'(C_HMAP_QLSD(9 downto 0) & x"000")), 32) +
+      resize(unsigned(qnice_dev_addr_i(27 downto 1)), 32));
+
+   qlsdbuf_hr_byteenable <= "01" when qnice_dev_addr_i(0) = '0' else "10";
+   qlsdbuf_hr_writedata  <= qnice_dev_data_i(7 downto 0) & qnice_dev_data_i(7 downto 0);
+
+   qnice_qlsdbuf_data_o  <= x"00" & qlsdbuf_hr_readdata(7 downto 0)
+                                when qnice_dev_addr_i(0) = '0' else
+                             x"00" & qlsdbuf_hr_readdata(15 downto 8);
+
+   i_qlsd_buf_bridge : entity work.qnice2hyperram
+      port map (
+         clk_i                 => qnice_clk_i,
+         rst_i                 => qnice_rst_i,
+
+         s_qnice_wait_o        => qnice_qlsdbuf_wait,
+         s_qnice_address_i     => qlsdbuf_hr_addr,
+         s_qnice_cs_i          => qnice_qlsdbuf_ce,
+         s_qnice_write_i       => qnice_qlsdbuf_we,
+         s_qnice_writedata_i   => qlsdbuf_hr_writedata,
+         s_qnice_byteenable_i  => qlsdbuf_hr_byteenable,
+         s_qnice_readdata_o    => qlsdbuf_hr_readdata,
+
+         m_avm_write_o         => qlsdbuf_avm_write,
+         m_avm_read_o          => qlsdbuf_avm_read,
+         m_avm_address_o       => qlsdbuf_avm_address,
+         m_avm_writedata_o     => qlsdbuf_avm_writedata,
+         m_avm_byteenable_o    => qlsdbuf_avm_byteenable,
+         m_avm_burstcount_o    => qlsdbuf_avm_burstcount,
+         m_avm_readdata_i      => qlsdbuf_avm_readdata,
+         m_avm_readdatavalid_i => qlsdbuf_avm_readdatavalid,
+         m_avm_waitrequest_i   => qlsdbuf_avm_waitrequest
+      ); -- i_qlsd_buf_bridge
+
+   i_qlsd_buf_cdc : entity work.avm_fifo
+      generic map (
+         G_WR_DEPTH     => 16,
+         G_RD_DEPTH     => 16,
+         G_ADDRESS_SIZE => 32,
+         G_DATA_SIZE    => 16
+      )
+      port map (
+         s_clk_i               => qnice_clk_i,
+         s_rst_i               => qnice_rst_i,
+         s_avm_waitrequest_o   => qlsdbuf_avm_waitrequest,
+         s_avm_write_i         => qlsdbuf_avm_write,
+         s_avm_read_i          => qlsdbuf_avm_read,
+         s_avm_address_i       => qlsdbuf_avm_address,
+         s_avm_writedata_i     => qlsdbuf_avm_writedata,
+         s_avm_byteenable_i    => qlsdbuf_avm_byteenable,
+         s_avm_burstcount_i    => qlsdbuf_avm_burstcount,
+         s_avm_readdata_o      => qlsdbuf_avm_readdata,
+         s_avm_readdatavalid_o => qlsdbuf_avm_readdatavalid,
+
+         m_clk_i               => hr_clk_i,
+         m_rst_i               => hr_rst_i,
+         m_avm_waitrequest_i   => hr_core_waitrequest_i,
+         m_avm_write_o         => hr_core_write_o,
+         m_avm_read_o          => hr_core_read_o,
+         m_avm_address_o       => hr_core_address_o,
+         m_avm_writedata_o     => hr_core_writedata_o,
+         m_avm_byteenable_o    => hr_core_byteenable_o,
+         m_avm_burstcount_o    => hr_core_burstcount_o,
+         m_avm_readdata_i      => hr_core_readdata_i,
+         m_avm_readdatavalid_i => hr_core_readdatavalid_i
+      ); -- i_qlsd_buf_cdc
 
    main_drive_led_o     <= '0';
    main_drive_led_col_o <= x"00FF00";  -- 24-bit RGB value for the led

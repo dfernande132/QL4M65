@@ -14,7 +14,21 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-02, sesión M1048 — MILESTONE 1 CERRADO)
+## 0. Estado actual del proyecto (actualizado: 2026-08-03, sesión M2001 — Milestone 2 en curso)
+
+**Milestone 2 (QL-SD) en implementación. `M2001` compila limpio (WNS=+0.282 ns,
+WHS=+0.052 ns, 0 nets sin rutar), pendiente de prueba en hardware real.**
+Instanciados `qlromext.v`+`sd_card.sv` (decodificación de dirección y DTACK
+en `main.vhd`) + `vdrives.vhd` (VDNUM=1) + un buffer de imagen montada
+respaldado por HyperRAM (fase 1: ~4MB, para una imagen de prueba de 3-4MB
+del usuario - las QXL.WIN reales de ~50MB quedan para una fase 2 de
+streaming real, aparcada). Menú "STORAGE"/"Mount HD image" añadido.
+Detalle técnico completo en `DECISIONES.md`, sección "Milestone 2 —
+implementación de QL-SD, M2001". Próximo paso: prueba en hardware de
+`M2001` (arranque normal sin regresión) y después `M2002` (montar la
+imagen de prueba de verdad).
+
+## 0.3 Estado histórico (hasta el cierre de Milestone 1, sección sin tocar)
 
 **MILESTONE 1 CERRADO, CONFIRMADO POR EL USUARIO Y PUBLICADO EN GITHUB**
 (`https://github.com/dfernande132/QL4M65`, commits `2a67d6d` y `f71cc16`).
@@ -221,7 +235,12 @@ razonamiento completo.
 | `M1014` | Overlay de depuración: antirrebote (≥2 ciclos estables) en el contador de transacciones (dígitos 6-11) + dígitos 16-19 repurpuestos para mostrar la palabra baja del PC inicial leído de la ROM cargada (verificación de carga correcta, a petición del usuario) | Con `M1013` (binario mínimo): ~9.364.000/seg, prácticamente igual que sin antirrebote - **descarta que el 11x fuera un artefacto de medición, es una diferencia real**; PC inicial = `0008`, correcto. Con Minerva: ~831.868/seg, igual que sin antirrebote; pero PC inicial = **`0000`**, inesperado - pendiente verificar contra los bytes reales del fichero de ROM de Minerva usado (offset `$04`-`$07`) |
 
 Detalle completo de cada prueba en `DECISIONES.md` (registro cronológico) y
-sus Anexos A/B (memoria y teclado).
+sus Anexos A/B (memoria y teclado). Esta tabla no se mantuvo fila a fila
+más allá de `M1014` (M1015-M1048 y el cierre de Milestone 1 están en
+prosa en `DECISIONES.md`); tampoco se expande aquí para Milestone 2 -
+`M2001` (compila limpio, WNS=+0.282 ns, WHS=+0.052 ns, pendiente de
+hardware) está documentado en `DECISIONES.md`, sección "Milestone 2 —
+implementación de QL-SD, M2001".
 
 ---
 
