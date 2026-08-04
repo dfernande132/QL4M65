@@ -233,17 +233,38 @@ replicate the `mdv` instance + buffer + loader per additional drive,
 extending the `main.vhd` mux (A.3) to cover more of `mdv_sel`'s 8 possible
 values, and adding one menu line per drive (`mdv2:%s`, `mdv3:%s`, ...).
 
+## Resolved (2026-08-04): real `.MDV` file sizes and the CDC primitive choice
+
+**File sizes, confirmed against real sample images** (`E:\QL_MEGA65\MDV\` +
+`CORE/QL_MiSTer/releases/*.mdv`, 9 files total): 7 of them are exactly
+174930 bytes (matches the core's own `readme.md` figure precisely -
+`CHESS.MDV`, `empty1.mdv`, `empty2.mdv`, `OPascal.mdv`, `tetris.mdv`,
+`crazy.mdv`, `GamesCart.mdv`), but **two are smaller: `easel.mdv` and
+`quill.mdv`, both exactly 163836 bytes** (11094 bytes less - real,
+legitimate images, not corrupt files, presumably formatted with fewer
+usable sectors on the original cartridge). **Design consequence: the size
+check must accept a range (`<= 174930`), not require an exact match** -
+unlike Main/Back ROM's exact-size CSR check, which was safe to copy
+literally only because every real Main/Back ROM combination genuinely is
+one fixed size. `mdv.v`'s own `mdv_end` tracking (whatever `dl_addr` was on
+the last `dl_wr`, see A.2 above) already handles variable-length images
+naturally - no RTL change needed for this, just don't reject the shorter
+files at the loader's size-check step. BRAM buffer sized for the maximum
+(174930 bytes → round up to the next clean boundary for `dualport_2clk_ram`'s
+own `MAXIMUM_SIZE` generic).
+
+**CDC primitive: `xpm_cdc_handshake`**, not a hand-rolled toggle or the
+simpler `xpm_cdc_array_single` (that one only synchronizes independent
+level bits, not a multi-bit payload that has to arrive atomically with its
+own request/ack framing). `xpm_cdc_handshake` is Xilinx's own primitive for
+exactly this shape of problem - transfer one data word across a clock
+boundary with a full request/acknowledge handshake, guaranteeing the data
+stays stable throughout - so the loader FSM (A.2) doesn't need to
+reimplement that protocol by hand. `vdrives.vhd` already proves `xpm_cdc_*`
+primitives are an established pattern in this project (`xpm_cdc_array_single`
+for its own mount-status bits), so this isn't introducing a new technique.
+
 ## Open questions for review
 
-1. **Exact `.MDV` file size** — need to confirm the real byte count from an
-   actual QLAY image file, to size the BRAM buffer precisely (currently
-   assuming the core's own `readme.md` figure, 174930 bytes) and the
-   size-check FSM.
-2. **CDC handshake implementation detail** — hand-rolled toggle + 2-FF
-   synchronizer (matching `intri_irq`'s own style) vs. `xpm_cdc_pulse`/
-   `xpm_cdc_handshake` (Xilinx primitives, `vdrives.vhd` already uses
-   `xpm_cdc_array_single` elsewhere in this project) — leaning toward the
-   `xpm_cdc_*` primitives for anything new, but no strong reason either way
-   yet.
-3. Anything from this design that doesn't match your own mental model of how
+1. Anything from this design that doesn't match your own mental model of how
    Phase A should work before writing VHDL/Verilog.
