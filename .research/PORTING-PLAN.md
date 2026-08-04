@@ -14,46 +14,40 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-04, sesión M2003 — Milestone 2 en curso)
+## 0. Estado actual del proyecto (actualizado: 2026-08-04, sesión M2004 — Milestone 2 reiniciado con microdrive)
 
-**Milestone 2 (QL-SD) en implementación. `M2001` confirmado en hardware
-(arranque sin regresión, menú "Mount HD image" visible). `M2002` (reset
-automático tras montar) confirmado parcialmente - el reset funciona, pero
-reveló un bug real de direccionamiento HyperRAM. `M2003` (arreglo) compila
-limpio (WNS=+0.222 ns, WHS=+0.052 ns, 0 nets con errores de rutado),
-pendiente de prueba en hardware.** Instanciados `qlromext.v`+`sd_card.sv`
-(decodificación de dirección y DTACK en `main.vhd`) + `vdrives.vhd`
-(VDNUM=1) + un buffer de imagen montada respaldado por HyperRAM (fase 1:
-~4MB, para una imagen de prueba de 3-4MB del usuario - las QXL.WIN reales de
-~50MB quedan para una fase 2 de streaming real, aparcada).
+**Milestone 2 pasa de QL-SD a microdrive (decisión del usuario, 2026-08-04).**
+QL-SD (`M2001`-`M2003`) quedó a medias: el mount llegaba a completarse (barra
+de progreso, reset automático funcionando) pero el driver QL-SD seguía sin
+detectar la tarjeta incluso después de arreglar un bug real de
+direccionamiento HyperRAM (`C_HMAP_QLSD` apuntaba al límite físico del chip)
+- queda al menos una causa más sin identificar. Antes de seguir depurando,
+el usuario reevaluó la prioridad del milestone por dos motivos de peso:
 
-**Hallazgo 1 (M2002): el mount se pierde en cualquier reset del core**
-(`vdrives.vhd` borra `drive_mounted_reg` en `reset_core_i` por diseño del
-framework; ni `shell.asm`/`vdrives.asm` re-anuncian un fichero ya montado
-tras un reset). Arreglo: `OSM_SEL_POST` (`CORE/m2m-rom/m2m-rom.asm`) ahora
-también resetea el core tras "Mount HD image:%s", mismo mecanismo que ya
-usa Main/Back ROM desde `M1045`.
+1. Las imágenes QXL.WIN reales (~50MB) no caben ni en BRAM ni en los 8MB de
+   HyperRAM del MEGA65 - el mecanismo de `vdrives.vhd`/el Shell QNICE exige
+   la imagen completa en un buffer lineal (confirmado leyendo `shell.asm`).
+   Soportar tamaños reales exigiría streaming real desde la SD, sin
+   precedente en este ecosistema M2M.
+2. El driver QL-SD ocupa el único slot de Back ROM (16KB) de forma
+   permanente, dejando sin sitio a cualquier otra ROM de extensión que se
+   quiera usar a la vez (caso real: la ROM de Prospero Pascal del usuario).
+   El microdrive no tiene este problema - Minerva ya trae soporte de
+   `mdv1_`/`mdv2_` de fábrica, sin necesitar ninguna Back ROM.
 
-**Hallazgo 2 (M2003): `C_HMAP_QLSD` apuntaba exactamente al límite físico
-de la HyperRAM (byte 8MB de un chip de 8MB)** - toda escritura al buffer de
-montaje se salía del chip, probablemente dando la vuelta a la dirección 0
-(zona reservada del framework/`ascal`). El síntoma en hardware (barra de
-progreso completando con normalidad, pero el driver QL-SD fallando en
-"checking FAT" tras el reset) apuntaba a datos corruptos, no a un fallo de
-detección de tarjeta - confirmado al revisar la aritmética de direcciones.
-Arreglado: `C_HMAP_QLSD` ahora comparte la dirección de `C_HMAP_QL`
-(`x"0200"`, byte 4MB - espacio real y libre hoy, RAM principal del QL sigue
-en BRAM).
+**Código de QL-SD revertido** (commit `248dbe5` en `CoreQL`, `7997bc5` en
+`QL_MiSTer`) - `main.vhd`/`mega65.vhd`/`config.vhd`/`globals.vhd`/
+`m2m-rom.asm`/`build_core.tcl`/`CORE-R6.xpr`/`exceptions.md` vueltos al
+estado de cierre de Milestone 1 (`M1048`); `sd_card.sv` vuelto a su
+`altsyncram` original. Los design docs (`.research/qlsd-design.md`,
+`qlsd-driver.md`) y todo el historial de depuración se quedan como
+referencia para cuando se retome - ver `DECISIONES.md`, sección "Milestone 2
+— QL-SD pausado, pivote a microdrive".
 
-Detalle técnico completo de ambos hallazgos en `DECISIONES.md`, sección
-"Milestone 2 — implementación de QL-SD, M2001" (M2001/M2002/M2003 están
-documentados en la misma sección corrida).
-
-**Reorganización de carpetas en la SD (2026-08-03):** ROMs en
-`/ql4m65/rom/`, imágenes QL-SD en `/ql4m65/storage/` (ver `globals.vhd`/
-`config.vhd`). Próximo paso: prueba en hardware de `M2003` (montar el `.win`
-de prueba, confirmar que el driver detecta la tarjeta/imagen esta vez de
-verdad).
+**Plan para microdrive:** 2 unidades en BRAM, solo lectura primero; después
+escritura; después migrar a HyperRAM; ampliar unidades si hace falta. Ver
+sección 7 (milestones) y el desglose de tareas de la sesión en curso.
+Próxima compilación: `M2004`.
 
 ## 0.3 Estado histórico (hasta el cierre de Milestone 1, sección sin tocar)
 
@@ -509,47 +503,50 @@ Fase 3 parcial, Fases 5-7 en curso (bloqueante actual: instanciar
 `fx68k`/`zx8301`/`zx8302` y la lógica de bus en `main.vhd`, la compilación
 `M1001`), Fases 8-12 pendientes.
 
-### Milestone 2 — QL-SD virtual (reordenado 2026-08-02, dos veces el mismo día)
+### Milestone 2 — Microdrive virtual (reordenado 2026-08-04, tercera vez: vuelve a ser microdrive)
 
-**Segunda reordenación del mismo día**, tras comparar el coste real de
-implementación de las dos opciones de almacenamiento (ver
-`.research/microdrive-read-design.md` y `.research/qlsd-design.md`,
-ambos escritos y revisados en esta sesión):
+**Historial de idas y venidas de este milestone** (para no perder el hilo):
+memoria/velocidad → microdrive (cierre de M1) → QL-SD (2026-08-02, por coste
+de implementación) → **microdrive de nuevo (2026-08-04, por dos problemas
+reales encontrados implementando QL-SD)**. Ver `DECISIONES.md`, sección
+"Milestone 2 — QL-SD pausado, pivote a microdrive", para el razonamiento
+completo: las imágenes QXL.WIN reales (~50MB) no caben en la memoria
+disponible (BRAM ni los 8MB de HyperRAM, compartidos con `ascal`) sin
+streaming real desde la SD (sin precedente en este ecosistema M2M); y el
+driver QL-SD ocupa la única Back ROM de forma permanente, sin dejar sitio a
+otras ROMs de extensión (caso real: la ROM de Prospero Pascal del usuario).
 
-- **Microdrive (`mdv.v`)**: sin interfaz LBA/direccionable — es un replay
-  continuo de un buffer entero a 200kbit/s — no encaja con `vdrives.vhd`.
-  Necesitaría escribir de cero: soporte de escritura (no existe en el RTL
-  original), un `dpram` propio sobre HyperRAM, un árbitro N-master para el
-  Avalon `hr_core_*`, y una FSM de carga QNICE nueva.
-- **QL-SD (`qlromext.v` + `sd_card.sv`)**: ambos módulos, sin modificar,
-  hablan ya el protocolo genérico "SD" de MiSTer (`sd_lba`/`sd_rd`/`sd_wr`/
-  `sd_ack`/`sd_buff_*`) — exactamente lo que `vdrives.vhd` espera, con el
-  añadido de que `sd_card.sv` ya trae el split de reloj (`clk_sys`/
-  `clk_spi`) que encaja con el dominio QNICE/núcleo que exige `vdrives.vhd`.
-  Lectura y escritura llegan "gratis" sin RTL nuevo — solo cableado, el
-  reemplazo Vivado-limpio del `altsyncram` interno de `sd_card.sv` (mismo
-  patrón ya resuelto 2 veces), decodificado de dirección y una instancia de
-  `vdrives.vhd`.
+**Por qué microdrive no tiene ninguno de esos dos problemas:**
+- Cada imagen `.MDV` (formato QLAY) son 174930 bytes exactos (~171KB) — un
+  par de unidades caben de sobra hasta en BRAM, sin tocar HyperRAM para
+  nada al principio.
+- Minerva trae soporte de `mdv1_`/`mdv2_` integrado en la propia ROM de
+  sistema (confirmado en `M1040`) — no necesita ninguna Back ROM, así que
+  no compite por ese slot con Prospero Pascal, TK2, ni nada más.
 
-**Se elige QL-SD como objetivo real de Milestone 2** (microdrive queda
-pendiente, sin cancelar, para más adelante — su propio design doc de
-lectura sigue vigente para cuando se retome). El driver QL-SD (1.08+,
-necesario según el propio `readme.md` del core: *"Needs QL-SD driver 1.08
-or higher"*) no supone trabajo nuevo — ya existe localmente
-`releases/minerva+qlsd_ql.rom` (Minerva + driver combinados) y la
-infraestructura de M1045 (`C_DEV_QL_MAINROM`/`C_DEV_QL_BACKROM`) ya estaba
-pensada para cargar justo esto en la ROM de extensión.
+**Coste de implementación (recordatorio de la comparación original,
+2026-08-02):** `mdv.v` no tiene interfaz LBA/direccionable — es un replay
+continuo de un buffer entero a 200kbit/s, no encaja con `vdrives.vhd`. Hace
+falta: soporte de escritura (no existe en el RTL original de `mdv.v`), un
+`dpram` propio (BRAM primero, HyperRAM después), y una FSM de carga QNICE
+nueva — sin poder reusar `vdrives.vhd` tal cual (a diferencia de QL-SD). El
+patrón de escritura de AExp (`adf_mount_wrapper.vhd`+`adf_track_engine.vhd`:
+HyperRAM + bitmap de pistas sucias + `HANDLE_CORE_IO`) es la referencia a
+seguir para la parte de escritura, una vez la lectura funcione.
 
-*(Motivo original de priorizar almacenamiento sobre memoria/velocidad,
-sigue vigente — ver razonamiento de la primera reordenación más abajo)*:
-tras la experiencia de `M1029`-`M1047`, se prioriza almacenamiento porque
-permite empezar a probar software real del QL (no solo ROMs/BASIC
-sintéticos) sin depender de ampliar memoria primero, y porque la razón
-original para hacer memoria antes ("evitar rehacer el camino de RAM si se
-construye primero sobre BRAM") ya no aplica — Milestone 1 acabó
-construyéndose sobre BRAM de todas formas y así es como arranca hoy.
+**Plan de implementación por fases (acordado 2026-08-04):**
+1. Preparar el milestone: revisar/actualizar `.research/microdrive-read-design.md`
+   con las lecciones de la sesión de QL-SD (sobre todo la aritmética de
+   direcciones de HyperRAM, aunque no aplica hasta la fase 4 de este plan).
+2. Un microdrive, solo lectura, en BRAM.
+3. Driver de escritura (ahora que ya se lee).
+4. Migrar el microdrive a HyperRAM.
+5. Ampliar a 2, 3 o 4 unidades.
 
-### Milestone 3 — Ampliación de memoria y velocidad (antes Milestone 2)
+Diseño completo de la lectura en `.research/microdrive-read-design.md`
+(pendiente de revisión antes de implementar, ver paso 1 arriba).
+
+### Milestone 3 — Ampliación de memoria y velocidad
 
 Los tres tamaños de RAM del requisito inicial (128k/640k/4096k, todos sobre
 HyperRAM) seleccionables desde el menú OSD, más los modos de velocidad de CPU
@@ -558,16 +555,27 @@ múltiplos del reloj base (sección 3), así que es principalmente exponer las
 opciones de `config.vhd` y verificar que la HyperRAM aguanta el ancho de banda
 a la velocidad más alta ("Full", 84 MHz de bus).
 
-### Milestone 4 — Almacenamiento adicional (antes parte de Milestone 3; QL-SD se cambió a Milestone 2 el 2026-08-02)
+### Milestone 4 — QL-SD / QXL.WIN (pausado 2026-08-04, no cancelado)
 
-Microdrive virtual (`.MDV`, formato QLAY) — pendiente, no cancelado. Diseño
-de la parte de lectura ya escrito en `.research/microdrive-read-design.md`
-(HyperRAM + `dpram` propio, sin encajar con `vdrives.vhd` por no tener
-`mdv.v` interfaz LBA); la parte de escritura queda por diseñar cuando se
-retome este hito.
+Implementación real ya empezada y luego pausada (`M2001`-`M2003`, código
+revertido) — ver `DECISIONES.md` para el razonamiento completo y todo lo
+aprendido (incluida la causa raíz de direccionamiento HyperRAM encontrada en
+`M2003`, y el problema sin resolver que quedó pendiente tras arreglarla).
+Diseño completo en `.research/qlsd-design.md`/`qlsd-driver.md`, siguen
+vigentes. Para retomarlo con imágenes de tamaño realista (~20-50MB, el
+estándar del mundo QL) hace falta además resolver el streaming real desde
+la SD (fase 2 del propio diseño, nunca empezada) — sin eso, solo sirven
+imágenes de prueba pequeñas (unos pocos MB).
 
-(GoldCard/SMSQE y el ratón quedan sin hito asignado todavía — se revisará
-cuando los milestones anteriores estén cerrados.)
+(GoldCard/SMSQE, el ratón, y el soporte de disquetera vía imágenes `.img`
+DSDD de 720KB tipo Trump Card quedan sin hito asignado todavía —
+investigado el 2026-08-04: el core `QL_MiSTer` no tiene absolutamente
+ningún soporte de disquetera, ni siquiera como fichero sin usar - el propio
+`readme.md` del core confirma que ni el driver de floppy de SMSQ/E está
+implementado. Sería el hito más grande de los tres pendientes, ya que
+habría que diseñar un controlador FDC completo y no hay ningún driver QDOS
+conocido para reutilizar/portar - se revisará cuando los milestones
+anteriores estén cerrados.)
 
 ## 8. Decisiones pendientes (para el usuario o para el arranque de Fase 4/5 en Claude Code)
 
