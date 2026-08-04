@@ -200,19 +200,19 @@ signal mdv1_dl_wr     : std_logic;
 signal mdv1_ld_byte0       : std_logic_vector(7 downto 0);
 signal mdv1_ld_word_addr   : std_logic_vector(16 downto 0);
 signal mdv1_ld_word_data   : std_logic_vector(15 downto 0);
-signal mdv1_ld_send        : std_logic;
-signal mdv1_ld_busy        : std_logic;  -- '1' from src_send until src_rcv - drives qnice_mdv1_wait_o
+signal mdv1_ld_send        : std_logic := '0';  -- level-held (see mdv1_loader_qnice), needs a defined power-on value
+signal mdv1_ld_busy        : std_logic := '0';  -- '1' for the whole handshake (send asserted through rcv dropping again) - drives qnice_mdv1_wait_o
 
 -- xpm_cdc_handshake's own src/dest signals (33 bits: 17-bit word address + 16-bit word data)
 signal mdv1_cdc_src_in    : std_logic_vector(32 downto 0);
 signal mdv1_cdc_src_rcv   : std_logic;
 signal mdv1_cdc_dest_req  : std_logic;
-signal mdv1_cdc_dest_ack  : std_logic;
+signal mdv1_cdc_dest_ack  : std_logic := '0';  -- level-held (see mdv1_loader_core), needs a defined power-on value
 signal mdv1_cdc_dest_out  : std_logic_vector(32 downto 0);
 
 -- core-clock-domain loader FSM (drives mdv1_dl_addr/dl_data/dl_wr/download
 -- from mdv1_cdc_dest_out once xpm_cdc_handshake delivers a word)
-type t_mdv1_ld_state is (LD_IDLE, LD_ACK);
+type t_mdv1_ld_state is (LD_IDLE, LD_WAIT_REQ_LOW);
 signal mdv1_ld_state : t_mdv1_ld_state := LD_IDLE;
 
 -- IPC link to ipc.vhd (QL4M65 M1031: the real emulated 8049, T48 core +
@@ -698,34 +698,53 @@ begin
    -- seen, held through mdv1_ld_busy until the core side acknowledges - the
    -- QNICE Shell's own generic byte-loading loop (shell.asm's LOAD_IMAGE)
    -- needs no special-casing, same as Main/Back ROM's own manual load.
+   --
+   -- IMPORTANT (found 2026-08-04, after M2004 hung on hardware mid-load):
+   -- xpm_cdc_handshake's src_send/dest_ack are LEVEL signals that must be
+   -- asserted and HELD until the other side's src_rcv/dest_req responds -
+   -- NOT one-cycle pulses. Confirmed by reading the actual primitive
+   -- source (C:\Xilinx\Vivado\2022.2\data\ip\xpm\xpm_cdc\hdl\xpm_cdc.sv,
+   -- module xpm_cdc_handshake) rather than assuming - its own simulation
+   -- assertions spell out the exact 4-phase protocol: src_send stays high
+   -- until src_rcv='1', then drops, then a NEW send may only start once
+   -- src_rcv has also dropped back to '0'. The first version of this loader
+   -- pulsed both src_send and dest_ack for a single cycle, which let
+   -- xpm_cdc_handshake's internal synchronizers drop the request before
+   -- the other side ever safely captured it - a real handshake deadlock
+   -- (not a timing/setup issue), matching the hang seen in hardware.
    ---------------------------------------------------------------------------
 
    qnice_mdv1_wait_o <= mdv1_ld_busy or (qnice_mdv1_ce_i and qnice_mdv1_we_i and qnice_mdv1_addr_i(0));
 
    mdv1_loader_qnice : process (qnice_clk_i)
-      variable v_send : std_logic;
    begin
       if rising_edge(qnice_clk_i) then
-         v_send := '0';
-
-         if qnice_mdv1_ce_i = '1' and qnice_mdv1_we_i = '1' and mdv1_ld_busy = '0' then
-            if qnice_mdv1_addr_i(0) = '0' then
-               -- even address: first byte of the pair, just latch it
-               mdv1_ld_byte0 <= qnice_mdv1_data_i(7 downto 0);
-            else
-               -- odd address: second byte - assemble the word and send it
-               mdv1_ld_word_addr <= qnice_mdv1_addr_i(17 downto 1);
-               mdv1_ld_word_data <= mdv1_ld_byte0 & qnice_mdv1_data_i(7 downto 0);
-               v_send := '1';
+         if mdv1_ld_busy = '0' then
+            if qnice_mdv1_ce_i = '1' and qnice_mdv1_we_i = '1' then
+               if qnice_mdv1_addr_i(0) = '0' then
+                  -- even address: first byte of the pair, just latch it
+                  mdv1_ld_byte0 <= qnice_mdv1_data_i(7 downto 0);
+               else
+                  -- odd address: second byte - assemble the word and start
+                  -- the handshake (src_send asserted and held, see above)
+                  mdv1_ld_word_addr <= qnice_mdv1_addr_i(17 downto 1);
+                  mdv1_ld_word_data <= mdv1_ld_byte0 & qnice_mdv1_data_i(7 downto 0);
+                  mdv1_ld_send      <= '1';
+                  mdv1_ld_busy      <= '1';
+               end if;
             end if;
-         end if;
-
-         mdv1_ld_send <= v_send;
-
-         if v_send = '1' then
-            mdv1_ld_busy <= '1';
-         elsif mdv1_cdc_src_rcv = '1' then
-            mdv1_ld_busy <= '0';
+         elsif mdv1_ld_send = '1' then
+            -- handshake in flight: drop send once the core side confirms
+            -- receipt (src_rcv='1') - do NOT drop it any earlier
+            if mdv1_cdc_src_rcv = '1' then
+               mdv1_ld_send <= '0';
+            end if;
+         else
+            -- send already dropped: wait for src_rcv to also drop before
+            -- allowing the next byte-pair's handshake to start
+            if mdv1_cdc_src_rcv = '0' then
+               mdv1_ld_busy <= '0';
+            end if;
          end if;
       end if;
    end process mdv1_loader_qnice;
@@ -753,14 +772,15 @@ begin
    -- for one cycle with dl_wr asserted (pulsing download too, for exactly
    -- one cycle, when the word address is 0 - see mdv.v:75-117 and the
    -- design doc's A.2: download is a one-shot reset of mdv.v's own
-   -- mem_addr/gap state, not something to hold for the whole transfer),
-   -- then acknowledge back to the QNICE side.
+   -- mem_addr/gap state, not something to hold for the whole transfer).
+   -- dest_ack itself must be asserted and HELD until dest_req drops back to
+   -- '0' (see the loader's own header comment above for why - xpm_cdc_
+   -- handshake's documented 4-phase protocol, not a one-cycle pulse).
    mdv1_loader_core : process (clk_main_i)
    begin
       if rising_edge(clk_main_i) then
-         mdv1_dl_wr        <= '0';
-         mdv1_download     <= '0';
-         mdv1_cdc_dest_ack <= '0';
+         mdv1_dl_wr    <= '0';
+         mdv1_download <= '0';
 
          case mdv1_ld_state is
             when LD_IDLE =>
@@ -771,12 +791,15 @@ begin
                   if unsigned(mdv1_cdc_dest_out(32 downto 16)) = 0 then
                      mdv1_download <= '1';
                   end if;
-                  mdv1_ld_state <= LD_ACK;
+                  mdv1_cdc_dest_ack <= '1';
+                  mdv1_ld_state     <= LD_WAIT_REQ_LOW;
                end if;
 
-            when LD_ACK =>
-               mdv1_cdc_dest_ack <= '1';
-               mdv1_ld_state     <= LD_IDLE;
+            when LD_WAIT_REQ_LOW =>
+               if mdv1_cdc_dest_req = '0' then
+                  mdv1_cdc_dest_ack <= '0';
+                  mdv1_ld_state     <= LD_IDLE;
+               end if;
          end case;
       end if;
    end process mdv1_loader_core;

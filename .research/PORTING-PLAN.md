@@ -14,7 +14,20 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-04, sesión M2004 — microdrive fase A compila limpio)
+## 0. Estado actual del proyecto (actualizado: 2026-08-04, sesión M2005 — microdrive fase A, arreglado protocolo CDC)
+
+**`M2004` probado en hardware: dos problemas.** ROMs dejaron de auto-cargar
+desde `/ql4m65/rom/` (el revert de QL-SD se llevó por delante esa
+reorganización, independiente de QL-SD). Cargar un `.mdv` colgaba el core en
+la barra de progreso. Causa raíz: mal uso de `xpm_cdc_handshake` -
+`src_send`/`dest_ack` deben mantenerse en alto hasta ver la confirmación del
+otro lado, no pulsarse un ciclo (confirmado leyendo el código fuente real de
+la primitiva, no de memoria). **`M2005` arregla ambos**: protocolo de 4 fases
+correcto en `main.vhd`, rutas de ROM restauradas en `globals.vhd`. Compila
+limpio (WNS=+0.114 ns, WHS=+0.054 ns, 0 nets con errores). Pendiente de
+prueba en hardware. Detalle completo en `DECISIONES.md`.
+
+
 
 **`M2004` (microdrive 1, solo lectura, BRAM) compila limpio: WNS=+0.282 ns,
 WHS=+0.055 ns, 0 nets sin rutar. Pendiente de prueba en hardware.** Segunda
