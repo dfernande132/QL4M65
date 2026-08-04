@@ -14,35 +14,46 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-03, sesión M2002 — Milestone 2 en curso)
+## 0. Estado actual del proyecto (actualizado: 2026-08-04, sesión M2003 — Milestone 2 en curso)
 
 **Milestone 2 (QL-SD) en implementación. `M2001` confirmado en hardware
-(arranque sin regresión, menú "Mount HD image" visible). `M2002` compila
-limpio (WNS=+0.112 ns, WHS=+0.056 ns, 0 nets sin rutar), pendiente de
-prueba en hardware.** Instanciados `qlromext.v`+`sd_card.sv` (decodificación
-de dirección y DTACK en `main.vhd`) + `vdrives.vhd` (VDNUM=1) + un buffer de
-imagen montada respaldado por HyperRAM (fase 1: ~4MB, para una imagen de
-prueba de 3-4MB del usuario - las QXL.WIN reales de ~50MB quedan para una
-fase 2 de streaming real, aparcada).
+(arranque sin regresión, menú "Mount HD image" visible). `M2002` (reset
+automático tras montar) confirmado parcialmente - el reset funciona, pero
+reveló un bug real de direccionamiento HyperRAM. `M2003` (arreglo) compila
+limpio (WNS=+0.222 ns, WHS=+0.052 ns, 0 nets con errores de rutado),
+pendiente de prueba en hardware.** Instanciados `qlromext.v`+`sd_card.sv`
+(decodificación de dirección y DTACK en `main.vhd`) + `vdrives.vhd`
+(VDNUM=1) + un buffer de imagen montada respaldado por HyperRAM (fase 1:
+~4MB, para una imagen de prueba de 3-4MB del usuario - las QXL.WIN reales de
+~50MB quedan para una fase 2 de streaming real, aparcada).
 
-**Hallazgo real en la primera prueba de montaje: el mount se pierde en
-cualquier reset del core** (`vdrives.vhd` borra `drive_mounted_reg` en
-`reset_core_i` por diseño del framework; ni `shell.asm`/`vdrives.asm`
-re-anuncian un fichero ya montado tras un reset, a diferencia de MiSTer real
-donde el ARM nunca se resetea con el core). `M2002` añade el arreglo elegido
-(por partes, empezando por el más simple): `OSM_SEL_POST`
-(`CORE/m2m-rom/m2m-rom.asm`) ahora también resetea el core tras "Mount HD
-image:%s", mismo mecanismo que ya usa Main/Back ROM desde `M1045` - funciona
-porque el montaje real (y el latch de `csd_size`/`csd_sdhc` en `sd_card.sv`)
-ya ocurrió antes del reset. Detalle técnico completo en `DECISIONES.md`,
-sección "Milestone 2 — implementación de QL-SD, M2001" (M2001 y M2002 están
-documentados en la misma sección).
+**Hallazgo 1 (M2002): el mount se pierde en cualquier reset del core**
+(`vdrives.vhd` borra `drive_mounted_reg` en `reset_core_i` por diseño del
+framework; ni `shell.asm`/`vdrives.asm` re-anuncian un fichero ya montado
+tras un reset). Arreglo: `OSM_SEL_POST` (`CORE/m2m-rom/m2m-rom.asm`) ahora
+también resetea el core tras "Mount HD image:%s", mismo mecanismo que ya
+usa Main/Back ROM desde `M1045`.
+
+**Hallazgo 2 (M2003): `C_HMAP_QLSD` apuntaba exactamente al límite físico
+de la HyperRAM (byte 8MB de un chip de 8MB)** - toda escritura al buffer de
+montaje se salía del chip, probablemente dando la vuelta a la dirección 0
+(zona reservada del framework/`ascal`). El síntoma en hardware (barra de
+progreso completando con normalidad, pero el driver QL-SD fallando en
+"checking FAT" tras el reset) apuntaba a datos corruptos, no a un fallo de
+detección de tarjeta - confirmado al revisar la aritmética de direcciones.
+Arreglado: `C_HMAP_QLSD` ahora comparte la dirección de `C_HMAP_QL`
+(`x"0200"`, byte 4MB - espacio real y libre hoy, RAM principal del QL sigue
+en BRAM).
+
+Detalle técnico completo de ambos hallazgos en `DECISIONES.md`, sección
+"Milestone 2 — implementación de QL-SD, M2001" (M2001/M2002/M2003 están
+documentados en la misma sección corrida).
 
 **Reorganización de carpetas en la SD (2026-08-03):** ROMs en
 `/ql4m65/rom/`, imágenes QL-SD en `/ql4m65/storage/` (ver `globals.vhd`/
-`config.vhd`). Próximo paso: prueba en hardware de `M2002` (montar el `.win`
-de prueba, confirmar que el reset automático hace que el driver detecte la
-tarjeta).
+`config.vhd`). Próximo paso: prueba en hardware de `M2003` (montar el `.win`
+de prueba, confirmar que el driver detecta la tarjeta/imagen esta vez de
+verdad).
 
 ## 0.3 Estado histórico (hasta el cierre de Milestone 1, sección sin tocar)
 

@@ -105,12 +105,24 @@ constant C_HMAP_QL            : std_logic_vector(15 downto 0) := x"0200";     --
 -- not real-world QXL.WIN images (~50MB - doesn't fit the MEGA65's 8MB
 -- HyperRAM, shared with ascal's framebuffer, regardless of how this is
 -- sized). Real-size images are phase 2 (real per-sector SD streaming,
--- not started yet, no ceiling then). Placed right after C_HMAP_QL's own
--- reserved (but not yet live) 4MB - both slices together exceed the
--- physical 8MB on paper, which is fine only as long as C_HMAP_QL stays
--- unused (milestone 3 will need to reconcile the two when QL main RAM
--- actually moves to HyperRAM).
-constant C_HMAP_QLSD           : std_logic_vector(15 downto 0) := x"0400";     -- Start address of the QL-SD mount buffer
+-- not started yet, no ceiling then).
+--
+-- BUG FOUND AND FIXED (2026-08-03, M2003): this was originally x"0400"
+-- (byte address 8MB - 1024 units * 4096 words) - exactly the physical end
+-- of the MEGA65's 8MB HyperRAM chip. Every write wrapped clean off the end
+-- of the address space, aliasing back to address 0 - i.e. straight into
+-- C_HMAP_M2M's own reserved region (ascal's framebuffer and other
+-- framework HyperRAM usage). Mounting a .win looked like it worked (the
+-- Shell's progress bar completed - it was actually writing real bytes,
+-- just to the wrong place), but reading it back for the QL-SD driver's own
+-- FAT check returned framework data, not the mounted file - "checking
+-- FAT... mount failed". Fixed by reusing C_HMAP_QL's own address instead
+-- of placing this after it: C_HMAP_QL is reserved but NOT yet live (main
+-- RAM is still BRAM), so its 4MB-8MB range is genuinely free today - same
+-- reconciliation caveat as before (milestone 3 will need to actually
+-- coordinate the two when QL main RAM moves to HyperRAM), now made real
+-- instead of just theoretical.
+constant C_HMAP_QLSD           : std_logic_vector(15 downto 0) := x"0200";     -- Start address of the QL-SD mount buffer (shares C_HMAP_QL's still-unused range)
 constant C_HMAP_QLSD_SIZE_4KW  : natural := 16#0200#;                         -- 512 units of 4kW = 4MB
 
 ----------------------------------------------------------------------------------------------------------
