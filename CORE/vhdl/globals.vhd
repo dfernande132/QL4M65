@@ -94,53 +94,18 @@ constant VRAM_ADDR_WIDTH      : natural := f_log2(CHAR_MEM_SIZE);
 ----------------------------------------------------------------------------------------------------------
 
 constant C_HMAP_M2M           : std_logic_vector(15 downto 0) := x"0000";     -- Reserved for the M2M framework
-constant C_HMAP_QL            : std_logic_vector(15 downto 0) := x"0200";     -- Start address reserved for the QL core (main RAM expansion, milestone 3 - not live yet, still BRAM)
-
--- QL4M65 (Milestone 2, QL-SD): mount buffer for the virtual HD image
--- (C_VD_BUFFER below) - phase 1 of the storage design (see
--- .research/qlsd-design.md, "Mount buffer" section): the QNICE Shell
--- firmware requires the WHOLE mounted .win image in one linearly-
--- addressed RAM, no on-demand sector streaming (confirmed reading
--- shell.asm's HANDLE_DRV_RD). Sized for a 3-4MB user-prepared test image,
--- not real-world QXL.WIN images (~50MB - doesn't fit the MEGA65's 8MB
--- HyperRAM, shared with ascal's framebuffer, regardless of how this is
--- sized). Real-size images are phase 2 (real per-sector SD streaming,
--- not started yet, no ceiling then).
---
--- BUG FOUND AND FIXED (2026-08-03, M2003): this was originally x"0400"
--- (byte address 8MB - 1024 units * 4096 words) - exactly the physical end
--- of the MEGA65's 8MB HyperRAM chip. Every write wrapped clean off the end
--- of the address space, aliasing back to address 0 - i.e. straight into
--- C_HMAP_M2M's own reserved region (ascal's framebuffer and other
--- framework HyperRAM usage). Mounting a .win looked like it worked (the
--- Shell's progress bar completed - it was actually writing real bytes,
--- just to the wrong place), but reading it back for the QL-SD driver's own
--- FAT check returned framework data, not the mounted file - "checking
--- FAT... mount failed". Fixed by reusing C_HMAP_QL's own address instead
--- of placing this after it: C_HMAP_QL is reserved but NOT yet live (main
--- RAM is still BRAM), so its 4MB-8MB range is genuinely free today - same
--- reconciliation caveat as before (milestone 3 will need to actually
--- coordinate the two when QL main RAM moves to HyperRAM), now made real
--- instead of just theoretical.
-constant C_HMAP_QLSD           : std_logic_vector(15 downto 0) := x"0200";     -- Start address of the QL-SD mount buffer (shares C_HMAP_QL's still-unused range)
-constant C_HMAP_QLSD_SIZE_4KW  : natural := 16#0200#;                         -- 512 units of 4kW = 4MB
+constant C_HMAP_QL            : std_logic_vector(15 downto 0) := x"0200";     -- Start address reserved for the QL core
 
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System
 ----------------------------------------------------------------------------------------------------------
 
--- QL4M65 (Milestone 2): one virtual drive for QL-SD (QXL.WIN image,
--- mounted via vdrives.vhd inside main.vhd - see .research/qlsd-design.md).
--- C_VD_DEVICE is vdrives.vhd's own QNICE MMIO window; C_VD_BUFFER is the
--- mount buffer device holding the whole image (HyperRAM-backed, see
--- C_HMAP_QLSD above) - both routed in mega65.vhd's core_specific_devices
--- process. Device IDs follow C_DEV_QL_MAINROM/BACKROM's 0x01xx numbering.
+-- QL4M65: no virtual drives in milestone 1 (microdrive .MDV / QL-SD QXL.WIN are
+-- milestone 3). Per the framework's own convention for not using virtual drives:
 type vd_buf_array is array(natural range <>) of std_logic_vector;
-constant C_VDNUM              : natural := 1;
-constant C_VD_DEVICE          : std_logic_vector(15 downto 0) := x"0103";
-constant C_DEV_QL_QLSD_BUFFER : std_logic_vector(15 downto 0) := x"0104";
-constant C_VD_BUFFER          : vd_buf_array := (C_DEV_QL_QLSD_BUFFER,
-                                                  x"EEEE");                  -- Always finish the array using x"EEEE"
+constant C_VDNUM              : natural := 0;
+constant C_VD_DEVICE          : std_logic_vector(15 downto 0) := x"EEEE";
+constant C_VD_BUFFER          : vd_buf_array := (x"EEEE", x"EEEE");
 
 ----------------------------------------------------------------------------------------------------------
 -- System for handling simulated cartridges and ROM loaders
@@ -221,13 +186,9 @@ constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_
 -- MANDATORY: if a file is missing, the firmware logs it and continues (no
 -- fatal error screen) - if only main.rom exists, only Main loads and Back
 -- stays cleared; the manual menu items remain the fallback either way.
--- QL4M65 (Milestone 2, 2026-08-03): moved from "/ql4m65/" straight into
--- "/ql4m65/rom/" for SD card tidiness now that QL-SD storage images have
--- their own "/ql4m65/storage/" folder too (config.vhd's DIR_START stays
--- at the "/ql4m65" parent, so browsing for either is one level down).
-constant MAIN_ROM_NAME            : string := "/ql4m65/rom/main.rom" & ENDSTR;
+constant MAIN_ROM_NAME            : string := "/ql4m65/main.rom" & ENDSTR;
 constant MAIN_ROM_NAME_START      : std_logic_vector(15 downto 0) := x"0000";
-constant BACK_ROM_NAME            : string := "/ql4m65/rom/back.rom" & ENDSTR;
+constant BACK_ROM_NAME            : string := "/ql4m65/back.rom" & ENDSTR;
 constant BACK_ROM_NAME_START      : std_logic_vector(15 downto 0) :=
    std_logic_vector(to_unsigned(MAIN_ROM_NAME'length, 16));
 

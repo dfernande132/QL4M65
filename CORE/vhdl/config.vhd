@@ -85,16 +85,15 @@ constant SCR_WELCOME : string :=
 
    "Sinclair QL for MEGA65 (QL4M65)\n" &
    "Desarrollado por dfsantos (2026)\n\n\n" &
-   "Milestone 2 - MEGA65 port in progress\n\n" &
+   "Milestone 1 - MEGA65 port in progress\n\n" &
 
    "Based on MiSTer-devel/QL_MiSTer\n" &
    "Powered by MiSTer2MEGA65,\n" &
    "done by sy2002 and MJoergen\n\n" &
 
-   "Milestone 2 scope: native QL speed, PAL,\n" &
-   "128k RAM, keyboard, QL-SD (QXL.WIN, small\n" &
-   "test images). No microdrive, mouse or\n" &
-   "GoldCard/SMSQE yet.\n\n\n" &
+   "Milestone 1 scope: native QL speed, PAL,\n" &
+   "128k RAM, keyboard. No microdrive, QL-SD,\n" &
+   "mouse or GoldCard/SMSQE yet.\n\n\n" &
 
    "    Press Space to continue.\n\n\n";
 
@@ -128,14 +127,6 @@ constant SEL_CFG_FILE      : std_logic_vector(15 downto 0) := x"0101";
 
 -- START YOUR CONFIGURATION BELOW THIS LINE
 
--- QL4M65 (Milestone 2, 2026-08-03): DIR_START stays at the "/ql4m65" parent
--- folder - every manual file browse (Main ROM, Back ROM, Mount HD image)
--- starts here regardless of which menu item opened it (the framework has
--- no per-item start directory, see M2M/rom/selectfile.asm's _S_START).
--- ROMs live one level down in "/ql4m65/rom/" (globals.vhd's MAIN_ROM_NAME/
--- BACK_ROM_NAME), QL-SD storage images in "/ql4m65/storage/" - kept as two
--- separate subfolders for SD card tidiness, symmetric one-level-down access
--- from here for both.
 constant DIR_START         : string := "/ql4m65";
 constant CFG_FILE          : string := "/ql4m65/m2mcfg";
 
@@ -219,7 +210,7 @@ constant SEL_CORENAME      : std_logic_vector(15 downto 0) := x"0200";
 
 -- Currently this is only used in the debug console. Use the welcome screen and the
 -- help system to display the name and version of your core to the end user
-constant CORENAME          : string := "QL4M65 Milestone 2";
+constant CORENAME          : string := "QL4M65 Milestone 1";
 
 --------------------------------------------------------------------------------------------------------------------
 -- "Help" menu / Options menu  (Selectors 0x0300 .. 0x0312): DO NOT TOUCH
@@ -284,16 +275,11 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 -- PORTING-PLAN.md - almost everything is fixed in code (scandoubler, scale,
 -- CPU speed, RAM size). One flat menu (no real submenu navigation): "ROM"
 -- is a plain non-selectable section heading (OPTM_G_TEXT) directly above
--- its three items, all visible on screen at once. SPEED/RAM section
--- headings will be added the same way exactly when each feature lands in
--- a later milestone, rather than as empty placeholders now. Reset is a
--- dedicated M2M key, not an Options item.
--- QL4M65 (Milestone 2): "STORAGE" section added the same way, below ROM,
--- with a single OPTM_G_MOUNT_DRV line for the QL-SD virtual drive
--- (vdrives.vhd, VDNUM=1 - see .research/qlsd-design.md). Positional: this
--- is the ONLY OPTM_G_MOUNT_DRV line in the whole menu, so it's drive 0
--- unambiguously.
-constant OPTM_SIZE         : natural := 11;  -- amount of items including empty lines:
+-- its three items, all visible on screen at once. SPEED/RAM/Microdrive
+-- section headings will be added the same way exactly when each feature
+-- lands in a later milestone, rather than as empty placeholders now.
+-- Reset is a dedicated M2M key, not an Options item.
+constant OPTM_SIZE         : natural := 8;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -307,15 +293,9 @@ constant OPTM_SIZE         : natural := 11;  -- amount of items including empty 
 -- own Options menus (confirmed via M1005 hardware test screenshots). Widened
 -- to 20 for the Main/Back ROM redesign: " Extract Back ROM" is the longest
 -- label now (18 chars), still comfortably inside 20 with a little margin.
--- QL4M65 (Milestone 2): widened again to 28 for " Mount HD image:%s" - the
--- label alone is already 17 chars, and %s expands to the mounted .win's
--- filename (OPTM_S_MOUNT's "<Mount Drive>" default is 13 chars; real
--- filenames will often be longer) - first estimate, not yet confirmed on
--- hardware (same caveat M1005's OSD crop estimate had - adjust after
--- seeing it rendered). No submenus here, so OPTM_DY = OPTM_SIZE (all 11
--- lines always visible).
-constant OPTM_DX           : natural := 28;
-constant OPTM_DY           : natural := 11;
+-- No submenus here, so OPTM_DY = OPTM_SIZE (all 8 lines always visible).
+constant OPTM_DX           : natural := 20;
+constant OPTM_DY           : natural := 8;
 
 -- QL4M65 M1006: added a "Sinclair QL" headline (OPTM_G_HEADLINE - shown in a
 -- brighter/yellow color by the framework), same pattern as AExp's "Amiga 500"
@@ -337,10 +317,7 @@ constant OPTM_ITEMS        : string :=
    " Back ROM:%s\n"         &    -- 4: load the QL extension ROM (TK2, Pascal...), 16K
    " Extract Back ROM\n"    &    -- 5: clear the 16K Back ROM slot (momentary action)
    "\n"                     &    -- 6: separator
-   " STORAGE\n"             &    -- 7: section heading (plain text, not selectable)
-   " Mount HD image:%s\n"   &    -- 8: mount a QXL.WIN image as the QL-SD virtual drive
-   "\n"                     &    -- 9: separator
-   " Close Menu\n";               -- 10: close menu
+   " Close Menu\n";               -- 7: close menu
 
 -- define your own constants here and choose meaningful names
 -- make sure that your first group uses the value 1 (0 means "no menu item", such as text and line),
@@ -350,7 +327,6 @@ constant OPTM_ITEMS        : string :=
 constant OPTM_G_MAINROM         : integer := 1;
 constant OPTM_G_BACKROM         : integer := 2;
 constant OPTM_G_BACKROM_EXTRACT : integer := 3;
-constant OPTM_G_QLSD_MOUNT      : integer := 4;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -365,10 +341,7 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_HEADLINE,                   
                                              OPTM_G_BACKROM + OPTM_G_LOAD_ROM,                -- 4: Back ROM:%s
                                              OPTM_G_BACKROM_EXTRACT + OPTM_G_SINGLESEL,       -- 5: Extract Back ROM (momentary action)
                                              OPTM_G_LINE,                                     -- 6: separator
-                                             OPTM_G_TEXT,                                     -- 7: STORAGE (section heading)
-                                             OPTM_G_QLSD_MOUNT + OPTM_G_MOUNT_DRV,            -- 8: Mount HD image:%s (drive 0 - the only mount line)
-                                             OPTM_G_LINE,                                     -- 9: separator
-                                             OPTM_G_CLOSE                                     -- 10: Close Menu
+                                             OPTM_G_CLOSE                                     -- 7: Close Menu
                                            );
 
 --------------------------------------------------------------------------------------------------------------------

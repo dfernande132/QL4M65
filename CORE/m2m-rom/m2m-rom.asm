@@ -174,31 +174,11 @@ PREP_START      INCRB
 ; Screen Config" momentary action guards against, same fix applied here:
 ; M2M$FORCE_MENU clears the selection, OPTM_SHOW repaints every label,
 ; OPTM_SELECT restores the cursor highlight).
-;
-; QL4M65 (Milestone 2): "Mount HD image:%s" (OPTM_G_QLSD_MOUNT) resets
-; the core the same way. Found in testing: mounting a .win while the QL
-; is already booted (Minerva/the QL-SD driver already ran its own SD
-; detection once, at its own boot time) never gets picked up - the
-; driver doesn't poll for a card appearing later. By the time we get
-; here, HANDLE_MOUNTING already ran (options.asm's OPTM_CB_SEL calls it
-; before OSM_SEL_POST) - vdrives.vhd already strobed img_mounted_o, and
-; sd_card.sv already latched the real csd_size/csd_sdhc for the newly
-; mounted image (those registers have no reset logic, so this survives
-; the reset below intact). All the reset needs to do is give the QL-SD
-; driver a clean boot to run its own CMD0/CMD8/ACMD41 detection sequence
-; against an already-ready emulated card - same mechanism MiSTer's own
-; ARM-side firmware relies on (it never resets when the FPGA core does),
-; ported to QNICE's equivalent role. vdrives.vhd's own drive_mounted_reg
-; does clear on this core reset (by the framework's own design), but
-; sd_card.sv never consults it - only img_mounted's one-shot strobe (already
-; consumed) and the latched csd_size/csd_sdhc matter to it, so this is safe.
 OSM_SEL_POST    INCRB
 
                 CMP     OPTM_G_MAINROM, R8
                 RBRA    _OSM_SP_RESET, Z
                 CMP     OPTM_G_BACKROM, R8
-                RBRA    _OSM_SP_RESET, Z
-                CMP     OPTM_G_QLSD_MOUNT, R8
                 RBRA    _OSM_SP_RESET, Z
                 CMP     OPTM_G_BACKROM_EXTRACT, R8
                 RBRA    _OSM_SP_RET, !Z
@@ -291,14 +271,13 @@ CUSTOM_MSG      XOR     R8, R8
 
 ; Add your core specific constants and strings here
 
-; Mirrors config.vhd's OPTM_G_MAINROM/OPTM_G_BACKROM/OPTM_G_BACKROM_EXTRACT/
-; OPTM_G_QLSD_MOUNT (the "Main ROM:%s"/"Back ROM:%s"/"Extract Back ROM"/
-; "Mount HD image:%s" menu items' group IDs) - used by OSM_SEL_POST above.
-; Keep in sync if config.vhd ever changes these.
+; Mirrors config.vhd's OPTM_G_MAINROM/OPTM_G_BACKROM/OPTM_G_BACKROM_EXTRACT
+; (the "Main ROM:%s"/"Back ROM:%s"/"Extract Back ROM" menu items' group
+; IDs) - used by OSM_SEL_POST above. Keep in sync if config.vhd ever
+; changes these.
 OPTM_G_MAINROM         .EQU 1
 OPTM_G_BACKROM         .EQU 2
 OPTM_G_BACKROM_EXTRACT .EQU 3
-OPTM_G_QLSD_MOUNT      .EQU 4
 
 ; Mirrors globals.vhd's C_DEV_QL_BACKROM - used by CLEAR_BACK_ROM above.
 C_DEV_QL_BACKROM       .EQU 0x0102

@@ -18,7 +18,6 @@ use ieee.numeric_std.all;
 
 library work;
 use work.video_modes_pkg.all;
-use work.vdrives_pkg.all;
 
 entity main is
    generic (
@@ -75,20 +74,7 @@ entity main is
       -- loaded by the QNICE Shell via mega65.vhd's ql_rom_u/l
       -- (C_DEV_QL_MAINROM/C_DEV_QL_BACKROM).
       ql_rom_addr_o           : out std_logic_vector(14 downto 0);
-      ql_rom_data_i           : in  std_logic_vector(15 downto 0);
-
-      -- QL4M65 (Milestone 2): QNICE-clock-domain side of vdrives.vhd's
-      -- QNICE MMIO interface for the QL-SD virtual drive. main.vhd runs
-      -- exclusively in the core's clock domain (see this file's header),
-      -- so these cross-domain signals are passed straight through from
-      -- mega65.vhd - same pattern as C64MEGA65's main.vhd's
-      -- c64_clk_sd_i/c64_qnice_*_i ports.
-      qnice_clk_i             : in  std_logic;
-      qnice_qlsd_addr_i       : in  std_logic_vector(27 downto 0);
-      qnice_qlsd_data_i       : in  std_logic_vector(15 downto 0);
-      qnice_qlsd_data_o       : out std_logic_vector(15 downto 0);
-      qnice_qlsd_ce_i         : in  std_logic;
-      qnice_qlsd_we_i         : in  std_logic
+      ql_rom_data_i           : in  std_logic_vector(15 downto 0)
    );
 end entity main;
 
@@ -179,77 +165,6 @@ signal ipc_audio         : std_logic;                     -- ipc.vhd -> zx8302
 -- to ipc.vhd's P1-selected data-bus-read logic - exactly the interface
 -- rtl/ipc.v itself expects from rtl/keyboard.v.
 signal ql_matrix : std_logic_vector(63 downto 0);
-
----------------------------------------------------------------------------
--- QL4M65 (Milestone 2): QL-SD - qlromext.v (QL-bus register interface) +
--- sd_card.sv (SPI-slave SD emulator) + vdrives.vhd (QNICE/FAT32 bridge).
--- See .research/qlsd-design.md for the full architecture and
--- doc/m2m/exceptions.md for the sd_card.sv altsyncram-removal surgery.
----------------------------------------------------------------------------
-
--- Address decode: original QL.sv:304-308 simplified (no GoldCard/
--- rom_shadow in any milestone yet - see qlsd-design.md item 4)
-signal qlsd_en      : std_logic;  -- cpu_rom and cpu_rd
-signal qlsd_reg     : std_logic;  -- $FEE0-$FEFF control page
-signal qlsd_rd      : std_logic;  -- $FEE4 SPI_READ, the only register that returns data
-signal qlsd_dat     : std_logic;  -- $FF00-$FFFF SPI background-transfer shift page
-signal qlsd_sel     : std_logic;  -- qlsd_reg or qlsd_dat - drives qlromext's romoel and cpu_dtack's mux
-signal qlsd_dout    : std_logic_vector(7 downto 0);
-signal qlsd_dtack   : std_logic;  -- qlromext's own DTACK, active-high "ready" (same convention as cpu_dtack)
-
--- qlromext.v <-> sd_card.sv raw SPI wires
-signal qlsd_spi_clk  : std_logic;
-signal qlsd_spi_cs1l : std_logic;
-signal qlsd_spi_cs2l : std_logic;
-signal qlsd_spi_di   : std_logic;
-signal qlsd_spi_do   : std_logic;
-
--- sd_card.sv <-> vdrives.vhd: MiSTer's generic "SD" block-storage protocol
--- (confirmed identical signal names/semantics against vdrives.vhd:155-166)
-signal qlsd_sd_lba       : std_logic_vector(31 downto 0);
-signal qlsd_sd_rd        : std_logic;
-signal qlsd_sd_wr        : std_logic;
-signal qlsd_sd_ack       : std_logic;
--- vdrives.vhd's sd_buff_addr_o is fixed at 14 bits (its own AW=13 constant,
--- covers up to 16384-byte blocks); sd_card.sv WIDE(0) only needs 9 bits
--- (AW=8) to index one 512-byte sector - low 9 bits used, see i_sd_card
--- below. Upper bits are 0 for the 512-byte BLKSZ=>2 vdrives is configured
--- with (real SD sector size, matches sd_card.sv's own assumption).
-signal qlsd_sd_buff_addr : std_logic_vector(13 downto 0);
-signal qlsd_sd_buff_dout : std_logic_vector(7 downto 0);  -- vdrives -> sd_card (into the buffer)
-signal qlsd_sd_buff_din  : std_logic_vector(7 downto 0);  -- sd_card -> vdrives (out of the buffer)
-signal qlsd_sd_buff_wr   : std_logic;
-
--- vdrives.vhd is generic over VDNUM (array-typed sd_lba_i/sd_rd_i/sd_wr_i/
--- sd_ack_o/sd_buff_din_i); sd_card.sv is not (its ports above are scalar,
--- it only ever models one card) - these single-element (G_VDNUM=1) arrays
--- bridge the two. QL4M65's QL-SD hardware/driver only ever supports one
--- card, so G_VDNUM is fixed at 1 (see globals.vhd's C_VDNUM).
-signal qlsd_sd_lba_arr      : vd_vec_array(G_VDNUM - 1 downto 0)(31 downto 0);
-signal qlsd_sd_blk_cnt_arr  : vd_vec_array(G_VDNUM - 1 downto 0)(5 downto 0);
-signal qlsd_sd_rd_arr       : vd_std_array(G_VDNUM - 1 downto 0);
-signal qlsd_sd_wr_arr       : vd_std_array(G_VDNUM - 1 downto 0);
-signal qlsd_sd_ack_arr      : vd_std_array(G_VDNUM - 1 downto 0);
-signal qlsd_sd_buff_din_arr : vd_vec_array(G_VDNUM - 1 downto 0)(7 downto 0);
-
--- sd_card.sv's internal "sdbuf" RAM, now externally instantiated
--- (dualport_2clk_ram, ADDR_WIDTH=>11, DATA_WIDTH=>8 - see exceptions.md)
-signal qlsd_ram_a_addr : std_logic_vector(10 downto 0);
-signal qlsd_ram_a_data : std_logic_vector(7 downto 0);
-signal qlsd_ram_a_wren : std_logic;
-signal qlsd_ram_a_q    : std_logic_vector(7 downto 0);
-signal qlsd_ram_b_addr : std_logic_vector(10 downto 0);
-signal qlsd_ram_b_data : std_logic_vector(7 downto 0);
-signal qlsd_ram_b_wren : std_logic;
-signal qlsd_ram_b_q    : std_logic_vector(7 downto 0);
-
--- vdrives.vhd img_mounted/img_size - only VDNUM=1 in this milestone, but
--- kept generic-width so G_VDNUM stays authoritative (mirrors AExp/C64's
--- own pattern of sizing these off VDNUM rather than hardcoding 1).
--- img_readonly_o/img_type_o/drive_mounted_o/cache_*_o are left open below -
--- nothing in this milestone's minimal wiring consumes them yet.
-signal qlsd_img_mounted   : std_logic_vector(G_VDNUM - 1 downto 0);
-signal qlsd_img_size      : std_logic_vector(31 downto 0);
 
 ---------------------------------------------------------------------------
 -- QL4M65: internal clock enables, derived from clk_main_i (84.000000 MHz)
@@ -388,46 +303,18 @@ begin
 
    io_dout <= zx8302_dout when zx8302_sel = '1' else x"0000";
 
-   -- QL4M65 (Milestone 2): QL-SD maps into the ROM address window ($FEE0-
-   -- $FEFF control page, $FF00-$FFFF SPI shift page) - takes priority over
-   -- ql_rom_data_i, same priority order as the original QL.sv (its own
-   -- cpu_din mux checks qlsd_rd before the ROM read).
-   cpu_din <= io_dout               when ql_io   = '1' else
-              qlsd_dout & qlsd_dout when qlsd_rd = '1' else
-              ql_rom_data_i         when cpu_rom = '1' else
-              ram_q_a               when cpu_ram = '1' else
+   cpu_din <= io_dout       when ql_io   = '1' else
+              ql_rom_data_i when cpu_rom = '1' else
+              ram_q_a       when cpu_ram = '1' else
               x"FFFF";
 
    -- ql_timing's wait-states apply uniformly (matches QL.sv's own default
    -- case - even ROM/IO reads share the contended-memory timing window);
    -- no extra RAM-controller dtack needed since main RAM is BRAM here, not
-   -- SDRAM (see DECISIONES.md: BRAM now, HyperRAM later). QL4M65
-   -- (Milestone 2): while a QL-SD register/data access is in flight,
-   -- qlromext.v generates its own DTACK instead (original QL.sv:684-688) -
-   -- same active-high "ready" convention as cpu_dtack, no polarity fix
-   -- needed (confirmed by reading qlromext.v's own dtack process, unlike
-   -- the IPL case in M1016/M1017).
-   cpu_dtack <= qlsd_dtack when qlsd_sel = '1' else not ram_delay_dtack;
+   -- SDRAM (see DECISIONES.md: BRAM now, HyperRAM later)
+   cpu_dtack <= not ram_delay_dtack;
 
    ql_rom_addr_o <= cpu_addr(15 downto 1);
-
-   -- QL4M65 (Milestone 2): QL-SD address decode, simplified from the
-   -- original QL.sv:304-308 (no GoldCard/rom_shadow in any milestone yet -
-   -- see .research/qlsd-design.md item 4).
-   qlsd_en  <= cpu_rom and cpu_rd;
-   qlsd_reg <= '1' when (qlsd_en = '1' and (cpu_addr(15 downto 4) = x"fee" or cpu_addr(15 downto 4) = x"fef")) else '0';
-   qlsd_rd  <= '1' when (qlsd_en = '1' and cpu_addr(15 downto 0) = x"fee4") else '0';  -- only SPI_READ actually returns data
-   qlsd_dat <= '1' when (qlsd_en = '1' and cpu_addr(15 downto 8) = x"ff") else '0';
-   qlsd_sel <= qlsd_reg or qlsd_dat;
-
-   -- QL4M65 (Milestone 2): bridge sd_card.sv's scalar SD-protocol ports to
-   -- vdrives.vhd's VDNUM-array ports (see the signal declarations above)
-   qlsd_sd_lba_arr(0)     <= qlsd_sd_lba;
-   qlsd_sd_blk_cnt_arr(0) <= (others => '0');  -- one 512-byte block per SD transaction, matches sd_card.sv's own per-LBA behaviour and vdrives' BLKSZ=>2
-   qlsd_sd_rd_arr(0)      <= qlsd_sd_rd;
-   qlsd_sd_wr_arr(0)      <= qlsd_sd_wr;
-   qlsd_sd_ack            <= qlsd_sd_ack_arr(0);
-   qlsd_sd_buff_din       <= qlsd_sd_buff_din_arr(0);
 
    ---------------------------------------------------------------------------
    -- QL4M65: CPU (fx68k) - Verilog/SystemVerilog original, instantiated
@@ -723,154 +610,6 @@ begin
          audio_o     => ipc_audio,
          ipl_o       => ipc_ipl
       ); -- i_ipc
-
-   ---------------------------------------------------------------------------
-   -- QL4M65 (Milestone 2): QL-SD - qlromext.v, unmodified, instantiated as-is
-   ---------------------------------------------------------------------------
-
-   i_qlromext : entity work.qlromext
-      port map (
-         clk      => clk_main_i,
-
-         ce_sd    => ce_sd,
-         dtack    => qlsd_dtack,
-
-         a        => cpu_addr(15 downto 0),
-         d        => qlsd_dout,
-         romoel   => not qlsd_sel,
-
-         io1      => open,
-         io2      => '0',   -- unused expansion input, tied off (matches QL.sv's own .io2(1'b0))
-         io3      => open,
-         io4      => open,
-
-         sd_clk   => qlsd_spi_clk,
-         sd_cs1l  => qlsd_spi_cs1l,
-         sd_cs2l  => qlsd_spi_cs2l,
-         sd_do    => qlsd_spi_do,
-         sd_di    => qlsd_spi_di
-      ); -- i_qlromext
-
-   ---------------------------------------------------------------------------
-   -- QL4M65 (Milestone 2): QL-SD - sd_card.sv (SPI-slave SD emulator),
-   -- unmodified except the ram_a_*/ram_b_* port additions (altsyncram
-   -- removal, see doc/m2m/exceptions.md) and the WIDE(0) instantiation
-   -- parameter (not WIDE(1) like the original QL.sv - see
-   -- .research/qlsd-design.md). clk_sys (block-level LBA side) runs in
-   -- QNICE's clock domain to match vdrives.vhd; clk_spi (SPI bit-shift
-   -- side, talking to qlromext.v) runs raw off clk_main_i, same as
-   -- QL.sv's own .clk_spi(clk_sys) wiring (its "clk_sys" is the QL core's
-   -- clock, not QNICE's - naming collision between the two projects, not
-   -- an error).
-   ---------------------------------------------------------------------------
-
-   i_sd_card : entity work.sd_card
-      generic map (
-         WIDE  => 0,
-         OCTAL => 0
-      )
-      port map (
-         clk_sys      => qnice_clk_i,
-         reset        => reset,
-
-         sdhc         => '1',  -- no physical/removable card detection - fixed, matches QL.sv's own .sdhc(1)
-         img_mounted  => qlsd_img_mounted(0),
-         img_size     => x"00000000" & qlsd_img_size,
-
-         sd_lba       => qlsd_sd_lba,
-         sd_rd        => qlsd_sd_rd,
-         sd_wr        => qlsd_sd_wr,
-         sd_ack       => qlsd_sd_ack,
-
-         sd_buff_addr => qlsd_sd_buff_addr(8 downto 0),
-         sd_buff_dout => qlsd_sd_buff_dout,
-         sd_buff_din  => qlsd_sd_buff_din,
-         sd_buff_wr   => qlsd_sd_buff_wr,
-
-         clk_spi      => clk_main_i,
-
-         ss           => not qlsd_spi_cs1l,
-         sck          => qlsd_spi_clk,
-         mosi         => qlsd_spi_di,
-         miso         => qlsd_spi_do,
-
-         ram_a_addr_o => qlsd_ram_a_addr,
-         ram_a_data_o => qlsd_ram_a_data,
-         ram_a_wren_o => qlsd_ram_a_wren,
-         ram_a_q_i    => qlsd_ram_a_q,
-
-         ram_b_addr_o => qlsd_ram_b_addr,
-         ram_b_data_o => qlsd_ram_b_data,
-         ram_b_wren_o => qlsd_ram_b_wren,
-         ram_b_q_i    => qlsd_ram_b_q
-      ); -- i_sd_card
-
-   -- QL4M65 (Milestone 2): sd_card.sv's internal "sdbuf" RAM, externally
-   -- instantiated (Vivado-clean replacement for its original altsyncram -
-   -- see doc/m2m/exceptions.md). Both ports are genuinely 8 bits wide with
-   -- WIDE(0) above, so a plain dualport_2clk_ram fits with no asymmetric
-   -- width handling needed.
-   i_qlsd_ram : entity work.dualport_2clk_ram
-      generic map (
-         ADDR_WIDTH => 11,
-         DATA_WIDTH => 8
-      )
-      port map (
-         clock_a   => qnice_clk_i,
-         address_a => qlsd_ram_a_addr,
-         data_a    => qlsd_ram_a_data,
-         wren_a    => qlsd_ram_a_wren,
-         q_a       => qlsd_ram_a_q,
-
-         clock_b   => clk_main_i,
-         address_b => qlsd_ram_b_addr,
-         data_b    => qlsd_ram_b_data,
-         wren_b    => qlsd_ram_b_wren,
-         q_b       => qlsd_ram_b_q
-      ); -- i_qlsd_ram
-
-   ---------------------------------------------------------------------------
-   -- QL4M65 (Milestone 2): QL-SD - vdrives.vhd, unmodified generic M2M
-   -- framework module (zero QL-specific changes), bridges sd_card.sv's
-   -- generic "SD" protocol to QNICE/FAT32.
-   ---------------------------------------------------------------------------
-
-   i_vdrives : entity work.vdrives
-      generic map (
-         VDNUM => G_VDNUM,
-         BLKSZ => 2   -- 512-byte blocks, matches sd_card.sv's own sector-size assumption
-      )
-      port map (
-         clk_qnice_i       => qnice_clk_i,
-         clk_core_i        => clk_main_i,
-         reset_core_i      => reset,
-
-         img_mounted_o     => qlsd_img_mounted,
-         img_readonly_o    => open,
-         img_size_o        => qlsd_img_size,
-         img_type_o        => open,
-
-         drive_mounted_o   => open,
-         cache_dirty_o     => open,
-         cache_flushing_o  => open,
-
-         sd_lba_i          => qlsd_sd_lba_arr,
-         sd_blk_cnt_i      => qlsd_sd_blk_cnt_arr,
-         sd_rd_i           => qlsd_sd_rd_arr,
-         sd_wr_i           => qlsd_sd_wr_arr,
-         sd_ack_o          => qlsd_sd_ack_arr,
-
-         sd_buff_addr_o    => qlsd_sd_buff_addr,
-         sd_buff_dout_o    => qlsd_sd_buff_dout,
-         sd_buff_din_i     => qlsd_sd_buff_din_arr,
-         sd_buff_wr_o      => qlsd_sd_buff_wr,
-
-         qnice_addr_i      => qnice_qlsd_addr_i,
-         qnice_data_i      => qnice_qlsd_data_i,
-         qnice_data_o      => qnice_qlsd_data_o,
-         qnice_ce_i        => qnice_qlsd_ce_i,
-         qnice_we_i        => qnice_qlsd_we_i
-      ); -- i_vdrives
 
 end architecture synthesis;
 

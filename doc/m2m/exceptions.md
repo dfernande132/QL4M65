@@ -84,41 +84,6 @@ full reasoning and the AExp reference pattern this follows).
 itself is implemented (not part of any of the three defined milestones
 yet).
 
-### `sys/sd_card.sv` - internal `altsyncram` ("sdbuf") replaced by an externally-instantiated `dualport_2clk_ram` (Milestone 2, QL-SD)
-
-Same class of problem as `dpram.v` above: `sd_card.sv`'s internal `sdbuf`
-RAM is an `altsyncram` instance (Quartus-only, doesn't synthesize in
-Vivado), and `sd_card.sv` itself is stock MiSTer framework code shared
-across many cores (not QL-specific), so QL4M65 keeps it unmodified as far
-as possible rather than rewriting its logic.
-
-The `altsyncram sdbuf (...)` instance and its `defparam` block were
-removed and replaced by eight new top-level ports (`ram_a_addr_o`/
-`ram_a_data_o`/`ram_a_wren_o`/`ram_a_q_i` for the `clk_sys`-side port,
-`ram_b_addr_o`/`ram_b_data_o`/`ram_b_wren_o`/`ram_b_q_i` for the
-`clk_spi`-side port) - the same "expose ports, instantiate the Vivado-clean
-replacement as a sibling" surgery already used for `zx8302.v`'s `ipc`/`mdv`
-removal, rather than trying to instantiate a VHDL entity directly from
-inside this Verilog module. `main.vhd` instantiates a `dualport_2clk_ram`
-(`ADDR_WIDTH => 11`, `DATA_WIDTH => 8`) wired to those eight ports, with
-`clock_a => qnice_clk_i`, `clock_b => ` the core clock.
-
-**Requires instantiating `sd_card` with `WIDE(0)`, not `WIDE(1)` like the
-original `QL.sv` does.** `WIDE` only affects the `clk_sys`-side address/data
-width (`AW`/`DW` localparams); with `WIDE(0)`, both RAM ports end up
-genuinely 8 bits wide (`numwords=2048`/`widthad=11` on both sides), which is
-what makes a single symmetric `dualport_2clk_ram` a clean fit and also
-matches `M2M/vhdl/vdrives.vhd`'s own fixed 8-bit `sd_buff_*` ports
-(`vdrives.vhd:104`, `constant DW: natural := 7`). The SPI-facing side
-(`clk_spi`, talking to `qlromext.v`) is unaffected either way. See
-`.research/qlsd-design.md` for the full reasoning - this project's local
-reference cores (AExp, C64MEGA65) don't actually pair `sd_card.sv` with
-`vdrives.vhd`, so there was no existing wiring to copy.
-
-When updating from a newer upstream `sd_card.sv`: re-apply the same
-surgery (remove `altsyncram sdbuf (...)` + `defparam`, re-expose the same
-eight `ram_a_*`/`ram_b_*` ports, keep instantiating with `WIDE(0)`).
-
 ### Removed the embedded "mdv" (microdrive) instance from `rtl/zx8302.v` - but `mdv_gap` is NOT just tied off
 
 Same problem as `ipc`: `zx8302.v` instantiates `mdv` (`rtl/mdv.v`)
