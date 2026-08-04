@@ -14,7 +14,22 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-04, sesión M2004 — Milestone 2 reiniciado con microdrive)
+## 0. Estado actual del proyecto (actualizado: 2026-08-04, sesión M2004 — microdrive fase A compila limpio)
+
+**`M2004` (microdrive 1, solo lectura, BRAM) compila limpio: WNS=+0.282 ns,
+WHS=+0.055 ns, 0 nets sin rutar. Pendiente de prueba en hardware.** Segunda
+cirugía sobre `zx8302.v` (tras la de `ipc`): 5 puertos nuevos
+(`mdv_sel_o`/`mdv1_gap_i`/`mdv1_tx_empty_i`/`mdv1_rx_ready_i`/
+`mdv1_byte_i`), `mdv.v` reinstanciado sin modificar con un reemplazo
+Vivado-limpio de su `dpram` interno (`mdv_dpram.vhd`, BRAM). Hallazgo de
+diseño real: `mdv.v` ata los dos relojes de su RAM interna a una única
+entrada `clk`, así que cargar el `.MDV` desde QNICE necesita un puente de
+cruce de dominio de reloj de verdad (`xpm_cdc_handshake`) - a diferencia de
+Main/Back ROM, cuya RAM de destino ya es de doble reloj sin necesitar
+ninguna FSM. Detalle técnico completo en `DECISIONES.md`, sección
+"Milestone 2 — microdrive fase A, M2004".
+
+
 
 **Milestone 2 pasa de QL-SD a microdrive (decisión del usuario, 2026-08-04).**
 QL-SD (`M2001`-`M2003`) quedó a medias: el mount llegaba a completarse (barra

@@ -305,6 +305,29 @@ signal back_val_state         : t_rom_val_state := VS_IDLE;
 -- 48 KB into the same physical ql_rom_u/l instances
 signal rom_addr_b             : std_logic_vector(14 downto 0);
 
+-- QL4M65 (Milestone 2 phase A): mdv1 microdrive image CSR (4k window
+-- 0xFFFF) + size-check FSM - same "always answer" protocol as Main/Back
+-- ROM above, but a RANGE check (<= C_MDV1_MAX_BYTES) instead of an exact
+-- match, since real .MDV images vary in length (globals.vhd's own comment
+-- on C_MDV1_MAX_BYTES). The actual byte stream itself is NOT buffered here
+-- (unlike Main/Back ROM's BRAM) - qnice_mdv1_ce/we/addr/data go straight
+-- through to main.vhd's own loader (mdv1's buffer lives there, see
+-- .research/microdrive-read-design.md section A.2); qnice_mdv1_wait comes
+-- back from main.vhd while a byte is still crossing clock domains.
+signal mdv1_ce                : std_logic;
+signal mdv1_csr_active        : std_logic;
+signal mdv1_csr_data          : std_logic_vector(15 downto 0);
+signal mdv1_csr_wait          : std_logic;
+signal mdv1_req_status        : std_logic_vector( 3 downto 0);
+signal mdv1_req_length        : std_logic_vector(22 downto 0);
+signal mdv1_resp_status       : std_logic_vector( 3 downto 0) := C_CSR_RESP_IDLE;
+signal mdv1_resp_error        : std_logic_vector( 3 downto 0) := x"0";
+signal mdv1_val_state         : t_rom_val_state := VS_IDLE;
+
+signal qnice_mdv1_ce          : std_logic;
+signal qnice_mdv1_we          : std_logic;
+signal qnice_mdv1_wait        : std_logic;
+
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
 ---------------------------------------------------------------------------------------------
@@ -444,7 +467,18 @@ begin
 
          -- QL4M65: system ROM (Minerva), see the "Dual Clocks" section below
          ql_rom_addr_o        => main_rom_addr,
-         ql_rom_data_i        => main_rom_q_u & main_rom_q_l
+         ql_rom_data_i        => main_rom_q_u & main_rom_q_l,
+
+         -- QL4M65 (Milestone 2 phase A): mdv1 loader, QNICE-clock-domain
+         -- side passed straight through - main.vhd runs exclusively in the
+         -- core's clock domain (see its own header), same pattern as
+         -- QL-SD's own (reverted) qnice_qlsd_* ports had.
+         qnice_clk_i          => qnice_clk_i,
+         qnice_mdv1_addr_i    => qnice_dev_addr_i,
+         qnice_mdv1_data_i    => qnice_dev_data_i,
+         qnice_mdv1_ce_i      => qnice_mdv1_ce,
+         qnice_mdv1_we_i      => qnice_mdv1_we,
+         qnice_mdv1_wait_o    => qnice_mdv1_wait
       ); -- i_main
 
    ---------------------------------------------------------------------------------------------
@@ -503,6 +537,10 @@ begin
       main_ce              <= '0';
       back_ce              <= '0';
 
+      mdv1_ce              <= '0';
+      qnice_mdv1_ce        <= '0';
+      qnice_mdv1_we        <= '0';
+
       case qnice_dev_id_i is
 
          -- QL4M65: manual/auto loading of the Main ROM (48KB, $000000-
@@ -543,6 +581,24 @@ begin
                else
                   qnice_dev_data_o <= x"00" & qnice_rom_q_l;
                end if;
+            end if;
+
+         -- QL4M65 (Milestone 2 phase A): mdv1 microdrive image, manual load
+         -- only (globals.vhd's C_CRTROMS_MAN). Window 0xFFFF is the same
+         -- M2M CSR/size-check protocol as Main/Back ROM above; everywhere
+         -- else, bytes go straight through to main.vhd's own loader
+         -- (mdv1's buffer lives there, not in a local BRAM here) - the
+         -- wait state comes back from main.vhd too, since a byte may still
+         -- be crossing into the core clock domain.
+         when C_DEV_QL_MDV1 =>
+            mdv1_ce <= qnice_dev_ce_i;
+            if mdv1_csr_active = '1' then
+               qnice_dev_data_o <= mdv1_csr_data;
+               qnice_dev_wait_o <= mdv1_csr_wait;
+            else
+               qnice_mdv1_ce    <= qnice_dev_ce_i;
+               qnice_mdv1_we    <= qnice_dev_we_i;
+               qnice_dev_wait_o <= qnice_mdv1_wait;
             end if;
 
          when others => null;
@@ -677,6 +733,65 @@ begin
          end if;
       end if;
    end process p_back_size_check;
+
+   i_mdv1_csr : entity work.qnice_csr
+      generic map (
+         G_ERROR_STRINGS => C_ROM_ERROR_STRINGS
+      )
+      port map (
+         qnice_clk_i          => qnice_clk_i,
+         qnice_rst_i          => qnice_rst_i,
+         qnice_addr_i         => qnice_dev_addr_i,
+         qnice_data_i         => qnice_dev_data_i,
+         qnice_ce_i           => mdv1_ce,
+         qnice_we_i           => qnice_dev_we_i,
+         qnice_data_o         => mdv1_csr_data,
+         qnice_wait_o         => mdv1_csr_wait,
+         qnice_csr_o          => mdv1_csr_active,
+         qnice_req_status_o   => mdv1_req_status,
+         qnice_req_length_o   => mdv1_req_length,
+         qnice_resp_status_i  => mdv1_resp_status,
+         qnice_resp_error_i   => mdv1_resp_error,
+         qnice_resp_address_i => (others => '0')
+      ); -- i_mdv1_csr
+
+   -- QL4M65 (Milestone 2 phase A): unlike Main/Back ROM's exact-size check,
+   -- this is a RANGE check (<= C_MDV1_MAX_BYTES) - real .MDV images vary in
+   -- length (confirmed against 9 real sample files, see globals.vhd).
+   p_mdv1_size_check : process (qnice_clk_i)
+   begin
+      if falling_edge(qnice_clk_i) then
+         case mdv1_val_state is
+            when VS_IDLE =>
+               if mdv1_req_status = C_CSR_REQ_OK then
+                  if unsigned(mdv1_req_length) <= C_MDV1_MAX_BYTES then
+                     mdv1_resp_status <= C_CSR_RESP_READY;
+                     mdv1_resp_error  <= x"0";
+                  else
+                     mdv1_resp_status <= C_CSR_RESP_ERROR;
+                     mdv1_resp_error  <= x"1";
+                  end if;
+                  mdv1_val_state <= VS_DONE;
+               else
+                  mdv1_resp_status <= C_CSR_RESP_IDLE;
+                  mdv1_resp_error  <= x"0";
+               end if;
+
+            when VS_DONE =>
+               if mdv1_req_status /= C_CSR_REQ_OK then
+                  mdv1_resp_status <= C_CSR_RESP_IDLE;
+                  mdv1_resp_error  <= x"0";
+                  mdv1_val_state   <= VS_IDLE;
+               end if;
+         end case;
+
+         if qnice_rst_i = '1' then
+            mdv1_val_state   <= VS_IDLE;
+            mdv1_resp_status <= C_CSR_RESP_IDLE;
+            mdv1_resp_error  <= x"0";
+         end if;
+      end if;
+   end process p_mdv1_size_check;
 
    ---------------------------------------------------------------------------------------------
    -- Dual Clocks

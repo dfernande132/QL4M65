@@ -84,40 +84,47 @@ full reasoning and the AExp reference pattern this follows).
 itself is implemented (not part of any of the three defined milestones
 yet).
 
-### Removed the embedded "mdv" (microdrive) instance from `rtl/zx8302.v` - but `mdv_gap` is NOT just tied off
+### `rtl/zx8302.v` microdrive interface: internal `mdv` instance removed (M1), then re-exposed as an external sibling (Milestone 2 phase A)
 
-Same problem as `ipc`: `zx8302.v` instantiates `mdv` (`rtl/mdv.v`)
-directly, and `mdv.v` itself instantiates `dpram` (see above) for its own
-internal buffer - so even though no milestone implements real microdrive
-storage, leaving the `mdv` instance in place would pull the unsynthesizable
-`dpram` into the Vivado build transitively, just to sit unused.
+**M1 (microdrive not implemented yet):** same problem as `ipc` - `zx8302.v`
+instantiated `mdv` (`rtl/mdv.v`) directly, and `mdv.v` itself instantiates
+`dpram` (see above) for its own internal buffer, so leaving the `mdv`
+instance in place would pull the unsynthesizable `dpram` into the Vivado
+build transitively just to sit unused. `mdv_tx_empty`/`mdv_rx_ready`/
+`mdv_byte` were tied to a "no drive present" state (`1`/`0`/`0x00`) and
+`mdv_gap` got a periodic ~125ms pulse generator instead (load-bearing, not
+cosmetic - QDOS's own boot sequence needs a real gap interrupt to converge
+to "no medium found" and continue booting; see `DECISIONES.md`'s `M1040`
+section for the full investigation).
 
-`mdv_tx_empty`/`mdv_rx_ready`/`mdv_byte` are tied to a "no drive present"
-state (`1`/`0`/`0x00`) instead of instantiating `mdv` - genuinely unused,
-milestone 3 territory. **`mdv_gap` is different and NOT just tied off**:
-it generates a periodic ~125ms pulse whenever any microdrive is selected
-(`mdv_sel != 0`). This is load-bearing, not cosmetic: QDOS's own boot
-sequence (any ROM - Minerva, MGE) looks for a boot file on `mdv1_` right
-after the F1-F4 screen resolves, and the code path that detects "no medium
-present" and lets boot continue can ONLY be reached via a real gap
-interrupt - with `mdv_gap` permanently low, that interrupt never fires
-even once and QDOS hangs forever waiting for it. QDOS's own downstream
-polling loops already have generous (~0.5s) software timeouts and converge
-cleanly to "no medium found" on their own once the chain is started - see
-`DECISIONES.md`'s `M1040` section for the full investigation (confirmed
-byte-for-byte against both a real ROM disassembly and Minerva's GPL
-source).
+**Milestone 2 phase A: `mdv` re-instantiated, as an external sibling in
+`main.vhd` (not re-embedded inside `zx8302.v`)** - same architectural
+pattern already used for `ipc` (see above): `zx8302.v` gained five new
+ports (`mdv_sel_o`, `mdv1_gap_i`, `mdv1_tx_empty_i`, `mdv1_rx_ready_i`,
+`mdv1_byte_i`) instead of taking `mdv` back as an internal instance.
+`mdv_tx_empty`/`mdv_rx_ready`/`mdv_byte`/`mdv_gap` are now muxed: the real
+`mdv1_*_i` inputs when `mdv_sel[0]` is set (drive 1 selected), the original
+M1 placeholders otherwise (`mdv_sel == 0`, or `mdv_sel` selecting drives
+2-8 - phase D territory, not backed yet). The original `mdv_dl_addr`/
+`mdv_dl_data`/`mdv_download`/`mdv_dl_wr` input ports (present in the
+upstream design, never referenced anywhere inside `zx8302.v` even before
+our own changes) stay declared but unused - the loader in `main.vhd`
+drives the external `mdv` instance's own `dl_addr`/`dl_data`/`download`/
+`dl_wr`/`dl_wr` ports directly instead of routing through `zx8302.v`.
+`mdv_sel` (drive selection from `mctrl`) and `led` stay untouched, `mdv_sel`
+is now also exposed as `mdv_sel_o` for `main.vhd`'s own use.
 
-`mdv_sel` (drive selection from `mctrl`) and `led` are untouched.
+`mdv.v` itself is instantiated **unmodified** (same policy as `ipc.vhd`
+around the real T48 core) - its own internal `dpram #(17, 88000) vram`
+gets a Vivado-clean replacement (`CORE/vhdl/mdv_dpram.vhd`, backed by
+`dualport_2clk_ram_byteenable`/BRAM for phase A, matching the module name
+exactly so Vivado's mixed-language elaboration resolves it - same pattern
+as `ipc_rom_t49.vhd` for the T48 core's `rom_t49`). See
+`.research/microdrive-read-design.md` for the full design (loader FSM,
+clock-domain crossing via `xpm_cdc_handshake`, phase B/C/D plan).
 
-When milestone 3 (microdrive) is implemented: re-instantiate `mdv`, and
-give it a Vivado-clean `dpram` (same treatment `ql_rom`/`vram` already
-got - see `DECISIONES.md` Anexo A) rather than trying to synthesize the
-original `dpram.v` - and reconsider whether the `mdv_gap` pulse generator
-above is still needed once real gap-detection timing exists.
-
-Files that stay in the repository but are excluded from the Vivado
-compile list because of this (not deleted): `rtl/mdv.v`.
+Files: `rtl/mdv.v` is now added to the Vivado compile list (was excluded
+during M1); `rtl/dpram.v` stays excluded (same as always).
 
 ### The `ipl` assignment in `rtl/zx8302.v` (interrupt lines)
 

@@ -19,6 +19,9 @@ use ieee.numeric_std.all;
 library work;
 use work.video_modes_pkg.all;
 
+library xpm;
+use xpm.vcomponents.all;
+
 entity main is
    generic (
       G_VDNUM                 : natural                     -- amount of virtual drives
@@ -74,7 +77,22 @@ entity main is
       -- loaded by the QNICE Shell via mega65.vhd's ql_rom_u/l
       -- (C_DEV_QL_MAINROM/C_DEV_QL_BACKROM).
       ql_rom_addr_o           : out std_logic_vector(14 downto 0);
-      ql_rom_data_i           : in  std_logic_vector(15 downto 0)
+      ql_rom_data_i           : in  std_logic_vector(15 downto 0);
+
+      -- QL4M65 (Milestone 2 phase A): QNICE-clock-domain side of the mdv1
+      -- microdrive image loader (mega65.vhd owns the qnice_csr/size-check
+      -- FSM, same split as QL-SD's own vdrives wiring had - main.vhd runs
+      -- exclusively in the core's clock domain, see this file's header, so
+      -- these cross-domain signals are passed straight through from
+      -- mega65.vhd). qnice_mdv1_wait_o lets the loader hold off the QNICE
+      -- bus cycle while a byte is still crossing into the core clock domain
+      -- (see .research/microdrive-read-design.md, section A.2).
+      qnice_clk_i             : in  std_logic;
+      qnice_mdv1_addr_i       : in  std_logic_vector(27 downto 0);
+      qnice_mdv1_data_i       : in  std_logic_vector(15 downto 0);
+      qnice_mdv1_ce_i         : in  std_logic;
+      qnice_mdv1_we_i         : in  std_logic;
+      qnice_mdv1_wait_o       : out std_logic
    );
 end entity main;
 
@@ -149,6 +167,53 @@ signal zx8302_sel   : std_logic;
 signal zx8302_addr  : std_logic_vector(1 downto 0);
 signal zx8302_dout  : std_logic_vector(15 downto 0);
 signal audio_bit    : std_logic;                      -- ZX8302's single-bit beeper output
+
+---------------------------------------------------------------------------
+-- QL4M65 (Milestone 2 phase A): microdrive 1 - mdv.v (unmodified) + its
+-- Vivado-clean dpram (mdv_dpram.vhd, BRAM-backed) + the QNICE-clock-domain
+-- image loader (byte-pair accumulation + xpm_cdc_handshake into mdv.v's
+-- own dl_addr/dl_data/dl_wr/download ports). See
+-- .research/microdrive-read-design.md, section A, and rtl/zx8302.v's own
+-- header note for the mdv_sel_o/mdv1_*_i ports this feeds.
+---------------------------------------------------------------------------
+
+-- zx8302.v <-> mdv1 (drive-select passthrough and the four "live" signals
+-- zx8302.v used to hardcode to "no drive present")
+signal mdv_sel        : std_logic_vector(7 downto 0);
+signal mdv1_gap       : std_logic;
+signal mdv1_tx_empty  : std_logic;
+signal mdv1_rx_ready  : std_logic;
+signal mdv1_byte      : std_logic_vector(7 downto 0);
+
+-- mdv1's own image-load port (core clock domain - mdv.v itself ties both
+-- of its internal dpram's clocks to its single clk input, see the design
+-- doc's A.2 finding)
+signal mdv1_dl_addr   : std_logic_vector(16 downto 0);
+signal mdv1_dl_data   : std_logic_vector(15 downto 0);
+signal mdv1_download  : std_logic;
+signal mdv1_dl_wr     : std_logic;
+
+-- QNICE-clock-domain byte-pair accumulator (mdv1_ld_word_addr/data feed
+-- xpm_cdc_handshake's src_in once a full 16-bit word is assembled - see
+-- the design doc: mdv.v's image format is big-endian at the byte level,
+-- first file byte -> data(15 downto 8))
+signal mdv1_ld_byte0       : std_logic_vector(7 downto 0);
+signal mdv1_ld_word_addr   : std_logic_vector(16 downto 0);
+signal mdv1_ld_word_data   : std_logic_vector(15 downto 0);
+signal mdv1_ld_send        : std_logic;
+signal mdv1_ld_busy        : std_logic;  -- '1' from src_send until src_rcv - drives qnice_mdv1_wait_o
+
+-- xpm_cdc_handshake's own src/dest signals (33 bits: 17-bit word address + 16-bit word data)
+signal mdv1_cdc_src_in    : std_logic_vector(32 downto 0);
+signal mdv1_cdc_src_rcv   : std_logic;
+signal mdv1_cdc_dest_req  : std_logic;
+signal mdv1_cdc_dest_ack  : std_logic;
+signal mdv1_cdc_dest_out  : std_logic_vector(32 downto 0);
+
+-- core-clock-domain loader FSM (drives mdv1_dl_addr/dl_data/dl_wr/download
+-- from mdv1_cdc_dest_out once xpm_cdc_handshake delivers a word)
+type t_mdv1_ld_state is (LD_IDLE, LD_ACK);
+signal mdv1_ld_state : t_mdv1_ld_state := LD_IDLE;
 
 -- IPC link to ipc.vhd (QL4M65 M1031: the real emulated 8049, T48 core +
 -- real firmware ROM - replaces both the embedded 8049 emulation removed
@@ -519,12 +584,22 @@ begin
          ipl           => cpu_ipl,
          xint          => '0',  -- no mouse in milestone 1
 
-         -- microdrive: not in milestone 1 (milestone 3)
-         mdv_dl_addr   => (others => '0'),
-         mdv_dl_data   => (others => '0'),
-         mdv_download  => '0',
-         mdv_dl_wr     => '0',
-         mdv_reverse   => '0',
+         -- QL4M65 (Milestone 2 phase A): mdv_dl_addr/mdv_dl_data/
+         -- mdv_download/mdv_dl_wr are unused leftovers in zx8302.v itself
+         -- (never referenced internally, even before our own port) - the
+         -- loader below drives mdv1's own dl_* ports directly instead of
+         -- routing through zx8302.v. mdv_sel_o/mdv1_*_i are the real link
+         -- (see rtl/zx8302.v's own header note and doc/m2m/exceptions.md).
+         mdv_dl_addr      => (others => '0'),
+         mdv_dl_data      => (others => '0'),
+         mdv_download     => '0',
+         mdv_dl_wr        => '0',
+         mdv_reverse      => '0',  -- normal order, no menu item yet (see design doc)
+         mdv_sel_o        => mdv_sel,
+         mdv1_gap_i       => mdv1_gap,
+         mdv1_tx_empty_i  => mdv1_tx_empty,
+         mdv1_rx_ready_i  => mdv1_rx_ready,
+         mdv1_byte_i      => mdv1_byte,
          led           => open,
 
          audio         => audio_bit,
@@ -610,6 +685,126 @@ begin
          audio_o     => ipc_audio,
          ipl_o       => ipc_ipl
       ); -- i_ipc
+
+   ---------------------------------------------------------------------------
+   -- QL4M65 (Milestone 2 phase A): microdrive 1 image loader.
+   --
+   -- QNICE-clock-domain side: accumulates two incoming bytes (mdv.v's image
+   -- format is big-endian at the byte level - the first file byte becomes
+   -- the high byte of the word, see rtl/mdv.v:88 and
+   -- .research/microdrive-read-design.md) into one 16-bit word, then hands
+   -- it to xpm_cdc_handshake. qnice_mdv1_wait_o stalls the QNICE bus cycle
+   -- combinationally the instant a word-completing (odd-address) write is
+   -- seen, held through mdv1_ld_busy until the core side acknowledges - the
+   -- QNICE Shell's own generic byte-loading loop (shell.asm's LOAD_IMAGE)
+   -- needs no special-casing, same as Main/Back ROM's own manual load.
+   ---------------------------------------------------------------------------
+
+   qnice_mdv1_wait_o <= mdv1_ld_busy or (qnice_mdv1_ce_i and qnice_mdv1_we_i and qnice_mdv1_addr_i(0));
+
+   mdv1_loader_qnice : process (qnice_clk_i)
+      variable v_send : std_logic;
+   begin
+      if rising_edge(qnice_clk_i) then
+         v_send := '0';
+
+         if qnice_mdv1_ce_i = '1' and qnice_mdv1_we_i = '1' and mdv1_ld_busy = '0' then
+            if qnice_mdv1_addr_i(0) = '0' then
+               -- even address: first byte of the pair, just latch it
+               mdv1_ld_byte0 <= qnice_mdv1_data_i(7 downto 0);
+            else
+               -- odd address: second byte - assemble the word and send it
+               mdv1_ld_word_addr <= qnice_mdv1_addr_i(17 downto 1);
+               mdv1_ld_word_data <= mdv1_ld_byte0 & qnice_mdv1_data_i(7 downto 0);
+               v_send := '1';
+            end if;
+         end if;
+
+         mdv1_ld_send <= v_send;
+
+         if v_send = '1' then
+            mdv1_ld_busy <= '1';
+         elsif mdv1_cdc_src_rcv = '1' then
+            mdv1_ld_busy <= '0';
+         end if;
+      end if;
+   end process mdv1_loader_qnice;
+
+   mdv1_cdc_src_in <= mdv1_ld_word_addr & mdv1_ld_word_data;
+
+   i_mdv1_cdc : xpm_cdc_handshake
+      generic map (
+         DEST_EXT_HSK => 1,
+         WIDTH        => 33
+      )
+      port map (
+         src_clk  => qnice_clk_i,
+         src_in   => mdv1_cdc_src_in,
+         src_send => mdv1_ld_send,
+         src_rcv  => mdv1_cdc_src_rcv,
+
+         dest_clk => clk_main_i,
+         dest_req => mdv1_cdc_dest_req,
+         dest_ack => mdv1_cdc_dest_ack,
+         dest_out => mdv1_cdc_dest_out
+      ); -- i_mdv1_cdc
+
+   -- Core-clock-domain side: on dest_req, drive mdv1's own dl_addr/dl_data
+   -- for one cycle with dl_wr asserted (pulsing download too, for exactly
+   -- one cycle, when the word address is 0 - see mdv.v:75-117 and the
+   -- design doc's A.2: download is a one-shot reset of mdv.v's own
+   -- mem_addr/gap state, not something to hold for the whole transfer),
+   -- then acknowledge back to the QNICE side.
+   mdv1_loader_core : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         mdv1_dl_wr        <= '0';
+         mdv1_download     <= '0';
+         mdv1_cdc_dest_ack <= '0';
+
+         case mdv1_ld_state is
+            when LD_IDLE =>
+               if mdv1_cdc_dest_req = '1' then
+                  mdv1_dl_addr <= mdv1_cdc_dest_out(32 downto 16);
+                  mdv1_dl_data <= mdv1_cdc_dest_out(15 downto 0);
+                  mdv1_dl_wr   <= '1';
+                  if unsigned(mdv1_cdc_dest_out(32 downto 16)) = 0 then
+                     mdv1_download <= '1';
+                  end if;
+                  mdv1_ld_state <= LD_ACK;
+               end if;
+
+            when LD_ACK =>
+               mdv1_cdc_dest_ack <= '1';
+               mdv1_ld_state     <= LD_IDLE;
+         end case;
+      end if;
+   end process mdv1_loader_core;
+
+   -- rtl/mdv.v, unmodified, instantiated as-is (mixed-language Vivado
+   -- project). Its own internal "dpram #(17,88000) vram" instance resolves
+   -- to CORE/vhdl/mdv_dpram.vhd (Vivado-clean, BRAM-backed for phase A -
+   -- see that file's own header and .research/microdrive-read-design.md).
+   i_mdv1 : entity work.mdv
+      port map (
+         clk      => clk_main_i,
+         ce       => ce_bus_p,
+         reset    => reset,
+
+         reverse  => '0',
+
+         sel      => mdv_sel(0),
+
+         gap       => mdv1_gap,
+         tx_empty  => mdv1_tx_empty,
+         rx_ready  => mdv1_rx_ready,
+         dout      => mdv1_byte,
+
+         download  => mdv1_download,
+         dl_addr   => mdv1_dl_addr,
+         dl_data   => mdv1_dl_data,
+         dl_wr     => mdv1_dl_wr
+      ); -- i_mdv1
 
 end architecture synthesis;
 

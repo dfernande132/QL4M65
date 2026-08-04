@@ -157,9 +157,19 @@ constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 constant C_DEV_QL_MAINROM        : std_logic_vector(15 downto 0) := x"0101";
 constant C_DEV_QL_BACKROM        : std_logic_vector(15 downto 0) := x"0102";
 
-constant C_CRTROMS_MAN_NUM       : natural := 2;                                       -- amount of manually loadable ROMs and carts; maximum is 16
+-- QL4M65 (Milestone 2 phase A): mdv1 microdrive image, manual load only for
+-- now (see .research/microdrive-read-design.md, section A.4 - auto-load
+-- can follow once read is confirmed on hardware). Size check tolerates a
+-- range (<= 174930 bytes) rather than requiring an exact match, since real
+-- .MDV images vary in length (confirmed against 9 real sample files -
+-- most are exactly 174930 bytes, but two legitimate ones are 163836).
+constant C_DEV_QL_MDV1            : std_logic_vector(15 downto 0) := x"0103";
+constant C_MDV1_MAX_BYTES         : natural := 174930;
+
+constant C_CRTROMS_MAN_NUM       : natural := 3;                                       -- amount of manually loadable ROMs and carts; maximum is 16
 constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_DEV_QL_MAINROM,
                                                          C_CRTROMTYPE_DEVICE, C_DEV_QL_BACKROM,
+                                                         C_CRTROMTYPE_DEVICE, C_DEV_QL_MDV1,
                                                          x"EEEE");                     -- Always finish the array using x"EEEE"
 
 -- Automatically loaded ROMs: These ROMs are loaded before the core starts

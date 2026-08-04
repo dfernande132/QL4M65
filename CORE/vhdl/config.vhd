@@ -279,7 +279,11 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 -- section headings will be added the same way exactly when each feature
 -- lands in a later milestone, rather than as empty placeholders now.
 -- Reset is a dedicated M2M key, not an Options item.
-constant OPTM_SIZE         : natural := 8;  -- amount of items including empty lines:
+-- QL4M65 (Milestone 2 phase A): "Microdrive" section added the same way,
+-- below ROM, with a single "mdv1:%s" line - manual load only for now
+-- (globals.vhd's C_CRTROMS_MAN, same OPTM_G_LOAD_ROM mechanism as Main/
+-- Back ROM, NOT OPTM_G_MOUNT_DRV - mdv1 doesn't go through vdrives.vhd).
+constant OPTM_SIZE         : natural := 11;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -293,9 +297,11 @@ constant OPTM_SIZE         : natural := 8;  -- amount of items including empty l
 -- own Options menus (confirmed via M1005 hardware test screenshots). Widened
 -- to 20 for the Main/Back ROM redesign: " Extract Back ROM" is the longest
 -- label now (18 chars), still comfortably inside 20 with a little margin.
--- No submenus here, so OPTM_DY = OPTM_SIZE (all 8 lines always visible).
+-- No submenus here, so OPTM_DY = OPTM_SIZE (all lines always visible).
+-- QL4M65 (Milestone 2 phase A): "mdv1:%s" is short, fits comfortably
+-- inside the existing 20 - no need to widen for this addition.
 constant OPTM_DX           : natural := 20;
-constant OPTM_DY           : natural := 8;
+constant OPTM_DY           : natural := 11;
 
 -- QL4M65 M1006: added a "Sinclair QL" headline (OPTM_G_HEADLINE - shown in a
 -- brighter/yellow color by the framework), same pattern as AExp's "Amiga 500"
@@ -317,7 +323,10 @@ constant OPTM_ITEMS        : string :=
    " Back ROM:%s\n"         &    -- 4: load the QL extension ROM (TK2, Pascal...), 16K
    " Extract Back ROM\n"    &    -- 5: clear the 16K Back ROM slot (momentary action)
    "\n"                     &    -- 6: separator
-   " Close Menu\n";               -- 7: close menu
+   " Microdrive\n"          &    -- 7: section heading (plain text, not selectable)
+   " mdv1:%s\n"             &    -- 8: load a .MDV microdrive image
+   "\n"                     &    -- 9: separator
+   " Close Menu\n";               -- 10: close menu
 
 -- define your own constants here and choose meaningful names
 -- make sure that your first group uses the value 1 (0 means "no menu item", such as text and line),
@@ -327,6 +336,7 @@ constant OPTM_ITEMS        : string :=
 constant OPTM_G_MAINROM         : integer := 1;
 constant OPTM_G_BACKROM         : integer := 2;
 constant OPTM_G_BACKROM_EXTRACT : integer := 3;
+constant OPTM_G_MDV1            : integer := 4;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -341,7 +351,10 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_HEADLINE,                   
                                              OPTM_G_BACKROM + OPTM_G_LOAD_ROM,                -- 4: Back ROM:%s
                                              OPTM_G_BACKROM_EXTRACT + OPTM_G_SINGLESEL,       -- 5: Extract Back ROM (momentary action)
                                              OPTM_G_LINE,                                     -- 6: separator
-                                             OPTM_G_CLOSE                                     -- 7: Close Menu
+                                             OPTM_G_TEXT,                                     -- 7: Microdrive (section heading)
+                                             OPTM_G_MDV1 + OPTM_G_LOAD_ROM,                   -- 8: mdv1:%s (3rd manual ROM/CRT slot - Main=0, Back=1, MDV1=2)
+                                             OPTM_G_LINE,                                     -- 9: separator
+                                             OPTM_G_CLOSE                                     -- 10: Close Menu
                                            );
 
 --------------------------------------------------------------------------------------------------------------------

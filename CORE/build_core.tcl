@@ -91,12 +91,18 @@ set_property file_type SystemVerilog [get_files "$core_ql_dir/rtl/ql_timing.sv"]
 set_property file_type SystemVerilog [get_files "$core_ql_dir/rtl/zx8301.v"]
 set_property file_type SystemVerilog [get_files "$core_ql_dir/rtl/zx8302.v"]
 
-# QL4M65: mdv.v was added in a previous attempt but is no longer instantiated
-# by zx8302.v (see its header note) - remove it if Vivado still has it from
-# an earlier run of this script.
-if {[llength [get_files -quiet "$core_ql_dir/rtl/mdv.v"]] > 0} {
-    remove_files "$core_ql_dir/rtl/mdv.v"
-}
+# QL4M65 (Milestone 2 phase A): mdv.v (unmodified) is back - re-instantiated
+# as an external sibling in main.vhd, see doc/m2m/exceptions.md and
+# .research/microdrive-read-design.md. mdv_dpram.vhd is the Vivado-clean
+# replacement for its own internal "dpram" (BRAM-backed for phase A).
+add_files -norecurse -fileset sources_1 [list \
+    "$core_ql_dir/rtl/mdv.v" \
+    "$core_vhdl_dir/mdv_dpram.vhd" \
+]
+# Same "reg declared inside an unnamed always block" issue as zx8301.v/
+# zx8302.v (legal SystemVerilog, rejected by Vivado's stricter plain-
+# Verilog-2001 parser) - same fix, build-setting only, no code change.
+set_property file_type SystemVerilog [get_files "$core_ql_dir/rtl/mdv.v"]
 
 update_compile_order -fileset sources_1
 
