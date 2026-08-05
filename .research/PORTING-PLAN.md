@@ -14,7 +14,15 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2013 — segundo bug de lectura sostenida (LRUN falla con ficheros grandes) sin causa clara todavía; barra de progreso de depuración añadida)
+## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2015 — bug de lectura sostenida sigue abierto: patrón claro (fichero grande = más fallos), sin causa lógica encontrable por análisis estático; endurecimiento de margen físico como experimento)
+
+**Patrón confirmado con las barras de depuración de `M2014`:** `DIR` necesita ~1-1.5x el tamaño del fichero en bytes leídos; `LRUN` de un fichero grande (chess) necesita 6-7 vueltas completas antes de rendirse con `bad or changed medium`; ficheros pequeños (`invaders`, `tetris`) funcionan casi siempre. Como cada vuelta de `mem_addr` en `mdv.v` reinicia limpio (sin acumular estado), un fallo que se vuelve más probable cuanta más lectura sostenida haya, sin degradación lógica, apunta a algo estadístico - un margen de timing real.
+
+Descartado con evidencia real: cascada manual de BRAM (inferencia estándar y portable, sin cascadeo manual). Análisis de timing detallado del checkpoint routeado: los caminos de `mdv1`/`zx8302` tienen peor margen que el ideal (hold 0.121ns) pero NO son el camino más ajustado del diseño completo (main_clk global: ~0.016-0.058ns) - así que no es *el* cuello de botella, pero sigue siendo estrecho por estándares FPGA.
+
+Comparación arquitectónica con AExp (a petición del usuario): su motor de disquete usa un protocolo Avalon-MM de petición/respuesta con verificación por transacción, sin ningún puntero libre desincronizable - `mdv.v` (pristino, sin modificar) en cambio confía en que el timing del protocolo serie bit a bit sea siempre perfecto, fiel al hardware real de microdrive de 1984. No hay bug de direcciones encontrado, pero confirma que el diseño es intrínsecamente más frágil que el de los cores hermanos.
+
+**`M2015`: experimento de endurecimiento de margen físico** - se registra una vez más el camino combinacional entre `mdv.v` y `zx8302` (gap/tx_empty/rx_ready/dout), partiéndolo en dos mitades más cortas. No hay garantía de que sea la causa raíz real, pero da más margen físico independientemente. Detalle completo en `DECISIONES.md`.
 
 **Causa raíz real del bug de lectura intermitente de microdrive (M2004-M2010): `mdv1_download` era un pulso de un ciclo en vez de un nivel mantenido durante toda la carga**, a diferencia del original de MiSTer (`ioctl_download`). El bloque de `mdv.v` que avanza `mem_addr` no está condicionado por `sel` ni por si el buffer está completo - corre libre en cuanto hay `ce`. Con el pulso de un ciclo, `mem_addr` empezaba a correr sobre la misma BRAM que el cargador de QNICE seguía escribiendo: una carrera de lectura/escritura real. Como `mdv_sel` no tiene reset, si ya estaba en `'1'` de una sesión anterior, `mdv_present` se volvía verdad en cuanto llegaba la segunda palabra, exponiendo la carrera a QDOS. Explica todos los síntomas: primeras entradas del catálogo bien, corrupción progresiva, variabilidad entre recargas, fiabilidad total en una segunda lectura de la misma sesión.
 

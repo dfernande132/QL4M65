@@ -199,6 +199,22 @@ signal mdv1_tx_empty  : std_logic;
 signal mdv1_rx_ready  : std_logic;
 signal mdv1_byte      : std_logic_vector(7 downto 0);
 
+-- QL4M65 (Milestone 2 phase A, M2015): raw, unregistered outputs straight
+-- off mdv.v - mdv1_gap/tx_empty/rx_ready/byte above are now a registered
+-- copy one clk_main_i cycle later (see the registering process near
+-- i_mdv1's instantiation), added as a physical-timing-margin hardening
+-- experiment for the still-unexplained sustained-read corruption on large
+-- files (see DECISIONES.md's M2015 section) - detailed post-route timing
+-- analysis showed mdv1/zx8302's own paths (worst hold slack 0.121ns) are
+-- tighter than ideal, though not the single worst path in the design.
+-- Breaking the mdv.v -> zx8302 combinational chain into two shorter
+-- registered halves gives more physical margin regardless of whether
+-- this turns out to be the actual root cause.
+signal mdv1_gap_raw      : std_logic;
+signal mdv1_tx_empty_raw : std_logic;
+signal mdv1_rx_ready_raw : std_logic;
+signal mdv1_byte_raw     : std_logic_vector(7 downto 0);
+
 -- mdv1's own image-load port (core clock domain - mdv.v itself ties both
 -- of its internal dpram's clocks to its single clk input, see the design
 -- doc's A.2 finding)
@@ -958,16 +974,29 @@ begin
 
          sel      => mdv_sel(0),
 
-         gap       => mdv1_gap,
-         tx_empty  => mdv1_tx_empty,
-         rx_ready  => mdv1_rx_ready,
-         dout      => mdv1_byte,
+         gap       => mdv1_gap_raw,
+         tx_empty  => mdv1_tx_empty_raw,
+         rx_ready  => mdv1_rx_ready_raw,
+         dout      => mdv1_byte_raw,
 
          download  => mdv1_download,
          dl_addr   => mdv1_dl_addr,
          dl_data   => mdv1_dl_data,
          dl_wr     => mdv1_dl_wr
       ); -- i_mdv1
+
+   -- QL4M65 (M2015): register mdv1's raw outputs one clk_main_i cycle
+   -- before zx8302 sees them - see mdv1_gap_raw's own declaration comment
+   -- for the full rationale (post-route timing hardening experiment).
+   mdv1_output_reg : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         mdv1_gap       <= mdv1_gap_raw;
+         mdv1_tx_empty  <= mdv1_tx_empty_raw;
+         mdv1_rx_ready  <= mdv1_rx_ready_raw;
+         mdv1_byte      <= mdv1_byte_raw;
+      end if;
+   end process mdv1_output_reg;
 
    ---------------------------------------------------------------------------
    -- QL4M65 TEMPORARY DEBUG AID (M2013/M2014): mdv1 read/write-progress
