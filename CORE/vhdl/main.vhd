@@ -240,6 +240,16 @@ signal dbg_rx_ready_sticky : std_logic := '0';
 signal dbg_vs_prev         : std_logic := '0';
 signal dbg_vs_count        : natural range 0 to 63 := 0;
 
+-- QL4M65 TEMPORARY DEBUG AID (M2010): 7th box - is mdv.v's own read
+-- pointer (mem_addr) actually advancing, or frozen? Lit green whenever
+-- mem_addr has changed at all within the last ~250ms, cleared otherwise -
+-- a short window (vs. the ~1s one used for GAP_IRQ/RXRDY) so a genuine
+-- freeze shows up quickly instead of being masked by the longer window.
+signal dbg_mem_addr        : std_logic_vector(16 downto 0);
+signal dbg_mem_addr_prev   : std_logic_vector(16 downto 0) := (others => '0');
+signal dbg_mem_addr_moving : std_logic := '0';
+signal dbg_vs_count2       : natural range 0 to 63 := 0;
+
 -- IPC link to ipc.vhd (QL4M65 M1031: the real emulated 8049, T48 core +
 -- real firmware ROM - replaces both the embedded 8049 emulation removed
 -- from zx8302.v AND keyboard.vhd's own hand-rolled M1018-M1030 protocol
@@ -891,32 +901,38 @@ begin
          dl_data   => mdv1_dl_data,
          dl_wr     => mdv1_dl_wr,
 
-         -- QL4M65 TEMPORARY DEBUG AID (M2007, see mdv1 status overlay below)
+         -- QL4M65 TEMPORARY DEBUG AID (M2007/M2010, see mdv1 status overlay below)
          mdv_present_o => dbg_mdv_present,
-         mdv_loaded_o  => dbg_mdv_loaded
+         mdv_loaded_o  => dbg_mdv_loaded,
+         mem_addr_o    => dbg_mem_addr
       ); -- i_mdv1
 
    ---------------------------------------------------------------------------
    -- QL4M65 TEMPORARY DEBUG AID (M2007): on-screen mdv1 status readout.
    --
-   -- Investigating: DIR mdv1_ hangs completely (no keyboard/break response)
-   -- once a real .mdv is loaded and drive 1 is selected - loading itself
-   -- now completes fine (M2006 fixed that). Six small boxes, top-left
-   -- corner, left to right: SEL / LOADED / PRESENT / GAP / GAP_IRQ / RXRDY.
-   -- Green = '1', red = '0'. SEL/LOADED/PRESENT/GAP are shown live (level
-   -- signals); GAP_IRQ/RXRDY are pulses, shown "sticky" (latched on any '1'
-   -- seen, cleared roughly once a second) - same idiom as M1020's sticky
-   -- debug flags, needed because a live pulse this narrow would never be
-   -- caught by eye.
+   -- Investigating: DIR mdv1_ hangs/misreads intermittently (not tied
+   -- cleanly to reset history - M2009 confirmed it's not the mdv1 speed
+   -- experiment either) once a real .mdv is loaded and drive 1 is
+   -- selected - loading itself completes fine (M2006 fixed that hang).
+   -- Seven small boxes, top-left corner, left to right: SEL / LOADED /
+   -- PRESENT / GAP / GAP_IRQ / RXRDY / MOVING. Green = '1', red = '0'.
+   -- SEL/LOADED/PRESENT/GAP are shown live (level signals); GAP_IRQ/RXRDY
+   -- are pulses, shown "sticky" (latched on any '1' seen, cleared roughly
+   -- once a second) - same idiom as M1020's sticky debug flags, needed
+   -- because a live pulse this narrow would never be caught by eye. MOVING
+   -- (M2010) is a shorter-window (~250ms) sticky on mdv.v's own mem_addr
+   -- changing at all - lets us see directly whether the read pointer is
+   -- genuinely frozen at the moment of a hang, vs. still advancing while
+   -- serving wrong data.
    --
    -- Remove this whole block (signals, i_zx8301's h_cnt_o/v_cnt_o,
-   -- i_zx8302's gap_irq_o, mdv.v's mdv_present_o/mdv_loaded_o, the
-   -- video_red/green/blue_o override) once diagnosed - see
+   -- i_zx8302's gap_irq_o, mdv.v's mdv_present_o/mdv_loaded_o/mem_addr_o,
+   -- the video_red/green/blue_o override) once diagnosed - see
    -- doc/m2m/exceptions.md.
    ---------------------------------------------------------------------------
 
    dbg_box_active <= '1' when unsigned(dbg_v_cnt) >= 8 and unsigned(dbg_v_cnt) < 24 and
-                              unsigned(dbg_h_cnt) >= 8 and unsigned(dbg_h_cnt) < 8 + 6 * 20
+                              unsigned(dbg_h_cnt) >= 8 and unsigned(dbg_h_cnt) < 8 + 7 * 20
                      else '0';
 
    dbg_box_idx <= (to_integer(unsigned(dbg_h_cnt)) - 8) / 20;
@@ -926,7 +942,8 @@ begin
                   dbg_mdv_present when dbg_box_idx = 2 else
                   dbg_gap_live   when dbg_box_idx = 3 else
                   dbg_gap_irq_sticky when dbg_box_idx = 4 else
-                  dbg_rx_ready_sticky;
+                  dbg_rx_ready_sticky when dbg_box_idx = 5 else
+                  dbg_mem_addr_moving;
 
    dbg_sel      <= mdv_sel(0);
    dbg_gap_live <= mdv1_gap;
@@ -937,14 +954,21 @@ begin
          if reset = '1' then
             dbg_vs_prev  <= '0';
             dbg_vs_count <= 0;
+            dbg_vs_count2 <= 0;
             dbg_gap_irq_sticky   <= '0';
             dbg_rx_ready_sticky  <= '0';
+            dbg_mem_addr_prev    <= (others => '0');
+            dbg_mem_addr_moving  <= '0';
          else
             if mdv1_rx_ready = '1' then
                dbg_rx_ready_sticky <= '1';
             end if;
             if dbg_gap_irq = '1' then
                dbg_gap_irq_sticky <= '1';
+            end if;
+            if dbg_mem_addr /= dbg_mem_addr_prev then
+               dbg_mem_addr_moving <= '1';
+               dbg_mem_addr_prev   <= dbg_mem_addr;
             end if;
 
             dbg_vs_prev <= zx_vs;
@@ -955,6 +979,13 @@ begin
                   dbg_rx_ready_sticky <= '0';
                else
                   dbg_vs_count <= dbg_vs_count + 1;
+               end if;
+
+               if dbg_vs_count2 = 11 then                -- ~250ms @ 50Hz PAL
+                  dbg_vs_count2       <= 0;
+                  dbg_mem_addr_moving <= '0';
+               else
+                  dbg_vs_count2 <= dbg_vs_count2 + 1;
                end if;
             end if;
          end if;

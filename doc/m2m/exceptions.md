@@ -138,6 +138,14 @@ as outputs), `rtl/zx8302.v` gained `gap_irq_o` (its own internal `gap_irq`
 register exposed). Remove all three once diagnosed, along with
 `main.vhd`'s overlay block.
 
+**M2010 (temporary): one more debug-only output port**, `rtl/mdv.v`'s
+`mem_addr_o` (its own internal read-pointer register exposed) - the
+DIR mdv1_ hang/misread turned out to be intermittent, not cleanly tied to
+reset history (M2009), so a 7th overlay box was added to see directly
+whether mem_addr is genuinely frozen at the moment of a failure vs. still
+advancing while serving wrong data. Remove alongside the others once
+diagnosed.
+
 ### The `ipl` assignment in `rtl/zx8302.v` (interrupt lines)
 
 `assign ipl = { ipc_ipl_i[1] || (irq_pending[4:0] != 0), ipc_ipl_i[0] };` -

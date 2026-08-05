@@ -14,7 +14,7 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2009 — revert del x4 de mdv1 (rompía la lectura), LED en rojo, investigando bug de contenido en CHESS.MDV)
+## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2010 — bug de lectura del microdrive confirmado no-determinista, no ligado a CHESS.MDV específicamente; séptima caja de depuración "MOVING" añadida)
 
 **`M2008` probado en hardware: LED funciona, pero la velocidad x4 rompe la lectura por completo** (ni `tetris.mdv`, que leía bien a 1x, lee ya). Causa: el driver de microdrive de QDOS es tiempo real bit-a-bit a velocidad de CPU nativa - si el microdrive sirve datos más rápido que la CPU sin acelerar también la CPU, QDOS no llega a tiempo. Confirma por qué el modo turbo real de MiSTer (`QL.sv`'s `"O78,CPU speed"`) escala CPU+bus JUNTOS desde un único generador de reloj compartido, nunca el storage por separado - el vídeo que vio el usuario con `DIR` rápido casi seguro era MiSTer en modo turbo (no implementado aquí todavía, milestone futuro propio).
 
