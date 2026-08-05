@@ -126,25 +126,34 @@ clock-domain crossing via `xpm_cdc_handshake`, phase B/C/D plan).
 Files: `rtl/mdv.v` is now added to the Vivado compile list (was excluded
 during M1); `rtl/dpram.v` stays excluded (same as always).
 
-**M2007 (temporary): three debug-only output ports** added to investigate
-`DIR mdv1_` hanging QDOS completely once a real `.mdv` is loaded and
-selected (loading itself works fine as of M2006 - detail in
-`DECISIONES.md`'s M2006/M2007 sections). Purely additive, no existing
-logic touched: `rtl/zx8301.v` gained `h_cnt_o`/`v_cnt_o` (raw pixel
-position, needed to draw an on-screen overlay - same pattern as the M1016
-`cpu_addr` debug overlay), `rtl/mdv.v` gained `mdv_present_o`/
-`mdv_loaded_o` (its own internal `mdv_present`/`mdv_end!=0` wires exposed
-as outputs), `rtl/zx8302.v` gained `gap_irq_o` (its own internal `gap_irq`
-register exposed). Remove all three once diagnosed, along with
-`main.vhd`'s overlay block.
+**M2007-M2010 (temporary, removed in M2011): on-screen debug overlay.**
+Added four debug-only output ports (`rtl/zx8301.v`'s `h_cnt_o`/`v_cnt_o`,
+`rtl/mdv.v`'s `mdv_present_o`/`mdv_loaded_o`/`mem_addr_o`, `rtl/zx8302.v`'s
+`gap_irq_o`) and an on-screen status-box overlay in `main.vhd` to
+investigate `DIR mdv1_` hanging/misreading once a real `.mdv` was loaded.
+The overlay itself never pinpointed the root cause (mem_addr turned out to
+free-run constantly regardless of health, so its "MOVING" box wasn't
+diagnostic); the actual bug (see M2011 below and `DECISIONES.md`) was
+found by comparing this port's loader architecture against the original
+MiSTer platform and sibling M2M cores (C64MEGA65, AExp), not from the
+overlay's readings. All four ports and the overlay block were removed in
+M2011 once the real fix landed.
 
-**M2010 (temporary): one more debug-only output port**, `rtl/mdv.v`'s
-`mem_addr_o` (its own internal read-pointer register exposed) - the
-DIR mdv1_ hang/misread turned out to be intermittent, not cleanly tied to
-reset history (M2009), so a 7th overlay box was added to see directly
-whether mem_addr is genuinely frozen at the moment of a failure vs. still
-advancing while serving wrong data. Remove alongside the others once
-diagnosed.
+**M2011: `mdv1_download` fixed from a one-cycle pulse to a level held for
+the whole transfer**, matching the original core's `ioctl_download`
+semantics (`QL.sv:534,582`). `rtl/mdv.v`'s own `if(ce)` block that advances
+`mem_addr` is unconditional - not gated by `sel` or by whether the buffer
+is fully written - so a single-cycle `download` pulse let `mem_addr` free-run
+through the same dual-port BRAM the QNICE loader was still writing, a
+genuine unsynchronized read/write race (worse yet exposed early to QDOS
+whenever `mdv_sel` - itself never reset - was already `'1'` from an earlier
+session). Fixed in `main.vhd` by deriving `mdv1_download` from a new
+`qnice_mdv1_loading_i` port (driven by `mega65.vhd` from
+`mdv1_req_status = C_CSR_REQ_LDNG`, the same flag `shell.asm`/
+`crts-and-roms.asm` use to track an in-progress vs. completed load),
+synchronized into `clk_main_i` with a plain 2-FF synchronizer (sufficient
+for a single level signal, unlike the word-at-a-time loader data which
+needs the full `xpm_cdc_handshake`). `mdv.v` itself remains unmodified.
 
 ### The `ipl` assignment in `rtl/zx8302.v` (interrupt lines)
 

@@ -333,6 +333,11 @@ signal qnice_mdv1_wait        : std_logic;
 -- no CDC needed for a board LED)
 signal main_mdv1_led          : std_logic;
 
+-- QL4M65 (Milestone 2 phase A, M2011): raw "is the Shell loading mdv1"
+-- level, QNICE clock domain - main.vhd does its own synchronization into
+-- clk_main_i (see that file's header comment on qnice_mdv1_loading_i).
+signal qnice_mdv1_loading      : std_logic;
+
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
 ---------------------------------------------------------------------------------------------
@@ -484,6 +489,11 @@ begin
          qnice_mdv1_ce_i      => qnice_mdv1_ce,
          qnice_mdv1_we_i      => qnice_mdv1_we,
          qnice_mdv1_wait_o    => qnice_mdv1_wait,
+
+         -- QL4M65 (Milestone 2 phase A, M2011): raw QNICE-clock-domain
+         -- "is the Shell currently loading mdv1" level - main.vhd
+         -- synchronizes it into clk_main_i itself (see its own header).
+         qnice_mdv1_loading_i => qnice_mdv1_loading,
 
          -- QL4M65 (Milestone 2 phase A, M2008): microdrive activity LED
          drive_led_o          => main_mdv1_led
@@ -762,6 +772,11 @@ begin
          qnice_resp_error_i   => mdv1_resp_error,
          qnice_resp_address_i => (others => '0')
       ); -- i_mdv1_csr
+
+   -- QL4M65 (Milestone 2 phase A, M2011): see main.vhd's own header comment
+   -- on qnice_mdv1_loading_i for why this matters - mdv.v's `download`
+   -- input needs to be held for the whole transfer, not just pulsed once.
+   qnice_mdv1_loading <= '1' when mdv1_req_status = C_CSR_REQ_LDNG else '0';
 
    -- QL4M65 (Milestone 2 phase A): unlike Main/Back ROM's exact-size check,
    -- this is a RANGE check (<= C_MDV1_MAX_BYTES) - real .MDV images vary in
