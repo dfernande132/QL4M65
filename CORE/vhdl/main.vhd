@@ -216,6 +216,62 @@ signal mdv1_dl_wr     : std_logic;
 -- used for the loader's own word data instead of a hand-rolled handshake).
 signal mdv1_loading_sync : std_logic;
 
+---------------------------------------------------------------------------
+-- QL4M65 TEMPORARY DEBUG AID (M2013): mdv1 read-progress overlay.
+--
+-- The M2011/M2012 fix (mdv1_download held as a level) solved the load-time
+-- read/write race (DIR mdv1_ now mostly works), but LRUN mdv1_boot - a
+-- much longer, continuous read of real program data rather than scattered
+-- catalog headers - still takes very long and then fails with QDOS's own
+-- "bad or changed medium". Works with little data, fails with a lot -
+-- something that accumulates or has a per-event failure chance during
+-- SUSTAINED reading, not the already-fixed load step. 16 boxes, top-left
+-- corner: a "thermometer" progress bar of how many bytes mdv1 has actually
+-- served (rx_ready rising edges) since the last reset, box i lights once
+-- the count passes (i+1)*11000 - i.e. box 16 lit means the whole 174930-
+-- byte file's worth of bytes have been served at least once. Freezing
+-- mid-bar at the moment of a failure tells us roughly where in the file
+-- (and how consistently) the corruption starts.
+--
+-- Remove this whole block (signals, i_zx8301's h_cnt_o/v_cnt_o, the
+-- video_red/green/blue_o override) once diagnosed - see doc/m2m/exceptions.md.
+---------------------------------------------------------------------------
+signal dbg_h_cnt          : std_logic_vector(9 downto 0);
+signal dbg_v_cnt          : std_logic_vector(9 downto 0);
+signal dbg_box_active     : std_logic;
+signal dbg_box_row       : integer;
+signal dbg_box_idx        : integer;
+signal dbg_box_lit        : std_logic;
+signal dbg_rx_ready_prev  : std_logic := '0';
+signal dbg_rx_count       : unsigned(17 downto 0) := (others => '0');
+
+-- QL4M65 TEMPORARY DEBUG AID (M2014): a second progress bar, one row below
+-- the first - counts mdv1_dl_wr pulses (words written into mdv1's buffer
+-- by the QNICE loader) instead of rx_ready (bytes served back out to the
+-- CPU). mdv1_dl_wr is already a clean one-cycle-per-word pulse from the
+-- loader FSM, no edge-detection needed. Lets us directly compare "how much
+-- did QNICE actually write" against "how much has mdv1 served" - if the
+-- write bar completes fully and consistently every time (word count always
+-- reaching the full 87465-word mark) while the read bar is what varies,
+-- that confirms the load itself is solid and the bug is purely in the
+-- serving side; if the write bar itself is inconsistent, the bug is back
+-- in the loader/CDC path we thought was fixed in M2011/M2012.
+signal dbg_wr_count       : unsigned(17 downto 0) := (others => '0');
+
+-- QL4M65 TEMPORARY DEBUG AID (M2014, timing fix): the first M2013 attempt
+-- computed each box's "lit" state combinationally at pixel time - a wide
+-- (18-bit) comparison against a RUNTIME multiplication (box_idx * 11000,
+-- box_idx itself derived combinationally from the fast-changing h_cnt) -
+-- and failed timing for real (main_clk WNS=-4.107ns, 120 failing
+-- endpoints, confirmed in the routed report, not just a warning). Fixed
+-- by precomputing all 32 box bits (16 per bar) as REGISTERED comparisons
+-- against fixed, compile-time-constant thresholds (cheap - no runtime
+-- multiply at all, since the per-box threshold is a loop-constant), so the
+-- pixel-time path is just a simple mux/index into an already-registered
+-- vector, not an arithmetic chain.
+signal dbg_wr_bar         : std_logic_vector(15 downto 0) := (others => '0');
+signal dbg_rx_bar         : std_logic_vector(15 downto 0) := (others => '0');
+
 -- QNICE-clock-domain byte-pair accumulator (mdv1_ld_word_addr/data feed
 -- xpm_cdc_handshake's src_in once a full 16-bit word is assembled - see
 -- the design doc: mdv.v's image format is big-endian at the byte level,
@@ -587,7 +643,11 @@ begin
          hs      => zx_hs,
          vs      => zx_vs,
          HBlank  => zx_hblank,
-         VBlank  => zx_vblank
+         VBlank  => zx_vblank,
+
+         -- QL4M65 TEMPORARY DEBUG AID (M2013, see mdv1 read-progress overlay below)
+         h_cnt_o => dbg_h_cnt,
+         v_cnt_o => dbg_v_cnt
       ); -- i_zx8301
 
    -- video_ce_o: divides clk_main_i into the core's native pre-scandoubler
@@ -909,9 +969,70 @@ begin
          dl_wr     => mdv1_dl_wr
       ); -- i_mdv1
 
-   video_red_o    <= (others => video_r);
-   video_green_o  <= (others => video_g);
-   video_blue_o   <= (others => video_b);
+   ---------------------------------------------------------------------------
+   -- QL4M65 TEMPORARY DEBUG AID (M2013/M2014): mdv1 read/write-progress
+   -- overlay, see the signal declarations' header comments above for the
+   -- full rationale. Two 16-box bars, top-left corner: row 0 (top) = words
+   -- written by the QNICE loader (mdv1_dl_wr, full file = 87465 words);
+   -- row 1 (bottom) = bytes served back out to the CPU (mdv1_rx_ready,
+   -- full file = 174930 bytes).
+   ---------------------------------------------------------------------------
+
+   dbg_count : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if reset = '1' then
+            dbg_rx_ready_prev <= '0';
+            dbg_rx_count      <= (others => '0');
+            dbg_wr_count      <= (others => '0');
+            dbg_wr_bar        <= (others => '0');
+            dbg_rx_bar        <= (others => '0');
+         else
+            dbg_rx_ready_prev <= mdv1_rx_ready;
+            if mdv1_rx_ready = '1' and dbg_rx_ready_prev = '0' then
+               dbg_rx_count <= dbg_rx_count + 1;
+            end if;
+            if mdv1_dl_wr = '1' then  -- already a clean one-cycle-per-word pulse
+               dbg_wr_count <= dbg_wr_count + 1;
+            end if;
+
+            -- registered, fixed-constant-only comparisons - see the
+            -- dbg_wr_bar/dbg_rx_bar signal declarations' header comment
+            for i in 0 to 15 loop
+               if dbg_wr_count >= to_unsigned((i + 1) * 5500, 18) then
+                  dbg_wr_bar(i) <= '1';
+               else
+                  dbg_wr_bar(i) <= '0';
+               end if;
+               if dbg_rx_count >= to_unsigned((i + 1) * 11000, 18) then
+                  dbg_rx_bar(i) <= '1';
+               else
+                  dbg_rx_bar(i) <= '0';
+               end if;
+            end loop;
+         end if;
+      end if;
+   end process dbg_count;
+
+   dbg_box_active <= '1' when ((unsigned(dbg_v_cnt) >= 8  and unsigned(dbg_v_cnt) < 24) or
+                                (unsigned(dbg_v_cnt) >= 28 and unsigned(dbg_v_cnt) < 44)) and
+                               unsigned(dbg_h_cnt) >= 8 and unsigned(dbg_h_cnt) < 8 + 16 * 20
+                     else '0';
+
+   dbg_box_row <= 0 when unsigned(dbg_v_cnt) < 24 else 1;
+   dbg_box_idx <= (to_integer(unsigned(dbg_h_cnt)) - 8) / 20;
+   dbg_box_lit <= '0' when (to_integer(unsigned(dbg_h_cnt)) - 8) mod 20 >= 16 else  -- 4px gap between boxes
+                  dbg_wr_bar(dbg_box_idx) when dbg_box_row = 0 else
+                  dbg_rx_bar(dbg_box_idx);
+
+   video_red_o    <= x"00" when dbg_box_active = '1' and dbg_box_lit = '1' else
+                      x"FF" when dbg_box_active = '1' else
+                      (others => video_r);
+   video_green_o  <= x"FF" when dbg_box_active = '1' and dbg_box_lit = '1' else
+                      x"00" when dbg_box_active = '1' else
+                      (others => video_g);
+   video_blue_o   <= x"00" when dbg_box_active = '1' else
+                      (others => video_b);
 
 end architecture synthesis;
 
