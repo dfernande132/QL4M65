@@ -14,7 +14,25 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2007 — microdrive fase A, carga arreglada; DIR mdv1_ cuelga, overlay de depuración añadido para diagnosticar)
+## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2008 — microdrive fase A funcionando: DIR/LRUN, LED de actividad, velocidad x4)
+
+**`M2007` probado en hardware: `DIR mdv1_` ya funciona, `tetris.mdv` se
+carga y se juega.** No se tocó ninguna lógica funcional entre `M2006` y
+`M2007` (solo taps de depuración + overlay de vídeo) - la hipótesis es que
+el place&route se reorganizó lo suficiente al añadir esas señales como
+para despejar algún camino de timing marginal que fallaba en `M2006`. Hay
+que volver a probar a fondo cuando se quite el overlay. `CHESS.MDV` ya no
+cuelga, da `bad or changed medium` (mensaje real de QDOS, no un bug).
+
+**`M2008`: LED de actividad del microdrive + velocidad x4.** El LED
+(`zx8302.v`'s `led = mdv_sel[0]`, ya calculado pero descartado) ahora sale
+por `main.vhd`→`mega65.vhd`→`main_drive_led_o`, igual que el LED de
+disquete de AExp. La velocidad de lectura real se confirmó idéntica a la
+del MiSTer original (mismo reloj 84MHz, misma `FRACT_BUS_QL`) - no era un
+bug, es la velocidad real de un microdrive de 1984. Por decisión del
+usuario, `mdv1` ahora usa su propio `ce_mdv1_fast` (~4x más rápido que
+`ce_bus_p`) en vez de compartirlo, sin tocar `mdv.v`. Detalle completo en
+`DECISIONES.md`.
 
 **`M2006` probado en hardware: la carga del `.mdv` ya funciona bien** (se
 vuelve limpiamente a BASIC). Pero `DIR mdv1_` con un `.mdv` cargado

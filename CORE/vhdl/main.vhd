@@ -92,7 +92,13 @@ entity main is
       qnice_mdv1_data_i       : in  std_logic_vector(15 downto 0);
       qnice_mdv1_ce_i         : in  std_logic;
       qnice_mdv1_we_i         : in  std_logic;
-      qnice_mdv1_wait_o       : out std_logic
+      qnice_mdv1_wait_o       : out std_logic;
+
+      -- QL4M65 (Milestone 2 phase A, M2008): microdrive activity LED - real
+      -- QL hardware lights it whenever a drive is selected (zx8302.v's own
+      -- "led" output, sel[0] of the mdv_sel shift register); previously
+      -- computed and discarded (led => open).
+      drive_led_o             : out std_logic
    );
 end entity main;
 
@@ -274,11 +280,26 @@ constant FRACT_11M    : unsigned(16 downto 0) := to_unsigned(8582, 17);  -- 10.9
 constant DIV_131K     : natural := 640;                                  -- 84MHz/640 = 131250Hz (SDRAM refresh / RTC tick)
 constant DIV_VID      : natural := 8;                                    -- 84MHz/8 = 10.5MHz pixel clock
 
+-- QL4M65 (Milestone 2 phase A, M2008): deliberate microdrive speedup. Real
+-- QL microdrive hardware (and mdv.v, unmodified, run off ce_bus_p like the
+-- original core did) is 200kbit/s (ce=7.5MHz, see rtl/mdv.v's own
+-- mdv_clk_scaler) - confirmed identical between this port and the
+-- original MiSTer core (same 84MHz base clock, same FRACT_BUS_QL), so this
+-- was never a bug, just genuinely slow real hardware. Per-user decision
+-- (2026-08-05): mdv1 doesn't need real-tape-speed fidelity, so it gets its
+-- own faster ce instead of ce_bus_p - mdv.v itself is untouched (same
+-- "unmodified upstream module" policy as ipc.vhd/T48), only the clock
+-- enable driving its `ce` port differs. ~4x: 84MHz*23406/65536 =~ 30.0MHz.
+constant FRACT_MDV1_FAST : unsigned(16 downto 0) := to_unsigned(23406, 17); -- ~30MHz (~4x mdv1's native 7.5MHz)
+
 signal cnt_bus  : unsigned(15 downto 0) := (others => '0');
 signal bus_tick : std_logic := '0';
 signal bus_pol  : std_logic := '0';
 signal ce_bus_p : std_logic := '0';
 signal ce_bus_n : std_logic := '0';
+
+signal cnt_mdv1_fast : unsigned(15 downto 0) := (others => '0');
+signal ce_mdv1_fast  : std_logic := '0';
 
 signal cnt_sd   : unsigned(15 downto 0) := (others => '0');
 signal ce_sd    : std_logic := '0';
@@ -302,16 +323,18 @@ begin
    -- relationship between bus_tick/cnt_bus and ce_bus_p/ce_bus_n/bus_pol).
    ---------------------------------------------------------------------------
    clock_enables : process (clk_main_i)
-      variable v_bus_sum : unsigned(16 downto 0);
-      variable v_sd_sum  : unsigned(16 downto 0);
-      variable v_11m_sum : unsigned(16 downto 0);
+      variable v_bus_sum   : unsigned(16 downto 0);
+      variable v_sd_sum    : unsigned(16 downto 0);
+      variable v_11m_sum   : unsigned(16 downto 0);
+      variable v_mdv1_sum  : unsigned(16 downto 0);
    begin
       if falling_edge(clk_main_i) then
          if reset_soft_i = '1' or reset_hard_i = '1' then
-            bus_pol <= '0';
-            cnt_bus <= (others => '0');
-            div131k <= (others => '0');
-            divvid  <= (others => '0');
+            bus_pol       <= '0';
+            cnt_bus       <= (others => '0');
+            cnt_mdv1_fast <= (others => '0');
+            div131k       <= (others => '0');
+            divvid        <= (others => '0');
          else
             if div131k = to_unsigned(DIV_131K - 1, div131k'length) then
                div131k <= (others => '0');
@@ -333,6 +356,12 @@ begin
          ce_bus_p  <= bus_tick and not bus_pol;
          ce_bus_n  <= bus_tick and bus_pol;
          bus_pol   <= bus_tick xor bus_pol;
+
+         -- mdv1 microdrive clock: deliberately faster than real ce_bus_p,
+         -- see FRACT_MDV1_FAST's declaration above
+         v_mdv1_sum    := ('0' & cnt_mdv1_fast) + FRACT_MDV1_FAST;
+         cnt_mdv1_fast <= v_mdv1_sum(15 downto 0);
+         ce_mdv1_fast  <= v_mdv1_sum(16);
 
          -- SDRAM refresh / RTC tick
          if div131k = 0 then
@@ -623,7 +652,7 @@ begin
 
          -- QL4M65 TEMPORARY DEBUG AID (M2007, see mdv1 status overlay below)
          gap_irq_o        => dbg_gap_irq,
-         led           => open,
+         led           => drive_led_o,
 
          audio         => audio_bit,
 
@@ -854,7 +883,7 @@ begin
    i_mdv1 : entity work.mdv
       port map (
          clk      => clk_main_i,
-         ce       => ce_bus_p,
+         ce       => ce_mdv1_fast,  -- deliberately faster than real ce_bus_p, see FRACT_MDV1_FAST
          reset    => reset,
 
          reverse  => '0',

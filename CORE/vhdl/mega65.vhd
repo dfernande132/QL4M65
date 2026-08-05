@@ -328,6 +328,11 @@ signal qnice_mdv1_ce          : std_logic;
 signal qnice_mdv1_we          : std_logic;
 signal qnice_mdv1_wait        : std_logic;
 
+-- QL4M65 (Milestone 2 phase A, M2008): microdrive activity LED, core-clock
+-- domain (main.vhd's own "led" tap from zx8302.v - a single level signal,
+-- no CDC needed for a board LED)
+signal main_mdv1_led          : std_logic;
+
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
 ---------------------------------------------------------------------------------------------
@@ -478,7 +483,10 @@ begin
          qnice_mdv1_data_i    => qnice_dev_data_i,
          qnice_mdv1_ce_i      => qnice_mdv1_ce,
          qnice_mdv1_we_i      => qnice_mdv1_we,
-         qnice_mdv1_wait_o    => qnice_mdv1_wait
+         qnice_mdv1_wait_o    => qnice_mdv1_wait,
+
+         -- QL4M65 (Milestone 2 phase A, M2008): microdrive activity LED
+         drive_led_o          => main_mdv1_led
       ); -- i_main
 
    ---------------------------------------------------------------------------------------------
@@ -848,13 +856,14 @@ begin
    ---------------------------------------------------------------------------------------
    -- Virtual drive handler
    --
-   -- QL4M65: not needed yet. Milestone 3 (microdrive .MDV / QL-SD QXL.WIN) will need
-   -- vdrives again; when that happens it likely belongs inside main.vhd rather than
-   -- here (per the template's own advice above this comment in earlier revisions), so
-   -- it is deferred rather than stubbed out now.
+   -- QL4M65 (Milestone 2 phase A, M2008): microdrive activity - main_mdv1_led
+   -- comes straight from zx8302.v's own "led" output (lit whenever any
+   -- drive is selected, mdv_sel[0], same as real QL hardware) via main.vhd's
+   -- drive_led_o. QL-SD's own vdrives activity (Milestone 4, parked) would
+   -- OR into this same signal if/when that's revisited.
    ---------------------------------------------------------------------------------------
 
-   main_drive_led_o     <= '0';
+   main_drive_led_o     <= main_mdv1_led;
    main_drive_led_col_o <= x"00FF00";  -- 24-bit RGB value for the led
 
 end architecture synthesis;
