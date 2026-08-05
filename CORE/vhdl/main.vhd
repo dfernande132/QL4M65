@@ -215,6 +215,25 @@ signal mdv1_cdc_dest_out  : std_logic_vector(32 downto 0);
 type t_mdv1_ld_state is (LD_IDLE, LD_WAIT_REQ_LOW);
 signal mdv1_ld_state : t_mdv1_ld_state := LD_IDLE;
 
+---------------------------------------------------------------------------
+-- QL4M65 TEMPORARY DEBUG AID (M2007): on-screen mdv1 status readout, see
+-- the overlay logic at the end of this architecture.
+---------------------------------------------------------------------------
+signal dbg_h_cnt           : std_logic_vector(9 downto 0);
+signal dbg_v_cnt           : std_logic_vector(9 downto 0);
+signal dbg_gap_irq         : std_logic;
+signal dbg_mdv_present     : std_logic;
+signal dbg_mdv_loaded      : std_logic;
+signal dbg_box_active      : std_logic;
+signal dbg_box_idx         : integer;
+signal dbg_box_lit         : std_logic;
+signal dbg_sel             : std_logic;
+signal dbg_gap_live        : std_logic;
+signal dbg_gap_irq_sticky  : std_logic := '0';
+signal dbg_rx_ready_sticky : std_logic := '0';
+signal dbg_vs_prev         : std_logic := '0';
+signal dbg_vs_count        : natural range 0 to 63 := 0;
+
 -- IPC link to ipc.vhd (QL4M65 M1031: the real emulated 8049, T48 core +
 -- real firmware ROM - replaces both the embedded 8049 emulation removed
 -- from zx8302.v AND keyboard.vhd's own hand-rolled M1018-M1030 protocol
@@ -550,7 +569,11 @@ begin
          hs      => zx_hs,
          vs      => zx_vs,
          HBlank  => zx_hblank,
-         VBlank  => zx_vblank
+         VBlank  => zx_vblank,
+
+         -- QL4M65 TEMPORARY DEBUG AID (M2007, see mdv1 status overlay below)
+         h_cnt_o => dbg_h_cnt,
+         v_cnt_o => dbg_v_cnt
       ); -- i_zx8301
 
    -- video_ce_o: divides clk_main_i into the core's native pre-scandoubler
@@ -560,9 +583,6 @@ begin
    video_ce_o     <= ce_pix;
    video_ce_ovl_o <= video_ce_o;
 
-   video_red_o    <= (others => video_r);
-   video_green_o  <= (others => video_g);
-   video_blue_o   <= (others => video_b);
    video_vs_o     <= zx_vs;
    video_hs_o     <= zx_hs;
    video_hblank_o <= zx_hblank;
@@ -600,6 +620,9 @@ begin
          mdv1_tx_empty_i  => mdv1_tx_empty,
          mdv1_rx_ready_i  => mdv1_rx_ready,
          mdv1_byte_i      => mdv1_byte,
+
+         -- QL4M65 TEMPORARY DEBUG AID (M2007, see mdv1 status overlay below)
+         gap_irq_o        => dbg_gap_irq,
          led           => open,
 
          audio         => audio_bit,
@@ -846,8 +869,86 @@ begin
          download  => mdv1_download,
          dl_addr   => mdv1_dl_addr,
          dl_data   => mdv1_dl_data,
-         dl_wr     => mdv1_dl_wr
+         dl_wr     => mdv1_dl_wr,
+
+         -- QL4M65 TEMPORARY DEBUG AID (M2007, see mdv1 status overlay below)
+         mdv_present_o => dbg_mdv_present,
+         mdv_loaded_o  => dbg_mdv_loaded
       ); -- i_mdv1
+
+   ---------------------------------------------------------------------------
+   -- QL4M65 TEMPORARY DEBUG AID (M2007): on-screen mdv1 status readout.
+   --
+   -- Investigating: DIR mdv1_ hangs completely (no keyboard/break response)
+   -- once a real .mdv is loaded and drive 1 is selected - loading itself
+   -- now completes fine (M2006 fixed that). Six small boxes, top-left
+   -- corner, left to right: SEL / LOADED / PRESENT / GAP / GAP_IRQ / RXRDY.
+   -- Green = '1', red = '0'. SEL/LOADED/PRESENT/GAP are shown live (level
+   -- signals); GAP_IRQ/RXRDY are pulses, shown "sticky" (latched on any '1'
+   -- seen, cleared roughly once a second) - same idiom as M1020's sticky
+   -- debug flags, needed because a live pulse this narrow would never be
+   -- caught by eye.
+   --
+   -- Remove this whole block (signals, i_zx8301's h_cnt_o/v_cnt_o,
+   -- i_zx8302's gap_irq_o, mdv.v's mdv_present_o/mdv_loaded_o, the
+   -- video_red/green/blue_o override) once diagnosed - see
+   -- doc/m2m/exceptions.md.
+   ---------------------------------------------------------------------------
+
+   dbg_box_active <= '1' when unsigned(dbg_v_cnt) >= 8 and unsigned(dbg_v_cnt) < 24 and
+                              unsigned(dbg_h_cnt) >= 8 and unsigned(dbg_h_cnt) < 8 + 6 * 20
+                     else '0';
+
+   dbg_box_idx <= (to_integer(unsigned(dbg_h_cnt)) - 8) / 20;
+   dbg_box_lit <= '0' when (to_integer(unsigned(dbg_h_cnt)) - 8) mod 20 >= 16 else  -- 4px gap between boxes
+                  dbg_sel        when dbg_box_idx = 0 else
+                  dbg_mdv_loaded when dbg_box_idx = 1 else
+                  dbg_mdv_present when dbg_box_idx = 2 else
+                  dbg_gap_live   when dbg_box_idx = 3 else
+                  dbg_gap_irq_sticky when dbg_box_idx = 4 else
+                  dbg_rx_ready_sticky;
+
+   dbg_sel      <= mdv_sel(0);
+   dbg_gap_live <= mdv1_gap;
+
+   dbg_sticky : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if reset = '1' then
+            dbg_vs_prev  <= '0';
+            dbg_vs_count <= 0;
+            dbg_gap_irq_sticky   <= '0';
+            dbg_rx_ready_sticky  <= '0';
+         else
+            if mdv1_rx_ready = '1' then
+               dbg_rx_ready_sticky <= '1';
+            end if;
+            if dbg_gap_irq = '1' then
+               dbg_gap_irq_sticky <= '1';
+            end if;
+
+            dbg_vs_prev <= zx_vs;
+            if dbg_vs_prev = '0' and zx_vs = '1' then  -- vsync rising edge
+               if dbg_vs_count = 49 then                -- ~1s @ 50Hz PAL vsync
+                  dbg_vs_count        <= 0;
+                  dbg_gap_irq_sticky  <= '0';
+                  dbg_rx_ready_sticky <= '0';
+               else
+                  dbg_vs_count <= dbg_vs_count + 1;
+               end if;
+            end if;
+         end if;
+      end if;
+   end process dbg_sticky;
+
+   video_red_o    <= x"00" when dbg_box_active = '1' and dbg_box_lit = '1' else
+                      x"FF" when dbg_box_active = '1' else
+                      (others => video_r);
+   video_green_o  <= x"FF" when dbg_box_active = '1' and dbg_box_lit = '1' else
+                      x"00" when dbg_box_active = '1' else
+                      (others => video_g);
+   video_blue_o   <= x"00" when dbg_box_active = '1' else
+                      (others => video_b);
 
 end architecture synthesis;
 

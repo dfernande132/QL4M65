@@ -14,7 +14,33 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2006 — microdrive fase A, segunda causa raíz del cuelgue encontrada y arreglada)
+## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2007 — microdrive fase A, carga arreglada; DIR mdv1_ cuelga, overlay de depuración añadido para diagnosticar)
+
+**`M2006` probado en hardware: la carga del `.mdv` ya funciona bien** (se
+vuelve limpiamente a BASIC). Pero `DIR mdv1_` con un `.mdv` cargado
+**cuelga el sistema por completo** (ni teclado ni Ctrl+Espacio responden;
+el IPC sigue sonando porque es independiente de la CPU principal). Sin
+`.mdv` cargado, `DIR mdv1_` da "not found" correctamente - así que el
+problema es específico de leer un microdrive ya presente, no del cargador
+(que ya funciona desde `M2006`).
+
+Comparación puerto a puerto contra el SoC original de MiSTer (`QL.sv`):
+clk/ce/mdv_reverse/orden de bytes/pulso `dl_wr` por palabra (`WIDE=1`) -
+todo coincide. Dos desviaciones reales encontradas: (1) `reset` en vez del
+`reset_mdv` original (puerto muerto en `zx8302.v` desde M1, bajo riesgo);
+(2) `mdv_download` es un pulso de un ciclo en vez del nivel mantenido
+durante toda la carga que usa el original - evaluado y descartado como
+causa de este cuelgue concreto (el driver aún no está seleccionado durante
+la carga), documentado como pendiente. Ningún smoking gun tan claro como
+el bug de `wait_o` de `M2006` - detalle completo en `DECISIONES.md`.
+
+**`M2007`: en vez de seguir especulando, se añade un overlay visual en
+pantalla** (6 cajas de color: SEL/LOADED/PRESENT/GAP/GAP_IRQ/RXRDY, mismo
+patrón que el debug overlay de `cpu_addr` de M1016) para ver con datos
+reales, en el momento exacto del cuelgue, qué señal no es la esperada.
+Puertos de depuración aditivos en `zx8301.v` (`h_cnt_o`/`v_cnt_o`),
+`mdv.v` (`mdv_present_o`/`mdv_loaded_o`) y `zx8302.v` (`gap_irq_o`) -
+ninguno toca lógica existente. Pendiente de prueba en hardware.
 
 **`M2004` probado en hardware: dos problemas.** ROMs dejaron de auto-cargar
 desde `/ql4m65/rom/` (el revert de QL-SD se llevó por delante esa

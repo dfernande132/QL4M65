@@ -126,6 +126,18 @@ clock-domain crossing via `xpm_cdc_handshake`, phase B/C/D plan).
 Files: `rtl/mdv.v` is now added to the Vivado compile list (was excluded
 during M1); `rtl/dpram.v` stays excluded (same as always).
 
+**M2007 (temporary): three debug-only output ports** added to investigate
+`DIR mdv1_` hanging QDOS completely once a real `.mdv` is loaded and
+selected (loading itself works fine as of M2006 - detail in
+`DECISIONES.md`'s M2006/M2007 sections). Purely additive, no existing
+logic touched: `rtl/zx8301.v` gained `h_cnt_o`/`v_cnt_o` (raw pixel
+position, needed to draw an on-screen overlay - same pattern as the M1016
+`cpu_addr` debug overlay), `rtl/mdv.v` gained `mdv_present_o`/
+`mdv_loaded_o` (its own internal `mdv_present`/`mdv_end!=0` wires exposed
+as outputs), `rtl/zx8302.v` gained `gap_irq_o` (its own internal `gap_irq`
+register exposed). Remove all three once diagnosed, along with
+`main.vhd`'s overlay block.
+
 ### The `ipl` assignment in `rtl/zx8302.v` (interrupt lines)
 
 `assign ipl = { ipc_ipl_i[1] || (irq_pending[4:0] != 0), ipc_ipl_i[0] };` -
