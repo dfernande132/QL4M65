@@ -280,26 +280,25 @@ constant FRACT_11M    : unsigned(16 downto 0) := to_unsigned(8582, 17);  -- 10.9
 constant DIV_131K     : natural := 640;                                  -- 84MHz/640 = 131250Hz (SDRAM refresh / RTC tick)
 constant DIV_VID      : natural := 8;                                    -- 84MHz/8 = 10.5MHz pixel clock
 
--- QL4M65 (Milestone 2 phase A, M2008): deliberate microdrive speedup. Real
--- QL microdrive hardware (and mdv.v, unmodified, run off ce_bus_p like the
--- original core did) is 200kbit/s (ce=7.5MHz, see rtl/mdv.v's own
--- mdv_clk_scaler) - confirmed identical between this port and the
--- original MiSTer core (same 84MHz base clock, same FRACT_BUS_QL), so this
--- was never a bug, just genuinely slow real hardware. Per-user decision
--- (2026-08-05): mdv1 doesn't need real-tape-speed fidelity, so it gets its
--- own faster ce instead of ce_bus_p - mdv.v itself is untouched (same
--- "unmodified upstream module" policy as ipc.vhd/T48), only the clock
--- enable driving its `ce` port differs. ~4x: 84MHz*23406/65536 =~ 30.0MHz.
-constant FRACT_MDV1_FAST : unsigned(16 downto 0) := to_unsigned(23406, 17); -- ~30MHz (~4x mdv1's native 7.5MHz)
+-- QL4M65 (Milestone 2 phase A, M2008->M2009): the M2008 "speed mdv1 up
+-- alone via its own ce_mdv1_fast, leave ce_bus_p/CPU untouched" attempt was
+-- REVERTED in M2009 - confirmed on hardware to break reads entirely (files
+-- that read fine at native 1x, e.g. tetris.mdv, stopped reading at all at
+-- 4x). Root cause: QDOS's own microdrive driver is real-time bit-banged
+-- code running at whatever speed the CPU itself is clocked at; decoupling
+-- mdv1's byte rate from the CPU's service rate breaks the timing budget
+-- QDOS needs to keep up - exactly why the ORIGINAL core's turbo option
+-- (QL.sv's "O78,CPU speed") scales ce_bus_p for the CPU AND zx8302/mdv
+-- TOGETHER via one shared accumulator, never just the storage device alone.
+-- A real speedup needs genuine CPU+bus turbo mode (planned, bigger, its own
+-- milestone) - not this shortcut. mdv1 is back on ce_bus_p, native 7.5MHz,
+-- matching real hardware and the original core exactly. See DECISIONES.md.
 
 signal cnt_bus  : unsigned(15 downto 0) := (others => '0');
 signal bus_tick : std_logic := '0';
 signal bus_pol  : std_logic := '0';
 signal ce_bus_p : std_logic := '0';
 signal ce_bus_n : std_logic := '0';
-
-signal cnt_mdv1_fast : unsigned(15 downto 0) := (others => '0');
-signal ce_mdv1_fast  : std_logic := '0';
 
 signal cnt_sd   : unsigned(15 downto 0) := (others => '0');
 signal ce_sd    : std_logic := '0';
@@ -326,13 +325,11 @@ begin
       variable v_bus_sum   : unsigned(16 downto 0);
       variable v_sd_sum    : unsigned(16 downto 0);
       variable v_11m_sum   : unsigned(16 downto 0);
-      variable v_mdv1_sum  : unsigned(16 downto 0);
    begin
       if falling_edge(clk_main_i) then
          if reset_soft_i = '1' or reset_hard_i = '1' then
             bus_pol       <= '0';
             cnt_bus       <= (others => '0');
-            cnt_mdv1_fast <= (others => '0');
             div131k       <= (others => '0');
             divvid        <= (others => '0');
          else
@@ -356,12 +353,6 @@ begin
          ce_bus_p  <= bus_tick and not bus_pol;
          ce_bus_n  <= bus_tick and bus_pol;
          bus_pol   <= bus_tick xor bus_pol;
-
-         -- mdv1 microdrive clock: deliberately faster than real ce_bus_p,
-         -- see FRACT_MDV1_FAST's declaration above
-         v_mdv1_sum    := ('0' & cnt_mdv1_fast) + FRACT_MDV1_FAST;
-         cnt_mdv1_fast <= v_mdv1_sum(15 downto 0);
-         ce_mdv1_fast  <= v_mdv1_sum(16);
 
          -- SDRAM refresh / RTC tick
          if div131k = 0 then
@@ -883,7 +874,7 @@ begin
    i_mdv1 : entity work.mdv
       port map (
          clk      => clk_main_i,
-         ce       => ce_mdv1_fast,  -- deliberately faster than real ce_bus_p, see FRACT_MDV1_FAST
+         ce       => ce_bus_p,  -- native QL speed - see M2009 revert note above
          reset    => reset,
 
          reverse  => '0',

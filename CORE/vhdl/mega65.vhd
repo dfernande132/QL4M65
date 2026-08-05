@@ -864,7 +864,7 @@ begin
    ---------------------------------------------------------------------------------------
 
    main_drive_led_o     <= main_mdv1_led;
-   main_drive_led_col_o <= x"00FF00";  -- 24-bit RGB value for the led
+   main_drive_led_col_o <= x"FF0000";  -- 24-bit RGB value for the led
 
 end architecture synthesis;
 

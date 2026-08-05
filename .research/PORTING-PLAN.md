@@ -14,7 +14,11 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2008 — microdrive fase A funcionando: DIR/LRUN, LED de actividad, velocidad x4)
+## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2009 — revert del x4 de mdv1 (rompía la lectura), LED en rojo, investigando bug de contenido en CHESS.MDV)
+
+**`M2008` probado en hardware: LED funciona, pero la velocidad x4 rompe la lectura por completo** (ni `tetris.mdv`, que leía bien a 1x, lee ya). Causa: el driver de microdrive de QDOS es tiempo real bit-a-bit a velocidad de CPU nativa - si el microdrive sirve datos más rápido que la CPU sin acelerar también la CPU, QDOS no llega a tiempo. Confirma por qué el modo turbo real de MiSTer (`QL.sv`'s `"O78,CPU speed"`) escala CPU+bus JUNTOS desde un único generador de reloj compartido, nunca el storage por separado - el vídeo que vio el usuario con `DIR` rápido casi seguro era MiSTer en modo turbo (no implementado aquí todavía, milestone futuro propio).
+
+**`M2009`: revertido el x4** (`mdv1` vuelve a `ce_bus_p` nativo, sin código muerto), LED cambiado a rojo. **Bug abierto y prioritario ahora: `CHESS.MDV` da "bad or changed medium" en QDOS incluso a 1x**, mientras `tetris.mdv` (mismo tamaño) lee bien - confirmado que el dump es válido (funciona en otro emulador con la misma ROM). Es un error de contenido detectado por el checksum de QDOS, no un cuelgue - el overlay de depuración actual puede no bastar, puede hacer falta instrumentación nueva. Detalle completo en `DECISIONES.md`.
 
 **`M2007` probado en hardware: `DIR mdv1_` ya funciona, `tetris.mdv` se
 carga y se juega.** No se tocó ninguna lógica funcional entre `M2006` y
