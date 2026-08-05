@@ -85,15 +85,15 @@ constant SCR_WELCOME : string :=
 
    "Sinclair QL for MEGA65 (QL4M65)\n" &
    "Desarrollado por dfsantos (2026)\n\n\n" &
-   "Milestone 1 - MEGA65 port in progress\n\n" &
+   "Milestone 2 - MEGA65 port in progress\n\n" &
 
    "Based on MiSTer-devel/QL_MiSTer\n" &
    "Powered by MiSTer2MEGA65,\n" &
    "done by sy2002 and MJoergen\n\n" &
 
-   "Milestone 1 scope: native QL speed, PAL,\n" &
-   "128k RAM, keyboard. No microdrive, QL-SD,\n" &
-   "mouse or GoldCard/SMSQE yet.\n\n\n" &
+   "Milestone 2 scope: native QL speed, PAL,\n" &
+   "128k RAM, keyboard, 1 microdrive (read).\n" &
+   "No QL-SD, mouse or GoldCard/SMSQE yet.\n\n\n" &
 
    "    Press Space to continue.\n\n\n";
 
@@ -215,7 +215,7 @@ constant SEL_CORENAME      : std_logic_vector(15 downto 0) := x"0200";
 
 -- Currently this is only used in the debug console. Use the welcome screen and the
 -- help system to display the name and version of your core to the end user
-constant CORENAME          : string := "QL4M65 Milestone 1";
+constant CORENAME          : string := "QL4M65 Milestone 2";
 
 --------------------------------------------------------------------------------------------------------------------
 -- "Help" menu / Options menu  (Selectors 0x0300 .. 0x0312): DO NOT TOUCH

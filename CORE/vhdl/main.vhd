@@ -712,9 +712,29 @@ begin
    -- xpm_cdc_handshake's internal synchronizers drop the request before
    -- the other side ever safely captured it - a real handshake deadlock
    -- (not a timing/setup issue), matching the hang seen in hardware.
+   --
+   -- SECOND BUG (found 2026-08-04, M2005 still hung identically): wait_o
+   -- must depend ONLY on registered state (mdv1_ld_busy), never on the raw
+   -- live qnice_mdv1_ce_i/we_i/addr_i inputs. The QNICE CPU (qnice_cpu.vhd,
+   -- state cs_exepost_store_dst_indirect) holds ce/we/addr asserted for as
+   -- long as it sees WAIT_FOR_DATA='1', and only retracts them the cycle
+   -- AFTER it samples wait='0'. The previous formula OR'd the live ce/we/
+   -- addr(0) straight into wait_o, so the instant mdv1_ld_busy dropped back
+   -- to '0' (transaction genuinely done), that same live term (still '1',
+   -- since the CPU hadn't yet had a chance to react) kept wait_o at '1' -
+   -- the CPU never saw a low cycle to retract on, so it held forever and
+   -- wait_o never had a reason to drop: a permanent deadlock on every single
+   -- odd-byte write, i.e. on the very first word of any .mdv load. This is
+   -- also why M2005's CDC-protocol fix alone did not change the symptom -
+   -- it fixed a real but different bug; this one is what actually blocked
+   -- the loader. Reference: M2M/vhdl/qnice2hyperram.vhd (the mechanism that
+   -- successfully loads .win files) computes its wait_o purely from its own
+   -- registered m_avm_write_o/m_avm_read_o/reading, never from the raw
+   -- incoming s_qnice_cs_i/s_qnice_write_i - same fix, same idiom, applied
+   -- here.
    ---------------------------------------------------------------------------
 
-   qnice_mdv1_wait_o <= mdv1_ld_busy or (qnice_mdv1_ce_i and qnice_mdv1_we_i and qnice_mdv1_addr_i(0));
+   qnice_mdv1_wait_o <= mdv1_ld_busy;
 
    mdv1_loader_qnice : process (qnice_clk_i)
    begin

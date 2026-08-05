@@ -14,18 +14,32 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-04, sesión M2005 — microdrive fase A, arreglado protocolo CDC)
+## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2006 — microdrive fase A, segunda causa raíz del cuelgue encontrada y arreglada)
 
 **`M2004` probado en hardware: dos problemas.** ROMs dejaron de auto-cargar
 desde `/ql4m65/rom/` (el revert de QL-SD se llevó por delante esa
 reorganización, independiente de QL-SD). Cargar un `.mdv` colgaba el core en
-la barra de progreso. Causa raíz: mal uso de `xpm_cdc_handshake` -
+la barra de progreso. Causa raíz aparente: mal uso de `xpm_cdc_handshake` -
 `src_send`/`dest_ack` deben mantenerse en alto hasta ver la confirmación del
 otro lado, no pulsarse un ciclo (confirmado leyendo el código fuente real de
-la primitiva, no de memoria). **`M2005` arregla ambos**: protocolo de 4 fases
-correcto en `main.vhd`, rutas de ROM restauradas en `globals.vhd`. Compila
-limpio (WNS=+0.114 ns, WHS=+0.054 ns, 0 nets con errores). Pendiente de
-prueba en hardware. Detalle completo en `DECISIONES.md`.
+la primitiva, no de memoria). **`M2005` arregla eso** (protocolo de 4 fases
+correcto en `main.vhd`, rutas de ROM restauradas en `globals.vhd`) pero
+**probado en hardware sigue colgándose exactamente igual** — ROM ya arranca
+bien, pero el `.mdv` no.
+
+**Segunda causa raíz (la real): `qnice_mdv1_wait_o` mezclaba estado
+registrado con señales "en vivo" de la CPU QNICE.** La fórmula
+`mdv1_ld_busy or (ce and we and addr(0))` nunca podía bajar a `'0'` mientras
+la CPU mantuviera su escritura asertada — y la CPU (confirmado leyendo
+`qnice_cpu.vhd`) solo retira `ce`/`we`/`addr` un ciclo *después* de ver
+`wait='0'`, así que nunca lo veía: cuelgue permanente garantizado en la
+primera palabra de cualquier carga. Encontrado comparando contra
+`qnice2hyperram.vhd` (el mecanismo que sí carga `.win` con éxito), cuyo
+`wait_o` depende solo de estado interno registrado, nunca de las señales
+en vivo entrantes. Fix: `qnice_mdv1_wait_o <= mdv1_ld_busy;` (sin el término
+extra). **`M2006`**: este fix + pantalla de bienvenida/`CORENAME` corregidos
+a "Milestone 2" (misma regresión que las rutas de ROM, no reaplicada hasta
+ahora). Detalle completo en `DECISIONES.md`.
 
 
 
