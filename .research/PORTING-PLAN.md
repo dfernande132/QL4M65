@@ -14,7 +14,13 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2015 — bug de lectura sostenida sigue abierto: patrón claro (fichero grande = más fallos), sin causa lógica encontrable por análisis estático; endurecimiento de margen físico como experimento)
+## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2016 — análisis externo encuentra mecanismo exacto: presupuesto de 7 ciclos de CPU del protocolo de microdrive consumido por esperas de contención de vídeo mal aplicadas a la E/S; plan de dos builds en marcha)
+
+**Análisis de un modelo de razonamiento externo (`E:\QL_MEGA65\Fase0\mdv1-sustained-read-analysis.md`, fuera del repo), a partir de un documento de traspaso.** Encuentra un mecanismo preciso: la ventana de `rx_ready` de `mdv.v` son 37 ciclos de CPU, el bucle de sondeo de Minerva (`md/read.asm`) tarda 30 — solo 7 ciclos de margen. `ql_timing.sv` aplica esperas de contención de vídeo a toda dirección que no sea ROM (`could_start || cpu_rom`, la E/S del `zx8302` no está exenta), añadiendo hasta 11 ciclos de jitter durante pantalla activa. Evidencia casi definitiva: `maxfail equ 7` en Minerva coincide exactamente con las 6-7 vueltas observadas antes del error; `M2008` (acelerar `mdv1` x4, rompió todo) resulta ser el experimento de control que confirma la relación ventana/bucle sin que lo supiéramos entonces.
+
+Síntoma 2 (arranque poco fiable) tiene causa propia y distinta: `i_mdv1` atado al reset general del core, que borra `mdv_end` (expulsa el cartucho) en cada reset — el original lo ata a `reset_mdv = osd_reset`, una señal distinta.
+
+**`M2016` (en curso): `enable=>'0'` en `i_ql_timing` (diagnóstico, desactiva toda contención) + `i_mdv1` reset desacoplado del reset general + overlay de depuración retirado.** Si confirma la hipótesis, `M2017` aplicará el arreglo real (`cpu_rom => cpu_rom or ql_io`, exime solo la E/S) manteniendo la fidelidad de velocidad. Detalle completo en `DECISIONES.md`.
 
 **Patrón confirmado con las barras de depuración de `M2014`:** `DIR` necesita ~1-1.5x el tamaño del fichero en bytes leídos; `LRUN` de un fichero grande (chess) necesita 6-7 vueltas completas antes de rendirse con `bad or changed medium`; ficheros pequeños (`invaders`, `tetris`) funcionan casi siempre. Como cada vuelta de `mem_addr` en `mdv.v` reinicia limpio (sin acumular estado), un fallo que se vuelve más probable cuanta más lectura sostenida haya, sin degradación lógica, apunta a algo estadístico - un margen de timing real.
 
