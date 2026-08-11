@@ -14,7 +14,17 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-05, sesión M2016 — análisis externo encuentra mecanismo exacto: presupuesto de 7 ciclos de CPU del protocolo de microdrive consumido por esperas de contención de vídeo mal aplicadas a la E/S; plan de dos builds en marcha)
+## 0. Estado actual del proyecto (actualizado: 2026-08-11 — RESUELTO: el bug de lectura sostenida de mdv1 nunca estuvo en el RTL, las imágenes de prueba (CHESS.MDV, Quill2.mdv, etc.) estaban corruptas de origen)
+
+**Ronda 2 del análisis externo (`E:\QL_MEGA65\Fase0\mdv1-sustained-read-analysis-round2.md`) cierra el caso.** Un verificador que simula `mdv.v` y aplica el checksum real de Minerva (`Fase0/tools/mdvcheck.py`) demuestra correlación perfecta: toda imagen que funcionaba está limpia, toda la que fallaba tiene checksums corruptos de origen (`CHESS.MDV`: 133 cabeceras de bloque con el valor de un sector vacío; `Quill2.mdv`: las 255 cabeceras de sector mal, por eso ni el `DIR` iba). El M2016/M2017 (desactivar contención + arreglar el reset del cargador) **sí funcionaron** — `maxfail=7` solo protege el sector de mapa, no los bloques de datos (sin límite de reintentos), así que al dejar de fallar el mapa el síntoma cambió de "error tras 7 vueltas" a "cuelgue indefinido" en vez de desaparecer. Herramientas y 4 imágenes reparadas en `Fase0/tools/` y `E:\QL_MEGA65\MDV\reparadas\`.
+
+**Regla nueva: pasar `mdvcheck.py` a cualquier `.mdv` antes de usarla como caso de prueba.**
+
+**Próximo build (pendiente de confirmar P1/P2 en hardware con `CHESS_fix.mdv`): sustituir `enable=>'0'` (diagnóstico) por el arreglo fino y definitivo** — `enable=>'1'` + `cpu_rom => cpu_rom or ql_io`, restaurando la fidelidad de velocidad de la QL. Detalle completo en `DECISIONES.md`.
+
+---
+
+## 0.old. Estado anterior (obsoleto, ver arriba — dejado por referencia histórica de la investigación M2004-M2017)
 
 **Análisis de un modelo de razonamiento externo (`E:\QL_MEGA65\Fase0\mdv1-sustained-read-analysis.md`, fuera del repo), a partir de un documento de traspaso.** Encuentra un mecanismo preciso: la ventana de `rx_ready` de `mdv.v` son 37 ciclos de CPU, el bucle de sondeo de Minerva (`md/read.asm`) tarda 30 — solo 7 ciclos de margen. `ql_timing.sv` aplica esperas de contención de vídeo a toda dirección que no sea ROM (`could_start || cpu_rom`, la E/S del `zx8302` no está exenta), añadiendo hasta 11 ciclos de jitter durante pantalla activa. Evidencia casi definitiva: `maxfail equ 7` en Minerva coincide exactamente con las 6-7 vueltas observadas antes del error; `M2008` (acelerar `mdv1` x4, rompió todo) resulta ser el experimento de control que confirma la relación ventana/bucle sin que lo supiéramos entonces.
 
