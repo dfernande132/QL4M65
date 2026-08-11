@@ -187,6 +187,22 @@ signal zx8302_addr  : std_logic_vector(1 downto 0);
 signal zx8302_dout  : std_logic_vector(15 downto 0);
 signal audio_bit    : std_logic;                      -- ZX8302's single-bit beeper output
 
+-- QL4M65 (Milestone 2 phase A, M2019): synthesized microdrive motor hum,
+-- mixed into the audio output while mdv1 is selected (mdv_sel(0), the
+-- same signal already driving the activity LED) - real microdrives spin
+-- for as long as a channel is open, not just during active data transfer,
+-- so this matches real hardware timing more closely than gating on
+-- rx_ready pulses would. There's no real "microdrive audio" signal from
+-- zx8302 to reuse - its own `audio` output is entirely the IPC/keyboard
+-- beeper (audio <= ipc_audio_i, zx8302.v:230), unrelated to the drive.
+constant MDV1_MOTOR_HALF_PERIOD : natural := 210000;  -- 84MHz / (2*210000) ~= 200Hz hum
+constant MDV1_MOTOR_AMPLITUDE   : natural := 3000;    -- well under 32767, leaves headroom for the beeper
+signal mdv1_motor_cnt   : natural range 0 to MDV1_MOTOR_HALF_PERIOD - 1 := 0;
+signal mdv1_motor_tone  : std_logic := '0';
+signal beeper_audio     : signed(15 downto 0);
+signal mdv1_motor_audio : signed(15 downto 0);
+signal audio_mix        : signed(16 downto 0);
+
 ---------------------------------------------------------------------------
 -- QL4M65 (Milestone 2 phase A): microdrive 1 - mdv.v (unmodified) + its
 -- Vivado-clean dpram (mdv_dpram.vhd, BRAM-backed) + the QNICE-clock-domain
@@ -714,8 +730,35 @@ begin
          cpu_dout      => zx8302_dout
       ); -- i_zx8302
 
-   audio_left_o  <= to_signed(16#7FFF#, 16) when audio_bit = '1' else to_signed(0, 16);
-   audio_right_o <= to_signed(16#7FFF#, 16) when audio_bit = '1' else to_signed(0, 16);
+   -- QL4M65 (M2019): microdrive motor hum, gated on mdv_sel(0), see the
+   -- signal declarations' header comment above.
+   mdv1_motor_snd : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if mdv_sel(0) = '0' then
+            mdv1_motor_cnt  <= 0;
+            mdv1_motor_tone <= '0';
+         elsif mdv1_motor_cnt = MDV1_MOTOR_HALF_PERIOD - 1 then
+            mdv1_motor_cnt  <= 0;
+            mdv1_motor_tone <= not mdv1_motor_tone;
+         else
+            mdv1_motor_cnt <= mdv1_motor_cnt + 1;
+         end if;
+      end if;
+   end process mdv1_motor_snd;
+
+   beeper_audio     <= to_signed(16#7FFF#, 16) when audio_bit = '1' else to_signed(0, 16);
+   mdv1_motor_audio <= to_signed(MDV1_MOTOR_AMPLITUDE, 16) when mdv1_motor_tone = '1' else to_signed(0, 16);
+
+   -- Mix in a 17-bit intermediate and saturate before truncating back to
+   -- 16 bits, so a beeper click and the motor hum coinciding can never
+   -- wrap around into a loud glitch.
+   audio_mix <= resize(beeper_audio, 17) + resize(mdv1_motor_audio, 17);
+
+   audio_left_o  <= to_signed(16#7FFF#, 16)   when audio_mix > to_signed(16#7FFF#, 17) else
+                    to_signed(-16#8000#, 16)  when audio_mix < to_signed(-16#8000#, 17) else
+                    audio_mix(15 downto 0);
+   audio_right_o <= audio_left_o;
 
    ---------------------------------------------------------------------------
    -- QL4M65: keyboard - MEGA65-native translation to the QL's 8x8 matrix
