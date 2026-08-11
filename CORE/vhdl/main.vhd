@@ -567,25 +567,30 @@ begin
       port map (
          clk_sys         => clk_main_i,
          reset           => reset,
-         -- QL4M65 (M2016, DIAGNOSTIC ONLY - see DECISIONES.md's M2016
-         -- section / .research/mdv1-sustained-read-analysis.md's "E2"
-         -- experiment): temporarily '0' to disable ALL video-contention
-         -- wait states, testing the hypothesis that ram_delay_dtack
-         -- (which ql_timing.sv applies to every non-ROM access, including
-         -- zx8302 I/O reads at $18020 - only cpu_rom is exempted,
-         -- ql_timing.sv:76) eats into the microdrive protocol's real-time
-         -- budget (rx_ready window 37 CPU cycles vs Minerva's 30-cycle
-         -- polling loop, only 7 cycles of margin) enough to drop bytes
-         -- during sustained mdv1 reads. NOT a real fix - breaks QL native
-         -- speed fidelity while '0'. Revert to '1' once confirmed/refuted,
-         -- replacing with the real fix (exempt only ql_io from contention).
-         enable          => '0',
+         enable          => '1',  -- QL-native speed, fidelity restored (see cpu_rom below)
          ce_bus_p        => ce_bus_p,
          VBlank          => zx_vblank,
          cpu_uds         => cpu_uds,
          cpu_lds         => cpu_lds,
          cpu_rw          => cpu_rw,
-         cpu_rom         => cpu_rom,
+         -- QL4M65 (M2018): the zx8302 I/O registers ($018000-$01BFFF) don't
+         -- live in the DRAM the ZX8301 contends for on real hardware, so
+         -- they shouldn't wait for the video chunk window either - present
+         -- them to ql_timing as if they were ROM (ql_timing.sv:76 only
+         -- exempts cpu_rom). Without this, each zx8302 I/O read from
+         -- Minerva's md_read polling loop could be delayed 0-11 cycles by
+         -- ram_delay_dtack, against a real-time budget of only 7 cycles
+         -- (rx_ready window 37 CPU cycles vs the 30-cycle poll loop) -
+         -- confirmed as a real, partial contributor: disabling ALL
+         -- contention (M2016/M2017, `enable => '0'`) measurably stabilized
+         -- sustained mdv1 reads on hardware. The OTHER, larger part of
+         -- what looked like a hang turned out to be genuinely corrupted
+         -- test .mdv images (see DECISIONES.md's mdv1-sustained-read
+         -- resolution) - both were real, independent factors. This
+         -- targeted exemption keeps full QL speed fidelity for everything
+         -- else (RAM still contends normally) while giving mdv1's polling
+         -- loop its margin back. See DECISIONES.md's M2018 section.
+         cpu_rom         => cpu_rom or ql_io,
          ram_delay_dtack => ram_delay_dtack
       ); -- i_ql_timing
 
