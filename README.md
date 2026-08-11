@@ -6,15 +6,28 @@ A port of the **Sinclair QL** to the **MEGA65**, built on top of the
 based on the [MiSTer-devel/QL_MiSTer](https://github.com/MiSTer-devel/QL_MiSTer)
 core (68008/`fx68k` CPU, `zx8301` video ULA, `zx8302` I/O ULA).
 
-**Current status: Milestone 1 complete.** The QL boots end-to-end on real
-MEGA65 R6 hardware: RAM check, boot logo, F1-F4 screen, 10-second timeout
-(or F1/F2/F5 response), and into SuperBASIC with a working keyboard - both
-Minerva and MGE tested. System ROM loads either automatically from a fixed
-SD card path at boot or manually via the Shell's Options menu, with the core
-auto-resetting itself after any manual ROM change. See
-`.research/PORTING-PLAN.md` and `DECISIONES.md` (in the parent directory)
-for the full, detailed log of the whole investigation and every decision
-made along the way.
+**Current status: Milestone 1 complete. Milestone 2 in progress - phase A
+(microdrive, read-only) working.** The QL boots end-to-end on real MEGA65 R6
+hardware: RAM check, boot logo, F1-F4 screen, 10-second timeout (or F1/F2/F5
+response), and into SuperBASIC with a working keyboard - both Minerva and
+MGE tested. System ROM loads either automatically from a fixed SD card path
+at boot or manually via the Shell's Options menu, with the core
+auto-resetting itself after any manual ROM change. On top of that, a single
+microdrive (`mdv1_`) can now be loaded from a `.MDV` image via the Shell's
+Options menu and read reliably by QDOS/Minerva - `DIR mdv1_` and `LRUN
+mdv1_xxx` both tested working on real hardware, including sustained,
+continuous reads of full-size programs. See `.research/PORTING-PLAN.md` and
+`DECISIONES.md` (in the parent directory) for the full, detailed log of the
+whole investigation and every decision made along the way - the microdrive
+read path in particular took a long, genuinely instructive debugging
+journey (see the "Microdrive image format" note below for the headline
+lesson).
+
+Milestone 2 continues towards: microdrive write support, moving the
+microdrive buffer from BRAM to HyperRAM, expanding from 1 to up to 4
+simultaneous microdrives, memory expansion (640 KB / 4096 KB), and CPU speed
+switching (16 MHz / 24 MHz / Full) - see `.research/PORTING-PLAN.md` section
+7 for the current milestone order and scope of each remaining phase.
 
 Milestone 1 scope
 -----------------
@@ -38,17 +51,56 @@ Milestone 1 scope
   keyboard has in that position. Full key-by-key rationale in
   `.research/keyboard-mapping-design.md`.
 
-Not yet in scope for Milestone 1: microdrive (`.MDV`, planned as Milestone
-2), QL-SD (`QXL.WIN`), memory/CPU-speed expansion, mouse, or
-GoldCard/SMSQ,E support - these are planned for later milestones (see
-`.research/PORTING-PLAN.md` section 7 for the current milestone order).
+Not yet in scope for Milestone 1: microdrive (`.MDV`, now underway as
+Milestone 2, see below), QL-SD (`QXL.WIN`), memory/CPU-speed expansion,
+mouse, or GoldCard/SMSQ,E support - these are planned for later milestones
+(see `.research/PORTING-PLAN.md` section 7 for the current milestone
+order).
+
+Milestone 2 scope (in progress)
+--------------------------------
+
+- **Microdrive, phase A (done): one drive, read-only.** Load a `.MDV` image
+  (QLAY format, exactly 174930 bytes) as `mdv1_` via the Shell's Options
+  menu; `DIR mdv1_` and `LRUN mdv1_xxx` both work reliably, including full,
+  sustained reads of real programs. `mdv.v` (the microdrive controller
+  itself) is unmodified upstream MiSTer-devel code, faithfully emulating
+  real 1984 microdrive hardware bit-serially at 200 kbit/s.
+- Still to come: write support, moving the microdrive buffer to HyperRAM,
+  expanding to 2-4 simultaneous drives, memory expansion, CPU speed
+  switching.
+
+### Microdrive image format: it must be a genuinely valid QLAY `.mdv`
+
+QDOS/Minerva validates every microdrive sector against a real checksum as it
+reads it - just like it would on real hardware. This port's `mdv.v` emulates
+the microdrive at the same low, bit-serial level real hardware used, so it's
+just as strict as the real thing: **if a `.MDV` image's checksums don't
+match its data, QDOS will refuse to read it**, exactly as a real QL would
+reject a damaged cartridge. This bit us hard during development - several
+downloaded/re-authored test images turned out to have corrupted sector or
+block-header checksums (usually because whatever tool wrote a file onto a
+blank image never recalculated the checksum for the header it overwrote),
+which looked for a long time like a hardware/timing bug because higher-level
+emulators (that model the microdrive as a filesystem, or intercept QDOS's
+own calls, rather than emulating the real bit-serial protocol) never
+noticed the corruption and loaded the same files without complaint.
+
+If a `.MDV` doesn't load - `DIR` never finishing, or a `LRUN`'d program
+hanging partway through - **check the image before suspecting the core**:
+`Fase0/tools/mdvcheck.py` (not in this repository) validates every sector's
+checksums against the real Minerva algorithm and reports exactly where a
+`.mdv` is broken; `mdvrepair.py` can fix checksum-only corruption without
+touching any data. See `DECISIONES.md`'s microdrive sections for the full
+story.
 
 Getting the compiled core
 --------------------------
 
 This repository is source only - no compiled `.cor` file and no system ROM
 (Minerva/MGE/JS are copyrighted Sinclair/AMS software, not redistributable
-here). A ready-to-use Milestone 1 `.cor` for MEGA65 R6 is available in the
+here). A ready-to-use `.cor` for MEGA65 R6 (Milestone 1 + Milestone 2 phase
+A) is available in the
 [MEGA65 community on Discord](https://discord.com/channels/719326990221574164/1177364456896999485)
 - ask there if you'd like a copy. Building it yourself from source requires
 your own copy of a QL system ROM placed on the SD card (see Milestone 1
