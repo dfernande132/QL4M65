@@ -484,6 +484,7 @@ begin
          -- core's clock domain (see its own header), same pattern as
          -- QL-SD's own (reverted) qnice_qlsd_* ports had.
          qnice_clk_i          => qnice_clk_i,
+         qnice_rst_i          => qnice_rst_i,
          qnice_mdv1_addr_i    => qnice_dev_addr_i,
          qnice_mdv1_data_i    => qnice_dev_data_i,
          qnice_mdv1_ce_i      => qnice_mdv1_ce,

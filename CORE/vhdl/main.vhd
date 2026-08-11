@@ -88,6 +88,11 @@ entity main is
       -- bus cycle while a byte is still crossing into the core clock domain
       -- (see .research/microdrive-read-design.md, section A.2).
       qnice_clk_i             : in  std_logic;
+      -- QL4M65 (M2017): mdv1_loader_qnice's own reset - see that process's
+      -- own comment for why this is needed (neither loader-FSM process had
+      -- any reset path at all, so a mid-handshake glitch could wedge the
+      -- loader permanently, recoverable only by a full power cycle).
+      qnice_rst_i             : in  std_logic;
       qnice_mdv1_addr_i       : in  std_logic_vector(27 downto 0);
       qnice_mdv1_data_i       : in  std_logic_vector(15 downto 0);
       qnice_mdv1_ce_i         : in  std_logic;
@@ -801,7 +806,20 @@ begin
    mdv1_loader_qnice : process (qnice_clk_i)
    begin
       if rising_edge(qnice_clk_i) then
-         if mdv1_ld_busy = '0' then
+         if qnice_rst_i = '1' then
+            -- QL4M65 (M2017): this process had NO reset path at all before
+            -- (same for its core-domain counterpart, mdv1_loader_core) -
+            -- if the xpm_cdc_handshake protocol ever got interrupted
+            -- mid-transaction (e.g. by a core reset landing exactly
+            -- between the two sides' handshake steps), mdv1_ld_busy could
+            -- stay wedged at '1' forever, permanently asserting
+            -- qnice_mdv1_wait_o and hanging every subsequent load attempt
+            -- - recoverable only by a full power cycle (FPGA
+            -- reconfiguration), matching exactly what was observed on
+            -- hardware after M2016. See DECISIONES.md's M2017 section.
+            mdv1_ld_busy <= '0';
+            mdv1_ld_send <= '0';
+         elsif mdv1_ld_busy = '0' then
             if qnice_mdv1_ce_i = '1' and qnice_mdv1_we_i = '1' then
                if qnice_mdv1_addr_i(0) = '0' then
                   -- even address: first byte of the pair, just latch it
@@ -860,6 +878,13 @@ begin
       if rising_edge(clk_main_i) then
          mdv1_dl_wr    <= '0';
 
+         if reset = '1' then
+            -- QL4M65 (M2017): see mdv1_loader_qnice's own comment - this
+            -- side of the handshake had no reset path either.
+            mdv1_cdc_dest_ack <= '0';
+            mdv1_ld_state     <= LD_IDLE;
+         else
+
          case mdv1_ld_state is
             when LD_IDLE =>
                if mdv1_cdc_dest_req = '1' then
@@ -876,6 +901,7 @@ begin
                   mdv1_ld_state     <= LD_IDLE;
                end if;
          end case;
+         end if;
       end if;
    end process mdv1_loader_core;
 
