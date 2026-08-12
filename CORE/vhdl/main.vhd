@@ -195,8 +195,12 @@ signal audio_bit    : std_logic;                      -- ZX8302's single-bit bee
 -- rx_ready pulses would. There's no real "microdrive audio" signal from
 -- zx8302 to reuse - its own `audio` output is entirely the IPC/keyboard
 -- beeper (audio <= ipc_audio_i, zx8302.v:230), unrelated to the drive.
-constant MDV1_MOTOR_HALF_PERIOD : natural := 210000;  -- 84MHz / (2*210000) ~= 200Hz hum
-constant MDV1_MOTOR_AMPLITUDE   : natural := 3000;    -- well under 32767, leaves headroom for the beeper
+-- QL4M65 (M2021): lowered pitch (~200Hz -> ~100Hz, one octave down) and
+-- amplitude (3000 -> 1200) per the user's own listening test on hardware
+-- - "más grave y más bajo" - purely a mix/tuning tweak, no change to the
+-- gap-gated rhythm from M2020.
+constant MDV1_MOTOR_HALF_PERIOD : natural := 420000;  -- 84MHz / (2*420000) ~= 100Hz hum
+constant MDV1_MOTOR_AMPLITUDE   : natural := 1200;    -- quieter background hum
 signal mdv1_motor_cnt   : natural range 0 to MDV1_MOTOR_HALF_PERIOD - 1 := 0;
 signal mdv1_motor_tone  : std_logic := '0';
 signal beeper_audio     : signed(15 downto 0);
