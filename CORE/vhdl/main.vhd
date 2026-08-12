@@ -732,10 +732,23 @@ begin
 
    -- QL4M65 (M2019): microdrive motor hum, gated on mdv_sel(0), see the
    -- signal declarations' header comment above.
+   -- QL4M65 (M2020): AExp's own Amiga floppy "click" turned out to be
+   -- genuine Kickstart/trackdisk.device audio, passed through Paula
+   -- unmodified (doc/m2m/exceptions.md-equivalent research confirmed
+   -- there's no M2M framework sound feature, nor an AExp technique, to
+   -- copy) - and real microdrives don't step like a floppy anyway (DC tape
+   -- motor, not a stepper), so a continuous hum is the honest analogue,
+   -- not a click. The M2019 version was gated purely on mdv_sel(0), giving
+   -- one unbroken tone for as long as a channel was open - flat and
+   -- "monotonous" per the user. Gating on mdv1_gap as well ties the sound
+   -- to mdv.v's own real timing (header ~1.1ms, gap ~2.8ms, data ~26ms,
+   -- see mdv.v's own gap-timing comments) instead of a single held note,
+   -- giving it real rhythm without inventing anything not backed by
+   -- actual drive activity.
    mdv1_motor_snd : process (clk_main_i)
    begin
       if rising_edge(clk_main_i) then
-         if mdv_sel(0) = '0' then
+         if mdv_sel(0) = '0' or mdv1_gap = '1' then
             mdv1_motor_cnt  <= 0;
             mdv1_motor_tone <= '0';
          elsif mdv1_motor_cnt = MDV1_MOTOR_HALF_PERIOD - 1 then
