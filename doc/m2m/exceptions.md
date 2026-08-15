@@ -202,10 +202,31 @@ support this.
 playback order, which only matches physical sector order when the tape
 isn't being replayed backwards.
 
-Etapa 1 (`M2022`) only wires the RTL path end to end - no dirty-sector
-bitmap, no QNICE-side flush yet (see `.research/microdrive-write-design.md`
-section 8 for the full 4-stage rollout: `M2022` RTL path, `M2023` dirty
-bitmap + QNICE read-back, `M2024` menu item + SD flush, `M2025` hardening).
+Etapa 1 (`M2022`, fixed in `M2023` - see below) only wires the RTL path end
+to end - no dirty-sector bitmap, no QNICE-side flush yet (see
+`.research/microdrive-write-design.md` section 8 for the design's original
+4-stage rollout sketch; actual build numbers drift from that sketch
+whenever a stage needs more than one hardware-tested build, same as
+happened repeatedly during phase A - `DECISIONES.md` has the real sequence).
+
+**`M2023`: `wr_strobe` needs its own edge detection inside `mdv.v` too, not
+just in `zx8302.v`.** `M2022` compiled clean and passed the read-regression
+battery on real hardware, but `SAVE` never terminated - QDOS retries data
+blocks without limit, so a `SAVE` that never returns is the signature of a
+verify-after-write mismatch. Root cause: `mdv1_wr_strobe` is generated
+inside `zx8302.v`'s `cen`-gated block (`cen` is the ~7.5MHz CPU bus enable,
+not `clk` itself) - once set, the register holds its value at full `clk`
+rate (84MHz) until the *next* `cen` tick, roughly 11 `clk` cycles later.
+`mdv.v`'s own write accumulator samples `wr_strobe` in a plain
+`always @(posedge clk)`, **not gated by `ce`** (unlike the rest of `mdv.v`'s
+read state machine, which is `if(ce) begin ... end` throughout and never
+had this problem) - so without its own edge detection, it counted roughly
+11 bytes for every real byte the CPU wrote, corrupting the word-index
+mapping from the very first byte. Same class of bug as "risk R1" in the
+design doc, one level deeper than the edge detection already added in
+`zx8302.v` for that risk. Fixed with the identical pattern one level in:
+a registered `wr_strobe_prev`, advancing the accumulator only on
+`wr_strobe && !wr_strobe_prev`.
 
 ### `rtl/zx8302.v`: `pc_tdata` ($18022) write decoding (Milestone 2 phase B, M2022)
 
