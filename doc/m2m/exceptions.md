@@ -114,8 +114,10 @@ drives the external `mdv` instance's own `dl_addr`/`dl_data`/`download`/
 `mdv_sel` (drive selection from `mctrl`) and `led` stay untouched, `mdv_sel`
 is now also exposed as `mdv_sel_o` for `main.vhd`'s own use.
 
-`mdv.v` itself is instantiated **unmodified** (same policy as `ipc.vhd`
-around the real T48 core) - its own internal `dpram #(17, 88000) vram`
+`mdv.v` itself is instantiated **unmodified through Milestone 2 phase A**
+(same policy as `ipc.vhd` around the real T48 core) - see the M2022 section
+below for its first real modification, once write support (phase B)
+started. Its own internal `dpram #(17, 88000) vram`
 gets a Vivado-clean replacement (`CORE/vhdl/mdv_dpram.vhd`, backed by
 `dualport_2clk_ram_byteenable`/BRAM for phase A, matching the module name
 exactly so Vivado's mixed-language elaboration resolves it - same pattern
@@ -153,7 +155,82 @@ session). Fixed in `main.vhd` by deriving `mdv1_download` from a new
 `crts-and-roms.asm` use to track an in-progress vs. completed load),
 synchronized into `clk_main_i` with a plain 2-FF synchronizer (sufficient
 for a single level signal, unlike the word-at-a-time loader data which
-needs the full `xpm_cdc_handshake`). `mdv.v` itself remains unmodified.
+needs the full `xpm_cdc_handshake`). `mdv.v` itself remains unmodified as
+of M2011 (see M2022 below for its first real modification).
+
+### Milestone 2 phase B (M2022): `rtl/mdv.v` write channel - first modification of `mdv.v` itself
+
+Everything above this point left `mdv.v` byte-for-byte identical to
+upstream (confirmed against `MiSTer-devel/QL_MiSTer` master - see
+`.research/microdrive-write-recon.md` section 1). `SAVE` support broke that
+streak: `mdv.v` gained a real write channel.
+
+New ports: `wr_en` (level, `mctrl[2]`/`pc..writ`, already routed through
+`zx8302.v`), `wr_strobe` (1-cycle-of-`clk` pulse per byte written to
+`$18022`), `wr_data[7:0]`, `sector[7:0]` (output - which physical 686-byte
+sector is under the "head" right now, 0..254), `wr_commit` (output, 1-cycle
+pulse per confirmed 16-bit word), `dl_q[15:0]` (output - read-back of the
+buffer's port A, for the eventual QNICE-side flush).
+
+Design principle (`.research/microdrive-write-design.md`): writing is the
+positional mirror of reading. Each incoming 16-bit word is written to
+`region_base + word_index`, where `region_base` is `mem_addr` captured
+continuously while the last gap was active (`mem_addr` doesn't advance
+during a gap, so it's already the address of the region that's about to
+start) - never derived from whenever the byte happens to arrive in real
+time. Recon phase found the CPU's write timing lands the first byte
+~11 words *into* the data region if taken at face value (`.research/
+microdrive-write-recon.md` section 5), which is exactly why the anchor has
+to be structural, not temporal. `tx_empty` stays hardcoded `1'b0` (never
+signals "buffer full") on purpose: since writes are positional rather than
+real-time, nothing is lost by letting the CPU run ahead of the tape's own
+timing, and a real level-based `txfl` would add real complexity for zero
+benefit in this MVP.
+
+Port A of the internal `dpram` (`mdv_dpram.vhd`) is now a priority mux:
+write-confirmation (`wr_do`) beats the QNICE loader/flush
+(`dl_wr`/`dl_addr`/`dl_data`) - in practice they never collide during a
+load (load and playback are mutually exclusive), but a flush can genuinely
+overlap with a live write from the QL, and losing a flush cycle (QNICE
+retries, it's just waiting) is preferable to losing a word the QL actually
+wrote. `mdv_dpram.vhd`'s `dpram` entity gained the `q_a` output port
+(previously `a_q_o => open`, nothing ever needed to read port A back) to
+support this.
+
+`sector` assumes `reverse = '0'` (true in this port today - see
+`main.vhd`'s `i_mdv1` instantiation); it counts gap-to-gap regions in
+playback order, which only matches physical sector order when the tape
+isn't being replayed backwards.
+
+Etapa 1 (`M2022`) only wires the RTL path end to end - no dirty-sector
+bitmap, no QNICE-side flush yet (see `.research/microdrive-write-design.md`
+section 8 for the full 4-stage rollout: `M2022` RTL path, `M2023` dirty
+bitmap + QNICE read-back, `M2024` menu item + SD flush, `M2025` hardening).
+
+### `rtl/zx8302.v`: `pc_tdata` ($18022) write decoding (Milestone 2 phase B, M2022)
+
+`$18022` (`pc_tdata`, the microdrive transmit-data register) was never
+decoded before - writes to it were silently dropped since the very first
+port. Added: `mdv_wr_data_o`/`mdv_wr_strobe_o` (byte + strobe, decoded from
+`cpu_addr == 2'b11` with `cpu_uds`, the same address-decode pattern already
+used for `mctrl`/`pc_intr`) and `mdv_wr_en_o`/`mdv_er_en_o` (`mctrl[2]`/
+`mctrl[3]`, `pc..writ`/`pc..eras` - already captured into `mctrl` but never
+exposed before).
+
+Edge detection is mandatory here and easy to get wrong: a single 68000
+`move.b` holds `cpu_sel`/`cpu_wr`/`cpu_uds`/`cpu_addr` stable across
+several `cen` ticks (one bus cycle spans several ticks of the bus clock
+enable), so gating the strobe purely on those conditions would fire
+multiple pulses - and write duplicate bytes into the microdrive buffer -
+for every single write instruction. Fixed with a registered
+`prev_mdv_wr_sel` and pulsing only on its rising edge, inside the same
+`cen`-gated always block that already handles `mctrl` (see
+`.research/microdrive-write-design.md` section 4.2 and its "risk R1").
+
+`pc_tctrl` ($18002) is still not decoded - out of scope until/unless a
+serial port is ever implemented (it would be needed to disambiguate
+`pc_tdata`'s two possible destinations). Noted here so nobody assumes it
+already exists.
 
 ### The `ipl` assignment in `rtl/zx8302.v` (interrupt lines)
 

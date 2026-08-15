@@ -17,6 +17,13 @@
 -- can shrink without modifying mdv.v itself, even though a real .MDV image
 -- only needs ~87465 words (174930 bytes / 2) of that.
 --
+-- Milestone 2 phase B (write support) - see .research/microdrive-write-design.md
+-- section 3.5. Port A gains a read output (q_a, wired to a_q_o - previously
+-- "open" since only the loader ever wrote through port A and nothing ever
+-- needed to read it back). mdv.v's own instantiation connects it by name as
+-- q_a, so port order below doesn't matter, but the entity and this instance
+-- must agree on the name.
+--
 -- QL4M65 port done by Jose Daniel Fernandez Santos (dfsantos) in 2026 and
 -- licensed under GPL v3
 ---------------------------------------------------------------------------------------------------------
@@ -38,7 +45,9 @@ entity dpram is
 
       rdclock   : in  std_logic;
       rdaddress : in  std_logic_vector(ADDRWIDTH - 1 downto 0);
-      q         : out std_logic_vector(15 downto 0)
+      q         : out std_logic_vector(15 downto 0);
+
+      q_a       : out std_logic_vector(15 downto 0)  -- QL4M65 fase B: lectura de puerto A, para el volcado a QNICE
    );
 end entity dpram;
 
@@ -56,7 +65,7 @@ begin
          a_data_i       => data,
          a_byteenable_i => byteena_a,
          a_wren_i       => wren,
-         a_q_o          => open,
+         a_q_o          => q_a,
 
          b_clk_i        => rdclock,
          b_address_i    => rdaddress,

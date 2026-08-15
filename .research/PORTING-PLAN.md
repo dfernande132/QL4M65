@@ -14,13 +14,13 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-11 — RESUELTO: el bug de lectura sostenida de mdv1 nunca estuvo en el RTL, las imágenes de prueba (CHESS.MDV, Quill2.mdv, etc.) estaban corruptas de origen)
+## 0. Estado actual del proyecto (actualizado: 2026-08-15 — Milestone 2 fase A cerrada y publicada; fase B (escritura) en curso, `M2022` compilado y pendiente de prueba en hardware)
 
-**Ronda 2 del análisis externo (`E:\QL_MEGA65\Fase0\mdv1-sustained-read-analysis-round2.md`) cierra el caso.** Un verificador que simula `mdv.v` y aplica el checksum real de Minerva (`Fase0/tools/mdvcheck.py`) demuestra correlación perfecta: toda imagen que funcionaba está limpia, toda la que fallaba tiene checksums corruptos de origen (`CHESS.MDV`: 133 cabeceras de bloque con el valor de un sector vacío; `Quill2.mdv`: las 255 cabeceras de sector mal, por eso ni el `DIR` iba). El M2016/M2017 (desactivar contención + arreglar el reset del cargador) **sí funcionaron** — `maxfail=7` solo protege el sector de mapa, no los bloques de datos (sin límite de reintentos), así que al dejar de fallar el mapa el síntoma cambió de "error tras 7 vueltas" a "cuelgue indefinido" en vez de desaparecer. Herramientas y 4 imágenes reparadas en `Fase0/tools/` y `E:\QL_MEGA65\MDV\reparadas\`.
+**Milestone 2 fase A (microdrive, solo lectura): cerrada en `M2018`, publicada en GitHub.** El bug de lectura sostenida (investigación `M2004`-`M2017`) nunca estuvo en el RTL — las imágenes de prueba (`CHESS.MDV`, `Quill2.mdv`, etc.) estaban corruptas de origen, confirmado simulando `mdv.v` + el checksum real de Minerva (`Fase0/tools/mdvcheck.py`). `M2019`-`M2021` añadieron y afinaron un zumbido sintetizado del motor. **Regla vigente: pasar `mdvcheck.py` a cualquier `.mdv` antes de usarla como caso de prueba en hardware.** Detalle completo de toda la investigación en `DECISIONES.md`.
 
-**Regla nueva: pasar `mdvcheck.py` a cualquier `.mdv` antes de usarla como caso de prueba.**
+**Milestone 2 fase B (escritura de microdrive): en curso.** Fase 1 (recon) y fase 2 (diseño) cerradas — `.research/microdrive-write-recon.md` y `.research/microdrive-write-design.md`. Plan de 4 builds (diseño §8): `M2022` camino RTL completo (hecho, compilado, pendiente de hardware), `M2023` bitmap de sucios + lectura desde QNICE, `M2024` ítem de menú + volcado a SD, `M2025` endurecimiento.
 
-**Próximo build (pendiente de confirmar P1/P2 en hardware con `CHESS_fix.mdv`): sustituir `enable=>'0'` (diagnóstico) por el arreglo fino y definitivo** — `enable=>'1'` + `cpu_rom => cpu_rom or ql_io`, restaurando la fidelidad de velocidad de la QL. Detalle completo en `DECISIONES.md`.
+**`M2022`: primera modificación real de `rtl/mdv.v`** (puerto de escritura, anclaje posicional `region_base`/`region_state`, contador de sector, mux de RAM) + decodificación de `pc_tdata` en `zx8302.v` (con detección de flanco, riesgo R1 del diseño) + cableado intra-dominio en `main.vhd`. Compila limpio en el dominio que importa (`main_clk`: `WNS=+0.886 ns`, `WHS=+0.053 ns`, 0 endpoints fallando); el `WHS` global negativo (`-0.118 ns`) está aislado en `hr_rwds` (HyperRAM, sin usar todavía — mismo hallazgo ya documentado en `M1031`, confirmado que ni el hold-fix dedicado de Vivado puede cerrarlo). Empaquetado como `QL4M65-CoreQL-M2022_r6.cor`. Detalle completo, incluida la relevancia para cuando Milestone 3 active HyperRAM de verdad, en `DECISIONES.md`.
 
 ---
 

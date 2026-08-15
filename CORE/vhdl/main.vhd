@@ -248,6 +248,21 @@ signal mdv1_dl_data   : std_logic_vector(15 downto 0);
 signal mdv1_download  : std_logic;
 signal mdv1_dl_wr     : std_logic;
 
+---------------------------------------------------------------------------
+-- QL4M65 (Milestone 2 phase B, M2022): microdrive write channel, CPU ->
+-- zx8302.v -> mdv1. Etapa 1 del diseño (.research/microdrive-write-design.md
+-- section 3-5): sin persistencia todavia (bitmap de sucios y volcado a
+-- QNICE llegan en M2023/M2024). Los cuatro caminos son intra-dominio
+-- (clk_main_i): no hace falta ningun xpm_cdc_* aqui.
+---------------------------------------------------------------------------
+signal mdv1_wr_data   : std_logic_vector(7 downto 0);
+signal mdv1_wr_strobe : std_logic;
+signal mdv1_wr_en     : std_logic;
+signal mdv1_er_en     : std_logic;
+signal mdv1_sector    : std_logic_vector(7 downto 0);
+signal mdv1_wr_commit : std_logic;
+signal mdv1_dl_q      : std_logic_vector(15 downto 0);
+
 -- QL4M65 (M2011): qnice_mdv1_loading_i (QNICE clock domain) synchronized
 -- into clk_main_i via xpm_cdc_single (a genuine, unrelated-clocks CDC
 -- crossing - a hand-rolled 2-FF process here left Vivado analyzing it as
@@ -692,6 +707,12 @@ begin
          mdv1_tx_empty_i  => mdv1_tx_empty,
          mdv1_rx_ready_i  => mdv1_rx_ready,
          mdv1_byte_i      => mdv1_byte,
+
+         -- QL4M65 fase B (M2022): canal de escritura hacia mdv1
+         mdv_wr_data_o    => mdv1_wr_data,
+         mdv_wr_strobe_o  => mdv1_wr_strobe,
+         mdv_wr_en_o      => mdv1_wr_en,
+         mdv_er_en_o      => mdv1_er_en,
          led           => drive_led_o,
 
          audio         => audio_bit,
@@ -1038,7 +1059,17 @@ begin
          download  => mdv1_download,
          dl_addr   => mdv1_dl_addr,
          dl_data   => mdv1_dl_data,
-         dl_wr     => mdv1_dl_wr
+         dl_wr     => mdv1_dl_wr,
+         dl_q      => mdv1_dl_q,
+
+         -- QL4M65 fase B (M2022): canal de escritura zx8302 -> mdv1. Van en
+         -- la direccion CONTRARIA a gap/tx_empty/rx_ready/dout (que si pasan
+         -- por mdv1_output_reg, M2015) - no deben pasar por ese registro.
+         wr_en     => mdv1_wr_en,
+         wr_strobe => mdv1_wr_strobe,
+         wr_data   => mdv1_wr_data,
+         sector    => mdv1_sector,
+         wr_commit => mdv1_wr_commit
       ); -- i_mdv1
 
    -- QL4M65 (M2015): register mdv1's raw outputs one clk_main_i cycle
