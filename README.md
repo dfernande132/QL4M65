@@ -97,14 +97,20 @@ story.
 Getting the compiled core
 --------------------------
 
-This repository is source only - no compiled `.cor` file and no system ROM
-(Minerva/MGE/JS are copyrighted Sinclair/AMS software, not redistributable
-here). A ready-to-use `.cor` for MEGA65 R6 (Milestone 1 + Milestone 2 phase
-A) is available in the
+This repository is source only - no compiled `.cor` file is committed here.
+A ready-to-use `.cor` for MEGA65 R6 (Milestone 1 + Milestone 2 phase A),
+together with a Minerva system ROM, is published on the
+[GitHub Releases page](https://github.com/dfernande132/QL4M65/releases) - see the instructions file bundled
+with each release for exactly where each file goes on the SD card. Minerva
+and TK2 are GPL/GNU-licensed and can be redistributed, which is why they're
+included; other QL ROMs (MGE, JS, ...) are not, since their licensing is
+unclear or restrictive - for those, see the
+[Sinclair QL ROM archive](https://sinclairql.net/djw/qlrom/index.html),
+which has the full set. The
 [MEGA65 community on Discord](https://discord.com/channels/719326990221574164/1177364456896999485)
-- ask there if you'd like a copy. Building it yourself from source requires
-your own copy of a QL system ROM placed on the SD card (see Milestone 1
-scope above).
+is also a good place to ask if you're missing something. Building the core
+yourself from source requires your own copy of a QL system ROM placed on
+the SD card (see Milestone 1 scope above).
 
 Repository layout
 ------------------

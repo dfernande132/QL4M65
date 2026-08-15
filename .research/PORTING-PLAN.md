@@ -22,6 +22,8 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 **`M2022`: primera modificación real de `rtl/mdv.v`** (puerto de escritura, anclaje posicional `region_base`/`region_state`, contador de sector, mux de RAM) + decodificación de `pc_tdata` en `zx8302.v` (con detección de flanco, riesgo R1 del diseño) + cableado intra-dominio en `main.vhd`. Compila limpio en el dominio que importa (`main_clk`: `WNS=+0.886 ns`, `WHS=+0.053 ns`, 0 endpoints fallando); el `WHS` global negativo (`-0.118 ns`) está aislado en `hr_rwds` (HyperRAM, sin usar todavía — mismo hallazgo ya documentado en `M1031`, confirmado que ni el hold-fix dedicado de Vivado puede cerrarlo). Empaquetado como `QL4M65-CoreQL-M2022_r6.cor`. Detalle completo, incluida la relevancia para cuando Milestone 3 active HyperRAM de verdad, en `DECISIONES.md`.
 
+**Housekeeping de repositorio en paralelo (otra conversación, sin tocar RTL ni `.research/microdrive-write-*`): `AUTHORS` relleno con datos reales, `CHANGELOG.md` nuevo, y preparación (no publicación aún) de un GitHub Release para el `.cor` de fase A (`M2021`) con Minerva 1.98+QLSD, TK2 y un `.mdv` en blanco verificado con `mdvcheck.py`.** Detalle completo en `DECISIONES.md`.
+
 ---
 
 ## 0.old. Estado anterior (obsoleto, ver arriba — dejado por referencia histórica de la investigación M2004-M2017)

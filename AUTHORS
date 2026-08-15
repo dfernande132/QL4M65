@@ -1,42 +1,39 @@
-YOUR PROJECT NAME for MEGA65 aka GITHUB REPO SHORT NAME
-=======================================================
+QL4M65 for MEGA65 aka CoreQL
+============================
 
-done in YEAR by YOUR NAME
+done in 2025-2026 by Jose Daniel Fernandez Santos (dfsantos)
 
-YOUR WEBSITE
-YOUR GITHUB SITE
+https://github.com/dfsantos
 
-REPO SHORT NAME is licensed under the terms of GNU/GPL v3, for more information please read the file LICENSE
-Parts of REPO SHORT NAME are licensed under other Free-software licenses as described in the source code
+QL4M65 (CoreQL) is licensed under the terms of GNU/GPL v3, for more information please read the file LICENSE
+Parts of QL4M65 are licensed under other Free-software licenses as described in the source code
 
-GITHUB REPO SHORT NAME:
+QL4M65 / CoreQL:
 -----------------------
 
-  GITHUB REPO SHORT NAME is a port of MISTER'S REPO SHORT NAME
+  QL4M65 is a Sinclair QL core for the MEGA65, ported on top of the
+  MiSTer2MEGA65 framework and built on the MiSTer-devel QL_MiSTer core.
+  The MEGA65 port itself (this repository), including the MiSTer2MEGA65
+  integration, the microdrive emulation, and all MEGA65-specific work,
+  was done by Jose Daniel Fernandez Santos (dfsantos), with the
+  assistance of Claude Code (Anthropic) as an AI pair-programming tool
+  throughout the design, debugging and documentation work.
+
+  QL4M65 is a port of MiSTer-devel's QL_MiSTer
       done by the MiSTer Development Team
-      Original GitHub Repository: https://github.com/MiSTer-devel/MISTER-REPO-LINK
+      Original GitHub Repository: https://github.com/MiSTer-devel/QL_MiSTer
       Significant contributors:
-      * NAME THE MAIN
-      * CONTRIBUTORS
-      * ON MiSTer's SIDE
+      * the MiSTer-devel QL_MiSTer core team
 
-  MISTER'S REPO SHORT NAME is a port of MiST's MiST NAME/OTHER SOURCE IN CASE MiSTer ported it from MIST/OTHER SOURCE
-      done by the MiST Development Team
-      Original GitHub Repository: https://github.com/mist-devel/MIST-REPO-LINK OR OTHER SOURCE
-      Significant contributors:
-      * NAME THE MAIN
-      * CONTRIBUTORS
-      * ON MiST's SIDE (OR OTHER SOURCE)
+  QL_MiSTer is itself based on decades of Sinclair QL emulation and
+  reverse-engineering work by the wider Sinclair QL community, including
+  the Minerva ROM (by Laurence Reeves / Tony Tebby and the Minerva team)
+  and QDOS/related system software originally by Sinclair Research and
+  Tony Tebby.
 
-  LIST SOME MORE SIGNIFICANT / MAIN AUTHERS OF SUBMODULES
-  HAVE A LOOK AT THIS EXAMPLE HOW TO: https://github.com/sy2002/gbc4mega65/blob/master/AUTHORS
-
-Other than that and my own work, REPO SHORT NAME uses:
+Other than that and my own work, QL4M65 uses:
 ------------------------------------------------------
 
-DO NOT FORGET TO CREDIT EVERYTHING YOU USE FROM OTHER PEOPLE HERE
-THE FOLLOWING LIST NEEDS ALWAYS TO BE PART OF YOUR LIST:
-  
   * MiSTer2MEGA65 by The MiSTer2MEGA65 Development Team
     https://github.com/sy2002/MiSTer2MEGA65
 
