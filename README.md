@@ -6,28 +6,31 @@ A port of the **Sinclair QL** to the **MEGA65**, built on top of the
 based on the [MiSTer-devel/QL_MiSTer](https://github.com/MiSTer-devel/QL_MiSTer)
 core (68008/`fx68k` CPU, `zx8301` video ULA, `zx8302` I/O ULA).
 
-**Current status: Milestone 1 complete. Milestone 2 in progress - phase A
-(microdrive, read-only) working.** The QL boots end-to-end on real MEGA65 R6
-hardware: RAM check, boot logo, F1-F4 screen, 10-second timeout (or F1/F2/F5
-response), and into SuperBASIC with a working keyboard - both Minerva and
-MGE tested. System ROM loads either automatically from a fixed SD card path
-at boot or manually via the Shell's Options menu, with the core
-auto-resetting itself after any manual ROM change. On top of that, a single
-microdrive (`mdv1_`) can now be loaded from a `.MDV` image via the Shell's
-Options menu and read reliably by QDOS/Minerva - `DIR mdv1_` and `LRUN
-mdv1_xxx` both tested working on real hardware, including sustained,
-continuous reads of full-size programs. See `.research/PORTING-PLAN.md` and
+**Current status: Milestone 1 complete. Milestone 2 in progress - microdrive
+read (phase A) and write (phase B, etapa 1) both working.** The QL boots
+end-to-end on real MEGA65 R6 hardware: RAM check, boot logo, F1-F4 screen,
+10-second timeout (or F1/F2/F5 response), and into SuperBASIC with a working
+keyboard - both Minerva and MGE tested. System ROM loads either
+automatically from a fixed SD card path at boot or manually via the Shell's
+Options menu, with the core auto-resetting itself after any manual ROM
+change. On top of that, a single microdrive (`mdv1_`) can be loaded from a
+`.MDV` image via the Shell's Options menu and both read and written by
+QDOS/Minerva - `DIR mdv1_`/`LRUN mdv1_xxx` (sustained, continuous reads of
+full-size programs) and `SAVE mdv1_xxx`/reload round-trips both tested
+working on real hardware. See `.research/PORTING-PLAN.md` and
 `DECISIONES.md` (in the parent directory) for the full, detailed log of the
-whole investigation and every decision made along the way - the microdrive
-read path in particular took a long, genuinely instructive debugging
-journey (see the "Microdrive image format" note below for the headline
-lesson).
+whole investigation and every decision made along the way - both the
+microdrive read path and the write path took long, genuinely instructive
+debugging journeys (see the "Microdrive image format" note below for the
+read-side headline lesson).
 
-Milestone 2 continues towards: microdrive write support, moving the
-microdrive buffer from BRAM to HyperRAM, expanding from 1 to up to 4
-simultaneous microdrives, memory expansion (640 KB / 4096 KB), and CPU speed
-switching (16 MHz / 24 MHz / Full) - see `.research/PORTING-PLAN.md` section
-7 for the current milestone order and scope of each remaining phase.
+Milestone 2 continues towards: persisting microdrive writes back to the SD
+card's `.mdv` file (currently they only live in the FPGA's own buffer until
+reload), moving the microdrive buffer from BRAM to HyperRAM, expanding from
+1 to up to 4 simultaneous microdrives, memory expansion (640 KB / 4096 KB),
+and CPU speed switching (16 MHz / 24 MHz / Full) - see
+`.research/PORTING-PLAN.md` section 7 for the current milestone order and
+scope of each remaining phase.
 
 Milestone 1 scope
 -----------------
@@ -66,9 +69,16 @@ Milestone 2 scope (in progress)
   sustained reads of real programs. `mdv.v` (the microdrive controller
   itself) is unmodified upstream MiSTer-devel code, faithfully emulating
   real 1984 microdrive hardware bit-serially at 200 kbit/s.
-- Still to come: write support, moving the microdrive buffer to HyperRAM,
-  expanding to 2-4 simultaneous drives, memory expansion, CPU speed
-  switching.
+- **Microdrive, phase B, etapa 1 (done): write support (`SAVE`) on an
+  already-formatted cartridge.** `SAVE mdv1_xxx` followed by `DIR mdv1_` and
+  `LOAD mdv1_xxx` round-trips correctly on real hardware, verified by
+  QDOS/Minerva's own write-then-verify logic. Writes only land in the FPGA's
+  own buffer for now - persisting them back to the SD card's `.mdv` file is
+  the next etapa, not implemented yet, so a reload or power cycle discards
+  anything written since the image was last loaded.
+- Still to come: persisting writes to the SD card, moving the microdrive
+  buffer to HyperRAM, expanding to 2-4 simultaneous drives, memory
+  expansion, CPU speed switching.
 
 ### Microdrive image format: it must be a genuinely valid QLAY `.mdv`
 
@@ -98,8 +108,9 @@ Getting the compiled core
 --------------------------
 
 This repository is source only - no compiled `.cor` file is committed here.
-A ready-to-use `.cor` for MEGA65 R6 (Milestone 1 + Milestone 2 phase A),
-together with a Minerva system ROM, is published on the
+Ready-to-use `.cor` files for MEGA65 **R6** (tested on real hardware) and
+**R3** (compiles clean, not yet tested on real R3 hardware - see the
+release notes), together with a Minerva system ROM, are published on the
 [GitHub Releases page](https://github.com/dfernande132/QL4M65/releases) - see the instructions file bundled
 with each release for exactly where each file goes on the SD card. Minerva
 and TK2 are GPL/GNU-licensed and can be redistributed, which is why they're
