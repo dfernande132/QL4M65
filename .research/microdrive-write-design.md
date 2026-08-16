@@ -143,7 +143,12 @@ y `mdv_sector` debe valer 0 ahí. ✓
 ### 3.4 Acumulador de bytes y confirmación
 
 ```verilog
-reg  [8:0] wr_byte_cnt;   // 0..537 en una sesion completa; 9 bits sobran
+// CORREGIDO tras M2023 (ver microdrive-write-bug-analysis.md): la version
+// original de este documento decia "[8:0] ... 9 bits sobran" - FALSO,
+// 2^9 = 512 < 538: el contador daba la vuelta en el byte 512 de cada
+// sesion y reescribia las palabras 0..12 de la region (cabecera de bloque
+// incluida) con la cola del bloque de datos. 0..537 necesita 10 bits.
+reg  [9:0] wr_byte_cnt;   // 0..537 en una sesion completa; 10 bits (¡no 9!)
 reg  [7:0] wr_byte_hi;    // primer byte del par
 reg        wr_pending;    // hay medio par acumulado
 reg        wr_do;         // pulso: hay una palabra que confirmar
@@ -151,20 +156,20 @@ reg [16:0] wr_addr;
 reg [15:0] wr_word;
 
 wire wr_session = wr_en && mdv_present;   // nunca escribir sin cartucho ni sin unidad seleccionada
-wire [8:0] wr_word_idx = wr_byte_cnt[8:1];
+wire [9:0] wr_word_idx = wr_byte_cnt[9:1];
 wire wr_in_range = region_state
-                 ? (wr_word_idx < 9'd329)      // region de datos
-                 : (wr_word_idx < 9'd14);      // region de cabecera (solo FORMAT)
+                 ? (wr_word_idx < 10'd329)     // region de datos
+                 : (wr_word_idx < 10'd14);     // region de cabecera (solo FORMAT)
 
 always @(posedge clk) begin
     wr_do <= 1'b0;
 
     if (!wr_session) begin
-        wr_byte_cnt <= 9'd0;      // cada sesion empieza de cero
+        wr_byte_cnt <= 10'd0;     // cada sesion empieza de cero
         wr_pending  <= 1'b0;
     end
     else if (wr_strobe) begin
-        wr_byte_cnt <= wr_byte_cnt + 9'd1;
+        wr_byte_cnt <= wr_byte_cnt + 10'd1;
         if (!wr_pending) begin
             wr_byte_hi <= wr_data;         // byte alto: el primero del par (mdv.v:88)
             wr_pending <= 1'b1;
@@ -172,7 +177,7 @@ always @(posedge clk) begin
         else begin
             wr_pending <= 1'b0;
             if (wr_in_range) begin
-                wr_addr <= region_base + {8'd0, wr_word_idx};
+                wr_addr <= region_base + {7'd0, wr_word_idx};
                 wr_word <= {wr_byte_hi, wr_data};
                 wr_do   <= 1'b1;
             end

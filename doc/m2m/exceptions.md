@@ -228,6 +228,28 @@ design doc, one level deeper than the edge detection already added in
 a registered `wr_strobe_prev`, advancing the accumulator only on
 `wr_strobe && !wr_strobe_prev`.
 
+**`M2024`: `wr_byte_cnt` was 9 bits wide (`reg [8:0]`), but a `md_write`
+session is 538 bytes - 2⁹=512<538, so it overflowed mid-session, every
+session, deterministically.** `M2023` fixed the strobe timing but left
+`SAVE` still failing (~30s, then "bad or changed medium"; `DIR` afterward
+failed too, with the same message and timing, until the source image was
+reloaded). Internal static re-analysis of `region_base`/`region_state`/word
+ordering/`wr_in_range` found nothing further, so a handoff document
+(`.research/microdrive-write-bug-handoff.md`) went to an external reasoning
+model, which found and simulated the actual bug
+(`.research/microdrive-write-bug-analysis.md`,
+verified with `Fase0/tools/wrsim.py` before it was ever compiled): the
+counter width traces back to `.research/microdrive-write-design.md`'s own
+§3.4 (`reg [8:0] wr_byte_cnt // 0..537 en una sesion completa; 9 bits
+sobran` - arithmetically false, faithfully copied into the implementation).
+The overflow rewrote the region's first 13 words (preamble, block header,
+and its checksum included) with the tail of the data block on every write,
+and left the last 13 words never written - and since `wr_word_idx` inherited
+the same short width, `wr_in_range`'s own overflow protection was
+structurally inert throughout. Fixed by widening `wr_byte_cnt`/`wr_word_idx`
+to 10 bits (design doc corrected too, so the comment can't be copied wrong
+again).
+
 ### `rtl/zx8302.v`: `pc_tdata` ($18022) write decoding (Milestone 2 phase B, M2022)
 
 `$18022` (`pc_tdata`, the microdrive transmit-data register) was never
