@@ -327,6 +327,7 @@ signal mdv1_val_state         : t_rom_val_state := VS_IDLE;
 signal qnice_mdv1_ce          : std_logic;
 signal qnice_mdv1_we          : std_logic;
 signal qnice_mdv1_wait        : std_logic;
+signal qnice_mdv1_data        : std_logic_vector(15 downto 0);
 
 -- QL4M65 (Milestone 2 phase A, M2008): microdrive activity LED, core-clock
 -- domain (main.vhd's own "led" tap from zx8302.v - a single level signal,
@@ -491,6 +492,10 @@ begin
          qnice_mdv1_we_i      => qnice_mdv1_we,
          qnice_mdv1_wait_o    => qnice_mdv1_wait,
 
+         -- QL4M65 (Milestone 2 phase B, etapa 2): read-back path (buffer
+         -- bytes + dirty-sector bitmap), for the future SD flush.
+         qnice_mdv1_data_o    => qnice_mdv1_data,
+
          -- QL4M65 (Milestone 2 phase A, M2011): raw QNICE-clock-domain
          -- "is the Shell currently loading mdv1" level - main.vhd
          -- synchronizes it into clk_main_i itself (see its own header).
@@ -609,6 +614,11 @@ begin
          -- (mdv1's buffer lives there, not in a local BRAM here) - the
          -- wait state comes back from main.vhd too, since a byte may still
          -- be crossing into the core clock domain.
+         --
+         -- QL4M65 (Milestone 2 phase B, etapa 2): reads now go through the
+         -- same non-CSR branch too (buffer bytes, or the dirty-sector
+         -- bitmap at C_MDV1_DIRTY_BASE - main.vhd itself decodes which one
+         -- a given address means, see its own mdv1_reader_core comment).
          when C_DEV_QL_MDV1 =>
             mdv1_ce <= qnice_dev_ce_i;
             if mdv1_csr_active = '1' then
@@ -617,6 +627,7 @@ begin
             else
                qnice_mdv1_ce    <= qnice_dev_ce_i;
                qnice_mdv1_we    <= qnice_dev_we_i;
+               qnice_dev_data_o <= qnice_mdv1_data;
                qnice_dev_wait_o <= qnice_mdv1_wait;
             end if;
 

@@ -275,6 +275,48 @@ serial port is ever implemented (it would be needed to disambiguate
 `pc_tdata`'s two possible destinations). Noted here so nobody assumes it
 already exists.
 
+### `CORE/vhdl/main.vhd`/`mega65.vhd`: dirty-sector bitmap + QNICE read-back (Milestone 2 phase B, etapa 2, M2025)
+
+No RTL deviation here (pristine `mdv.v`/`zx8302.v` untouched by this etapa) -
+new intra-project wiring only, still no user-visible change on the QL side.
+`main.vhd` gains a 256-bit dirty-sector bitmap (`p_dirty`, one bit per
+*confirmed word* via `mdv1_wr_commit`/`mdv1_sector` - simpler and exact,
+since `mdv.v`'s own `wr_in_range` already forbids a session straddling two
+sectors) and a full read-back path for QNICE (buffer bytes at
+`0..C_MDV1_MAX_BYTES-1`, the bitmap itself at `C_MDV1_DIRTY_BASE..+31`,
+`globals.vhd`) - both needed for the eventual SD flush (etapa 3).
+
+Two new pieces of CDC, both following the exact same discipline already
+proven by the write-channel/loader work above (`xpm_cdc_*` only, reset from
+day one on both sides, level-held handshake signals):
+
+- **Clearing the bitmap** (`C_MDV1_DIRTY_CLR`, write-any-value): the QNICE
+  bus write cycle holds `ce_i`/`we_i`/`addr_i` stable for several
+  `qnice_clk` cycles (same as a 68000 `move.b` holds `cpu_sel`/`cpu_wr` for
+  several `cen` ticks) - `xpm_cdc_single` only synchronizes the *level*, so
+  clearing needs the identical rising-edge detection that `M2024`'s
+  `wr_strobe_prev` fix already established for the exact same class of
+  problem (`mdv1_clear_sync_prev` here). Applied from the start this time,
+  not found the hard way again.
+- **Reading a byte** (buffer or bitmap): two new `xpm_cdc_handshake`
+  instances (request QNICE→core carrying the address, response core→QNICE
+  carrying the 16-bit result) plus two new state machines
+  (`mdv1_reader_qnice`/`mdv1_reader_core`), mirroring
+  `mdv1_loader_qnice`/`mdv1_loader_core`'s own 4-phase protocol exactly.
+  `qnice_mdv1_wait_o` now covers both the write-loader and this read path,
+  combined in one expression (a `std_logic` port can only have one driver) -
+  still purely OR'd from registered state, never live `ce_i`/`we_i`
+  (`M2006` lesson).
+
+**One new wiring wrinkle, not CDC-related**: `mdv.v`'s own `dl_addr` input
+now has two logical owners (the existing loader, for writes; the new
+reader, for read-back) that are never active at the same time in practice
+(QNICE's own bus is inherently sequential) but still can't both drive the
+same signal in synthesizable VHDL. Resolved with a small mux
+(`mdv1_ld_dl_addr`/`mdv1_rd_dl_addr`, muxed into the real `mdv1_dl_addr`) -
+same "two owners, one mux" pattern as `mdv.v`'s own `wr_do`/`dl_wr`
+priority mux from `M2022`.
+
 ### The `ipl` assignment in `rtl/zx8302.v` (interrupt lines)
 
 `assign ipl = { ipc_ipl_i[1] || (irq_pending[4:0] != 0), ipc_ipl_i[0] };` -

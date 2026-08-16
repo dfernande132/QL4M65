@@ -14,7 +14,7 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-16 — Milestone 2 fase A cerrada y publicada; fase B (escritura) etapa 1 CERRADA y confirmada en hardware con `M2024`)
+## 0. Estado actual del proyecto (actualizado: 2026-08-16 — Milestone 2 fase A cerrada y publicada; fase B etapa 1 CERRADA (M2024); etapa 2 (M2025, bitmap + lectura QNICE) compilada, pendiente de verificación. Solo R6 hasta cerrar Milestone 2 en las dos placas)
 
 **Milestone 2 fase A (microdrive, solo lectura): cerrada en `M2018`, publicada en GitHub.** El bug de lectura sostenida (investigación `M2004`-`M2017`) nunca estuvo en el RTL — las imágenes de prueba (`CHESS.MDV`, `Quill2.mdv`, etc.) estaban corruptas de origen, confirmado simulando `mdv.v` + el checksum real de Minerva (`Fase0/tools/mdvcheck.py`). `M2019`-`M2021` añadieron y afinaron un zumbido sintetizado del motor. **Regla vigente: pasar `mdvcheck.py` a cualquier `.mdv` antes de usarla como caso de prueba en hardware.** Detalle completo de toda la investigación en `DECISIONES.md`.
 
@@ -27,6 +27,8 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 **`M2024`: causa raíz real, encontrada por un modelo de razonamiento externo tras agotar el análisis estático propio** (`.research/microdrive-write-bug-handoff.md` → `.research/microdrive-write-bug-analysis.md`, verificado por simulación en `Fase0/tools/wrsim.py` antes de compilar): `wr_byte_cnt` tenía 9 bits para una sesión de 538 bytes (2⁹=512<538) — desbordaba en cada escritura, corrompiendo las primeras y dejando sin escribir las últimas palabras de la región. El error venía de un comentario aritméticamente falso en el propio documento de diseño (§3.4), copiado fielmente al implementar; corregido también ahí. **Confirmado en hardware: `SAVE mdv1_dani` termina, `DIR mdv1_` lo ve, `LOAD mdv1_dani` lo recarga sin error, regresión de lectura OK.** Etiquetado `M2024` en ambos repos. Detalle completo, incluida la relevancia de `hr_rwds`/HyperRAM para cuando Milestone 3 la active de verdad, en `DECISIONES.md`.
 
 **Housekeeping de repositorio en paralelo (otra conversación, sin tocar RTL ni `.research/microdrive-write-*`): `AUTHORS` relleno con datos reales, `CHANGELOG.md` nuevo, y GitHub Release publicado** para el `.cor` de fase A (`M2021`) con Minerva 1.98+QLSD, TK2 y un `.mdv` en blanco verificado con `mdvcheck.py`: <https://github.com/dfernande132/QL4M65/releases/tag/M2021>. Detalle completo en `DECISIONES.md`.
+
+**`M2025`: etapa 2 — bitmap de sectores sucios + lectura del buffer/bitmap desde QNICE**, sin ítem de menú ni volcado a SD todavía (eso es etapa 3), sin cambio funcional visible en la QL. Dos `xpm_cdc_handshake` nuevos (petición/respuesta) + un `xpm_cdc_single` con detección de flanco (misma lección de `M2023`/`M2024`, aplicada esta vez desde el principio), calcados del cargador de escritura ya probado. Compila limpio (`WNS=+0.132 ns`, `WHS=+0.003 ns`, 0 nets sin rutar; el margen mínimo es el mismo `hr_rwds` inerte de siempre, no algo nuevo). Empaquetado como `QL4M65-CoreQL-M2025_r6.cor`. **Pendiente: decidir cómo verificar el camino de lectura nuevo** (no tiene disparador desde QNICE todavía) y confirmar la regresión de etapa 1 sin cambios. Detalle completo en `DECISIONES.md`.
 
 ---
 

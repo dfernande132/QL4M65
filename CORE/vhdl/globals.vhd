@@ -166,6 +166,14 @@ constant C_DEV_QL_BACKROM        : std_logic_vector(15 downto 0) := x"0102";
 constant C_DEV_QL_MDV1            : std_logic_vector(15 downto 0) := x"0103";
 constant C_MDV1_MAX_BYTES         : natural := 174930;
 
+-- QL4M65 (Milestone 2 phase B, etapa 2): read-back path for the eventual SD
+-- flush - .research/microdrive-write-design.md section 6.1. Byte range
+-- 0x0000000..C_MDV1_MAX_BYTES-1 (same window as the loader above) becomes
+-- readable too; the dirty-sector bitmap lives well above it and well below
+-- the framework's own CSR window (0xFFFF000+), so there's no overlap.
+constant C_MDV1_DIRTY_BASE        : natural := 16#30000#; -- 32 bytes, byte m bit n = sector m*8+n
+constant C_MDV1_DIRTY_CLR         : natural := 16#30020#; -- write (any value) clears the whole bitmap
+
 constant C_CRTROMS_MAN_NUM       : natural := 3;                                       -- amount of manually loadable ROMs and carts; maximum is 16
 constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_DEV_QL_MAINROM,
                                                          C_CRTROMTYPE_DEVICE, C_DEV_QL_BACKROM,
