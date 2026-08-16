@@ -341,6 +341,11 @@ type t_mdv1_rdcore_state is (RDC_IDLE, RDC_REQ_WAIT_LOW, RDC_LATCH1, RDC_LATCH2,
 signal mdv1_rdcore_state : t_mdv1_rdcore_state := RDC_IDLE;
 signal mdv1_rd_req_addr  : std_logic_vector(27 downto 0);
 
+-- QL4M65 (M2027): previous-cycle level of the raw read-trigger condition
+-- (qnice_mdv1_ce_i='1' and we_i='0'), qnice_clk_i domain - see
+-- qnice_mdv1_wait_o's own comment for why this edge detector exists.
+signal mdv1_rd_req_prev : std_logic := '0';
+
 -- QL4M65 (M2011): qnice_mdv1_loading_i (QNICE clock domain) synchronized
 -- into clk_main_i via xpm_cdc_single (a genuine, unrelated-clocks CDC
 -- crossing - a hand-rolled 2-FF process here left Vivado analyzing it as
@@ -968,10 +973,56 @@ begin
    -- QL4M65 (Milestone 2 phase B, etapa 2): qnice_mdv1_wait_o now also
    -- covers the read-back path (mdv1_reader_qnice, further down) - combined
    -- here in one place rather than driven from two, since a std_logic
-   -- output port can only have one source. Purely OR'd from registered
-   -- state (mdv1_ld_busy, mdv1_rd_state), never from live we_i/ce_i - same
-   -- rule as mdv1_ld_busy's own derivation (M2006 lesson, see below).
-   qnice_mdv1_wait_o <= '1' when (mdv1_ld_busy = '1' or mdv1_rd_state /= RD_IDLE) else '0';
+   -- output port can only have one source. mdv1_ld_busy's own contribution
+   -- stays purely registered (M2006 lesson, see above): a write's DATA is
+   -- captured unconditionally by mdv1_loader_qnice's clocked process on the
+   -- very first ce_i/we_i cycle regardless of wait_o, so there is nothing
+   -- to race there.
+   --
+   -- THIRD BUG (found 2026-08-16, M2026 hardware: every SD flush of mdv1
+   -- corrupted sectors 8/10/18 - see DECISIONES.md's M2027 section for the
+   -- full byte-level diagnosis): the read-back term genuinely DOES need a
+   -- live (non-registered) contribution, unlike mdv1_ld_busy. QNICE's own
+   -- CPU (qnice_cpu.vhd's cs_exeprep_get_src_indirect) both asserts
+   -- ce_i/addr AND checks WAIT_FOR_DATA for the FIRST time in the very
+   -- same qnice_clk cycle for an indirect read - there is no extra setup
+   -- cycle before that first check (unlike cs_fetch, which loops in the
+   -- same state on every retry). mdv1_rd_state only leaves RD_IDLE on the
+   -- clock edge AFTER RD_IDLE itself sees ce_i='1'/we_i='0' (further down),
+   -- so a purely registered-state wait_o is still '0' during that exact
+   -- first cycle - the CPU sees no wait request and immediately captures
+   -- whatever qnice_mdv1_data_o is left over from the PREVIOUS read, one
+   -- full request behind the one actually being asked for, on every single
+   -- call to READ_MDV1_BYTE (m2m-rom.asm). Confirmed by byte-level analysis
+   -- of a real corrupted .mdv: mod[N] == orig[N-1] for the entire 686-byte
+   -- span of every dirty sector, with the very first byte of each sector
+   -- instead carrying over whatever the PRECEDING READ_MDV1_BYTE call (the
+   -- last dirty-bitmap byte, or the previous dirty sector's last byte)
+   -- last returned - exactly what "one response behind" predicts.
+   --
+   -- Fixed by qualifying the live ce_i/we_i term with mdv1_rd_req_prev='0'
+   -- (an actual rising edge, not just a level - same idiom as mdv.v's
+   -- wr_strobe_prev and this file's own mdv1_clear_sync_prev). This is
+   -- deliberately NOT the same shape as M2006's SECOND BUG: that one OR'd
+   -- in a bare level (ce_i='1' and we_i='1'), which stayed true even after
+   -- mdv1_ld_busy legitimately dropped back to '0' (the CPU can hold ce_i
+   -- asserted for one extra cycle after it samples wait_o='0', before it
+   -- reacts and retracts it), permanently re-triggering wait_o with no low
+   -- cycle for the CPU to ever see. Here, that same lingering high ce_i is
+   -- harmless: mdv1_rd_req_prev was ALSO '1' on the cycle before, so the
+   -- edge qualifier is false and the live term stays false throughout the
+   -- retraction cycle - it can only fire again once ce_i has gone low
+   -- first, which only happens for a genuinely new request.
+   qnice_mdv1_wait_o <= '1' when (mdv1_ld_busy = '1' or mdv1_rd_state /= RD_IDLE or
+                                   (qnice_mdv1_ce_i = '1' and qnice_mdv1_we_i = '0' and mdv1_rd_req_prev = '0'))
+                        else '0';
+
+   mdv1_rd_edge : process (qnice_clk_i)
+   begin
+      if rising_edge(qnice_clk_i) then
+         mdv1_rd_req_prev <= qnice_mdv1_ce_i and not qnice_mdv1_we_i;
+      end if;
+   end process mdv1_rd_edge;
 
    mdv1_loader_qnice : process (qnice_clk_i)
    begin
