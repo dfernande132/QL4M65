@@ -353,7 +353,38 @@ kept as a correctness improvement.
 MiSTer2MEGA65
 -------------
 
-No changes.
+### `M2M/rom/shell.asm`: `HANDLE_CORE_IO` hook in `HANDLE_IO` (Milestone 2 phase B, etapa 4, M2028)
+
+First framework-level change in this project. mdv1 is not a vdrive (a real
+QL microdrive is a continuous tape that has to be preloaded whole into
+`mdv.v`'s own buffer, not a sector-addressable device `vdrives.vhd`'s
+on-demand protocol expects), so it doesn't get the automatic background
+write-back that `shell.asm`'s own `HANDLE_IO`/`FLUSH_CACHE` already gives
+every vdrive out of the box - there is no core-specific extension point
+in stock M2M for a non-vdrive storage device to get a time slice of its
+own. sy2002's own `AExp` project (Amiga, same M2M framework) hit the
+identical problem for its ADF floppy write-back and solved it with a
+small, explicitly-documented patch - ported here verbatim rather than
+inventing a new mechanism, same "check the sibling cores first" discipline
+already used throughout Milestone 2 phase B (see `DECISIONES.md`'s M2026
+section).
+
+The patch: a new mandatory core callback function, `HANDLE_CORE_IO`,
+called from `HANDLE_IO` right after the SD-card-change detection (so
+`SD_CHANGED` is fresh), on every iteration of the Shell's main loop *and*
+every blocking wait loop that also polls `HANDLE_IO` (the OSM, the file
+browser, help screens). Contract: preserve all registers (`SYSCALL`
+enter/leave), return quickly (cooperative multitasking), may change the
+active RAMROM device/window selection (same as `HANDLE_IO` itself already
+does). QL4M65 implements it in `CORE/m2m-rom/m2m-rom.asm` to drive
+`MDV1_FLUSH_STEP`, mdv1's own resumable background SD write-back - see
+that routine's own header comment for the full design.
+
+When updating from a newer upstream `M2M/rom/shell.asm`: re-apply this
+patch at the same point (right before the vdrives loop inside `HANDLE_IO`,
+label `_HANDLE_IO_0` retargeted to the new `RSUB HANDLE_CORE_IO, 1` line).
+`HANDLE_CORE_IO` itself lives entirely in `m2m-rom.asm` and needs no
+further framework changes.
 
 QNICE
 -----
