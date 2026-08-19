@@ -124,7 +124,16 @@ entity main is
       -- QL hardware lights it whenever a drive is selected (zx8302.v's own
       -- "led" output, sel[0] of the mdv_sel shift register); previously
       -- computed and discarded (led => open).
-      drive_led_o             : out std_logic
+      drive_led_o             : out std_logic;
+
+      -- QL4M65 (Milestone 2 phase B, etapa 4, M2029): is any mdv1 sector
+      -- dirty (not yet flushed to the SD card)? Already in clk_main_i (the
+      -- 256-bit mdv1_dirty bitmap below lives entirely in this domain, see
+      -- p_dirty) - no CDC needed. mega65.vhd uses this to recolor
+      -- drive_led_o, same "amber/blue while dirty" pattern already proven
+      -- by C64MEGA65's vdrives (main.vhd's own cache_dirty) and AExp's ADF
+      -- write-back (main_adf_dirty) - see DECISIONES.md's M2029 section.
+      mdv1_dirty_o             : out std_logic
    );
 end entity main;
 
@@ -1240,6 +1249,10 @@ begin
          end if;
       end if;
    end process p_dirty;
+
+   -- QL4M65 (M2029): combinational OR-reduce, already in clk_main_i - see
+   -- this signal's own port comment.
+   mdv1_dirty_o <= '0' when unsigned(mdv1_dirty) = 0 else '1';
 
    -- Clearing the bitmap: QNICE writes any value to C_MDV1_DIRTY_CLR. The
    -- underlying QNICE bus write cycle holds ce_i/we_i/addr_i stable for

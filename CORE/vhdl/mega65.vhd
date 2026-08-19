@@ -334,6 +334,11 @@ signal qnice_mdv1_data        : std_logic_vector(15 downto 0);
 -- no CDC needed for a board LED)
 signal main_mdv1_led          : std_logic;
 
+-- QL4M65 (Milestone 2 phase B, etapa 4, M2029): any mdv1 sector dirty
+-- (not yet flushed to SD)? Already in clk_main_i, straight from main.vhd's
+-- own mdv1_dirty bitmap - see that port's own comment.
+signal main_mdv1_dirty        : std_logic;
+
 -- QL4M65 (Milestone 2 phase A, M2011): raw "is the Shell loading mdv1"
 -- level, QNICE clock domain - main.vhd does its own synchronization into
 -- clk_main_i (see that file's header comment on qnice_mdv1_loading_i).
@@ -502,7 +507,11 @@ begin
          qnice_mdv1_loading_i => qnice_mdv1_loading,
 
          -- QL4M65 (Milestone 2 phase A, M2008): microdrive activity LED
-         drive_led_o          => main_mdv1_led
+         drive_led_o          => main_mdv1_led,
+
+         -- QL4M65 (Milestone 2 phase B, etapa 4, M2029): any mdv1 sector
+         -- dirty (not yet flushed to SD)?
+         mdv1_dirty_o         => main_mdv1_dirty
       ); -- i_main
 
    ---------------------------------------------------------------------------------------------
@@ -888,10 +897,20 @@ begin
    -- drive is selected, mdv_sel[0], same as real QL hardware) via main.vhd's
    -- drive_led_o. QL-SD's own vdrives activity (Milestone 4, parked) would
    -- OR into this same signal if/when that's revisited.
+   --
+   -- QL4M65 (Milestone 2 phase B, etapa 4, M2029): while any mdv1 sector is
+   -- dirty (MDV1_FLUSH_STEP hasn't finished writing it back to the SD card
+   -- yet - m2m-rom.asm), force the LED lit and recolor it blue instead of
+   -- red - "don't power off yet". Same pattern C64MEGA65's vdrives
+   -- (main.vhd's own cache_dirty -> amber) and AExp's ADF write-back
+   -- (main_adf_dirty -> yellow) already use; blue chosen here simply to
+   -- stay visually distinct from both. main_mdv1_dirty is combinational
+   -- straight off main.vhd's own mdv1_dirty bitmap (clk_main_i already) -
+   -- no new CDC needed. See DECISIONES.md's M2029 section.
    ---------------------------------------------------------------------------------------
 
-   main_drive_led_o     <= main_mdv1_led;
-   main_drive_led_col_o <= x"FF0000";  -- 24-bit RGB value for the led
+   main_drive_led_o     <= main_mdv1_led or main_mdv1_dirty;
+   main_drive_led_col_o <= x"0000FF" when main_mdv1_dirty = '1' else x"FF0000";  -- 24-bit RGB
 
 end architecture synthesis;
 
