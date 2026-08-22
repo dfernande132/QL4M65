@@ -251,6 +251,7 @@ architecture synthesis of dpram is
    signal a_pend_read      : std_logic := '0';
    signal a_pend_read_addr : std_logic_vector(ADDRWIDTH - 1 downto 0);
    signal a_hold_q         : std_logic_vector(15 downto 0) := (others => '0');
+   signal a_hold_addr      : std_logic_vector(ADDRWIDTH - 1 downto 0) := (others => '1');
    signal a_settle_cnt     : unsigned(3 downto 0) := (others => '0');
    signal a_settled        : std_logic := '0';  -- already fired for this stable stretch
 
@@ -261,8 +262,6 @@ architecture synthesis of dpram is
    signal b_hold_q         : std_logic_vector(15 downto 0) := (others => '0');
    signal b_refresh_cnt    : unsigned(15 downto 0) := (others => '0');
 
-   signal q_a_valid_i : std_logic := '0';
-
 begin
 
    assert wrclock = rdclock
@@ -271,26 +270,35 @@ begin
 
    q   <= b_hold_q;
    q_a <= a_hold_q;
-   q_a_valid_o <= q_a_valid_i;
 
-   -- QL4M65 M2030: pulses for exactly one cycle on the SAME edge a_hold_q
-   -- gets a definitely-fresh value - either a write committing (matches
-   -- p_track's "if wren='1' ... a_hold_q <= data;" below) or a genuine
-   -- port-A read completing (matches p_arbiter's "owner=PORT_A and
-   -- s_readdatavalid='1' ... a_hold_q <= s_readdata;"). Deliberately does
-   -- NOT fire for port B (q/b_hold_q) - only q_a/port A is read back by
-   -- QNICE, see this signal's own declaration comment.
-   p_qavalid : process (wrclock)
-   begin
-      if rising_edge(wrclock) then
-         q_a_valid_i <= '0';
-         if wren = '1' then
-            q_a_valid_i <= '1';
-         elsif owner = PORT_A and s_readdatavalid = '1' then
-            q_a_valid_i <= '1';
-         end if;
-      end if;
-   end process p_qavalid;
+   -- QL4M65 M2031 fix #2 (found in hardware after the first M2031 fix):
+   -- q_a_valid is NOT "a fetch just completed this cycle" (a one-shot
+   -- pulse) - it is "a_hold_q is KNOWN CORRECT for wraddress RIGHT NOW",
+   -- a level. The difference matters for a very common access pattern:
+   -- QNICE reads a 16-bit word as two back-to-back byte reads (high byte,
+   -- then low byte) at the SAME wraddress - e.g. every single call to
+   -- MDV1_FLUSH_STEP starts by reading the 32-byte dirty bitmap this way
+   -- (16 words, m2m-rom.asm's _MFS_RDBM loop). The FIRST byte's read
+   -- genuinely dispatches and completes, correctly settling a_hold_q/
+   -- a_settled for that address. The SECOND byte's request reuses the
+   -- EXACT SAME wraddress (same word, other half) - wraddress does not
+   -- change, a_settled is already '1' from the first byte, so the
+   -- settle-counter correctly does NOT dispatch a second, redundant
+   -- fetch (a_hold_q already has the right word cached). A pulse-based
+   -- q_a_valid (the original M2031 fix) only fired on the ACT of
+   -- fetching, so it never fired for this second, cache-hit request -
+   -- main.vhd's mdv1_reader_core (M2031's own new wait-for-valid logic)
+   -- hung forever waiting for a pulse that correctly never needed to
+   -- come. Found on real hardware: MEGA65 froze at the OSD main menu
+   -- right after any LOAD (OSM_SEL_PRE force-flushes before returning,
+   -- and even an all-clean bitmap still gets read once, in full, every
+   -- single call). Comparing addresses instead of pulsing on the fetch
+   -- event handles a cache hit and a cache miss identically and
+   -- correctly: valid the instant a_hold_q's own address matches
+   -- whatever is being asked for RIGHT NOW, whether that took 8 cycles
+   -- (a genuine new fetch) or 0 (already cached from the read right
+   -- before it).
+   q_a_valid_o <= '1' when a_hold_addr = wraddress else '0';
 
    p_por : process (wrclock)
    begin
@@ -427,6 +435,7 @@ begin
             -- dual-port RAM serves the just-written value on its own read
             -- port immediately, which this line restores.
             a_hold_q      <= data;
+            a_hold_addr   <= wraddress;
          elsif wraddress /= a_addr_prev then
             -- address just moved (a genuine new read target, OR a
             -- writer setting up its NEXT target a cycle or two before
@@ -501,7 +510,8 @@ begin
          -- inferred two separate registers both fighting to drive q_a).
          -- Both of a_hold_q's writers now live in this one process.
          if owner = PORT_A and s_readdatavalid = '1' then
-            a_hold_q <= s_readdata;
+            a_hold_q    <= s_readdata;
+            a_hold_addr <= a_pend_read_addr;
          end if;
 
          if por_rst = '1' then

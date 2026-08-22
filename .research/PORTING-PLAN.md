@@ -695,8 +695,16 @@ seguir para la parte de escritura, una vez la lectura funcione.
    real de "dato listo" (`q_a_valid`) de extremo a extremo; ver
    `DECISIONES.md` para el detalle (incluye un bug de síntesis
    multiple-drivers encontrado al implementarlo). Build R6 compila limpio,
-   timing cumplido (`WNS=+0.111 ns`). Pendiente: regresión en hardware real
-   con `M2031` (`LOAD`/`DIR`/`SAVE`/apagar-encender/recarga).
+   timing cumplido (`WNS=+0.111 ns`).
+   **`M2032` (2026-08-22):** `M2031` colgaba la MEGA65 al volver al menú
+   OSD tras un LOAD - `q_a_valid` como pulso no servía para un acierto de
+   caché (misma dirección pedida dos veces seguidas, exactamente el patrón
+   con que `OSM_SEL_PRE` relee el bitmap de sucios en cada vuelta al menú).
+   Rediseñado como nivel (comparación de dirección cacheada vs. pedida);
+   ver `DECISIONES.md`. Build R6 compila limpio, timing cumplido
+   (`WNS=+0.338 ns`, `WHS=+0.011 ns`, algo ajustado). Pendiente: regresión
+   en hardware real con `M2032` (`LOAD`→menú, `DIR`/`SAVE`/apagar-
+   encender/recarga).
 5. Ampliar a 2, 3 o 4 unidades.
 
 Diseño completo de la lectura en `.research/microdrive-read-design.md`
