@@ -133,7 +133,25 @@ entity main is
       -- drive_led_o, same "amber/blue while dirty" pattern already proven
       -- by C64MEGA65's vdrives (main.vhd's own cache_dirty) and AExp's ADF
       -- write-back (main_adf_dirty) - see DECISIONES.md's M2029 section.
-      mdv1_dirty_o             : out std_logic
+      mdv1_dirty_o             : out std_logic;
+
+      -- QL4M65 (Milestone 2 phase C, etapa B): mdv1's own Avalon-MM
+      -- master, straight through from i_mdv1's new m_avm_* ports (mdv.v)
+      -- to mega65.vhd, which crosses into hr_clk via avm_fifo and reaches
+      -- the framework's real hr_core_* HyperRAM port. main.vhd runs
+      -- exclusively in clk_main_i (see this entity's own header), so
+      -- these are plain pass-through, no logic - the CDC lives in
+      -- mega65.vhd, same layering as every other clk_main_i/other-domain
+      -- boundary in this file.
+      mdv1_avm_write_o         : out std_logic;
+      mdv1_avm_read_o          : out std_logic;
+      mdv1_avm_address_o       : out std_logic_vector(31 downto 0);
+      mdv1_avm_writedata_o     : out std_logic_vector(15 downto 0);
+      mdv1_avm_byteenable_o    : out std_logic_vector(1 downto 0);
+      mdv1_avm_burstcount_o    : out std_logic_vector(7 downto 0);
+      mdv1_avm_readdata_i      : in  std_logic_vector(15 downto 0);
+      mdv1_avm_readdatavalid_i : in  std_logic;
+      mdv1_avm_waitrequest_i   : in  std_logic
    );
 end entity main;
 
@@ -1213,7 +1231,20 @@ begin
          wr_strobe => mdv1_wr_strobe,
          wr_data   => mdv1_wr_data,
          sector    => mdv1_sector,
-         wr_commit => mdv1_wr_commit
+         wr_commit => mdv1_wr_commit,
+
+         -- QL4M65 (Milestone 2 phase C, etapa B): pass straight through to
+         -- this entity's own mdv1_avm_*_o/i ports (see their declaration
+         -- above) - mdv.v's own dpram instance is the only real consumer.
+         m_avm_write         => mdv1_avm_write_o,
+         m_avm_read          => mdv1_avm_read_o,
+         m_avm_address       => mdv1_avm_address_o,
+         m_avm_writedata     => mdv1_avm_writedata_o,
+         m_avm_byteenable    => mdv1_avm_byteenable_o,
+         m_avm_burstcount    => mdv1_avm_burstcount_o,
+         m_avm_readdata      => mdv1_avm_readdata_i,
+         m_avm_readdatavalid => mdv1_avm_readdatavalid_i,
+         m_avm_waitrequest   => mdv1_avm_waitrequest_i
       ); -- i_mdv1
 
    -- QL4M65 (M2015): register mdv1's raw outputs one clk_main_i cycle

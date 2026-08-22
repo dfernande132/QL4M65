@@ -344,6 +344,19 @@ signal main_mdv1_dirty        : std_logic;
 -- clk_main_i (see that file's header comment on qnice_mdv1_loading_i).
 signal qnice_mdv1_loading      : std_logic;
 
+-- QL4M65 (Milestone 2 phase C, etapa B): mdv1's own Avalon-MM master,
+-- clk_main_i domain - straight from i_main's mdv1_avm_*_o/i ports into
+-- i_avm_fifo_mdv1's slave side below (main_clk -> hr_clk CDC).
+signal main_mdv1_avm_write         : std_logic;
+signal main_mdv1_avm_read          : std_logic;
+signal main_mdv1_avm_address       : std_logic_vector(31 downto 0);
+signal main_mdv1_avm_writedata     : std_logic_vector(15 downto 0);
+signal main_mdv1_avm_byteenable    : std_logic_vector(1 downto 0);
+signal main_mdv1_avm_burstcount    : std_logic_vector(7 downto 0);
+signal main_mdv1_avm_readdata      : std_logic_vector(15 downto 0);
+signal main_mdv1_avm_readdatavalid : std_logic;
+signal main_mdv1_avm_waitrequest   : std_logic;
+
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
 ---------------------------------------------------------------------------------------------
@@ -354,12 +367,48 @@ signal qnice_mdv1_loading      : std_logic;
 
 begin
 
-   hr_core_write_o      <= '0';
-   hr_core_read_o       <= '0';
-   hr_core_address_o    <= (others => '0');
-   hr_core_writedata_o  <= (others => '0');
-   hr_core_byteenable_o <= (others => '0');
-   hr_core_burstcount_o <= (others => '0');
+   -- QL4M65 (Milestone 2 phase C, etapa B): mdv1's buffer is the first
+   -- real HyperRAM consumer in this project (C_HMAP_MDV1, globals.vhd) -
+   -- ascal/QNICE don't use hr_core_* yet, so it's a single master, no
+   -- avm_arbit needed (unlike e.g. AExp's two-master ADF chain). Domain
+   -- resets follow the framework's own rule (HyperRAM-for-Beginners.md
+   -- S5.8 / AExp's own avm_fifo comment): the slave side resets from the
+   -- core's own reset (main_reset_m2m_i), the master side from the
+   -- framework's HyperRAM reset (hr_rst_i) - never cross them, or one
+   -- side thinks a transaction is still in flight after the other has
+   -- forgotten it.
+   i_avm_fifo_mdv1 : entity work.avm_fifo
+      generic map (
+         G_WR_DEPTH     => 16,
+         G_RD_DEPTH     => 16,
+         G_FILL_SIZE    => 1,
+         G_ADDRESS_SIZE => 32,
+         G_DATA_SIZE    => 16
+      )
+      port map (
+         s_clk_i               => main_clk,
+         s_rst_i               => main_reset_m2m_i,
+         s_avm_waitrequest_o   => main_mdv1_avm_waitrequest,
+         s_avm_write_i         => main_mdv1_avm_write,
+         s_avm_read_i          => main_mdv1_avm_read,
+         s_avm_address_i       => main_mdv1_avm_address,
+         s_avm_writedata_i     => main_mdv1_avm_writedata,
+         s_avm_byteenable_i    => main_mdv1_avm_byteenable,
+         s_avm_burstcount_i    => main_mdv1_avm_burstcount,
+         s_avm_readdata_o      => main_mdv1_avm_readdata,
+         s_avm_readdatavalid_o => main_mdv1_avm_readdatavalid,
+         m_clk_i               => hr_clk_i,
+         m_rst_i               => hr_rst_i,
+         m_avm_waitrequest_i   => hr_core_waitrequest_i,
+         m_avm_write_o         => hr_core_write_o,
+         m_avm_read_o          => hr_core_read_o,
+         m_avm_address_o       => hr_core_address_o,
+         m_avm_writedata_o     => hr_core_writedata_o,
+         m_avm_byteenable_o    => hr_core_byteenable_o,
+         m_avm_burstcount_o    => hr_core_burstcount_o,
+         m_avm_readdata_i      => hr_core_readdata_i,
+         m_avm_readdatavalid_i => hr_core_readdatavalid_i
+      ); -- i_avm_fifo_mdv1
 
    -- Tristate all expansion port drivers that we can directly control
    -- @TODO: As soon as we support modules that can act as busmaster, we need to become more flexible here
@@ -511,7 +560,19 @@ begin
 
          -- QL4M65 (Milestone 2 phase B, etapa 4, M2029): any mdv1 sector
          -- dirty (not yet flushed to SD)?
-         mdv1_dirty_o         => main_mdv1_dirty
+         mdv1_dirty_o         => main_mdv1_dirty,
+
+         -- QL4M65 (Milestone 2 phase C, etapa B): mdv1's own Avalon-MM
+         -- master, into i_avm_fifo_mdv1's slave side above.
+         mdv1_avm_write_o         => main_mdv1_avm_write,
+         mdv1_avm_read_o          => main_mdv1_avm_read,
+         mdv1_avm_address_o       => main_mdv1_avm_address,
+         mdv1_avm_writedata_o     => main_mdv1_avm_writedata,
+         mdv1_avm_byteenable_o    => main_mdv1_avm_byteenable,
+         mdv1_avm_burstcount_o    => main_mdv1_avm_burstcount,
+         mdv1_avm_readdata_i      => main_mdv1_avm_readdata,
+         mdv1_avm_readdatavalid_i => main_mdv1_avm_readdatavalid,
+         mdv1_avm_waitrequest_i   => main_mdv1_avm_waitrequest
       ); -- i_main
 
    ---------------------------------------------------------------------------------------------

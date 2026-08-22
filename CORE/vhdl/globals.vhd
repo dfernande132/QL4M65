@@ -96,6 +96,17 @@ constant VRAM_ADDR_WIDTH      : natural := f_log2(CHAR_MEM_SIZE);
 constant C_HMAP_M2M           : std_logic_vector(15 downto 0) := x"0000";     -- Reserved for the M2M framework
 constant C_HMAP_QL            : std_logic_vector(15 downto 0) := x"0200";     -- Start address reserved for the QL core
 
+-- QL4M65 Milestone 2 phase C (mdv1 buffer -> HyperRAM, etapa B): first real
+-- consumer of the QL's 4MB HyperRAM reservation (C_HMAP_QL), so placed right
+-- at its start. mdv.v's own dpram is addressed with 17 bits (0..131071
+-- words), of which real .mdv images only ever use up to 87999 (174930
+-- bytes / 2 - .research/microdrive-read-design.md) - 22 4kW windows
+-- (90112 words) covers that with margin. NOT yet subdivided further within
+-- the QL's 4MB block - when Milestone 3 migrates the QL's own main RAM to
+-- HyperRAM too, its own placement must avoid this range (or the whole map
+-- gets redesigned at that point - not a concern until that milestone starts).
+constant C_HMAP_MDV1           : std_logic_vector(15 downto 0) := C_HMAP_QL;
+
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System
 ----------------------------------------------------------------------------------------------------------

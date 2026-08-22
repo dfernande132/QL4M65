@@ -676,7 +676,18 @@ seguir para la parte de escritura, una vez la lectura funcione.
    direcciones de HyperRAM, aunque no aplica hasta la fase 4 de este plan).
 2. Un microdrive, solo lectura, en BRAM.
 3. Driver de escritura (ahora que ya se lee).
-4. Migrar el microdrive a HyperRAM.
+4. Migrar el microdrive a HyperRAM. **En curso (2026-08-22, `M2030`):**
+   camino de memoria (`avm_cache` compartido para el tráfico en tiempo real
+   de `mdv.v`, dirección base `C_HMAP_MDV1`) verificado a fondo en
+   simulación (tres bugs reales encontrados/arreglados en `dpram_avm.vhd`,
+   ver `DECISIONES.md`) y ya migrado a **HyperRAM real** en la build
+   (etapa A intermedia en BRAM sintetizable saltada — no existe un bloque
+   del framework apto para síntesis con ese propósito, `avm_memory*.vhd`
+   son solo simulación). Build R6 compila limpio, timing cumplido
+   (`WNS=+0.194 ns`). Las 4 FSM de CDC del lado QNICE (`mdv1_loader_core`,
+   lectura/escritura del menú) se han dejado intactas por ahora - jubilarlas
+   a favor de `qnice2hyperram.vhd` queda como paso posterior independiente.
+   Pendiente: regresión en hardware real (`LOAD`/`DIR`/`SAVE`/recarga).
 5. Ampliar a 2, 3 o 4 unidades.
 
 Diseño completo de la lectura en `.research/microdrive-read-design.md`
