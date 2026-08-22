@@ -134,6 +134,22 @@ entity dpram is
 
       q_a       : out std_logic_vector(15 downto 0);  -- QL4M65 fase B: lectura de puerto A, para el volcado a QNICE
 
+      -- QL4M65 M2030 (encontrado en hardware real): pulso de un ciclo
+      -- cuando q_a acaba de quedar actualizado con un valor DEFINITIVAMENTE
+      -- fresco para la dirección actual de wraddress - bien por una
+      -- escritura (write-through inmediato) o por la llegada real de una
+      -- lectura despachada. main.vhd's mdv1_reader_core (el volcado a SD)
+      -- esperaba antes un numero FIJO de 2 ciclos tras fijar la direccion -
+      -- valido contra la BRAM original (1 ciclo de latencia) pero
+      -- totalmente insuficiente contra este backend (contador de
+      -- estabilizacion + avm_cache + avm_fifo + HyperRAM real, decenas de
+      -- ciclos) - encontrado por una regresion real: SAVE seguido de
+      -- apagado/reencendido persistia contenido sin escribir en varios
+      -- sectores, con el LED indicando (incorrectamente) que ya estaba
+      -- todo volcado. mdv1_reader_core ahora espera este pulso en vez de
+      -- adivinar un numero de ciclos.
+      q_a_valid_o : out std_logic;
+
       -- QL4M65 fase C (etapa B): maestro Avalon-MM hacia los puertos de
       -- paso puro nuevos de mdv.v (m_avm_*), que a su vez llegan hasta el
       -- hr_core_* real de mega65.vhd a través de un avm_fifo de CDC.
@@ -245,6 +261,8 @@ architecture synthesis of dpram is
    signal b_hold_q         : std_logic_vector(15 downto 0) := (others => '0');
    signal b_refresh_cnt    : unsigned(15 downto 0) := (others => '0');
 
+   signal q_a_valid_i : std_logic := '0';
+
 begin
 
    assert wrclock = rdclock
@@ -253,6 +271,26 @@ begin
 
    q   <= b_hold_q;
    q_a <= a_hold_q;
+   q_a_valid_o <= q_a_valid_i;
+
+   -- QL4M65 M2030: pulses for exactly one cycle on the SAME edge a_hold_q
+   -- gets a definitely-fresh value - either a write committing (matches
+   -- p_track's "if wren='1' ... a_hold_q <= data;" below) or a genuine
+   -- port-A read completing (matches p_arbiter's "owner=PORT_A and
+   -- s_readdatavalid='1' ... a_hold_q <= s_readdata;"). Deliberately does
+   -- NOT fire for port B (q/b_hold_q) - only q_a/port A is read back by
+   -- QNICE, see this signal's own declaration comment.
+   p_qavalid : process (wrclock)
+   begin
+      if rising_edge(wrclock) then
+         q_a_valid_i <= '0';
+         if wren = '1' then
+            q_a_valid_i <= '1';
+         elsif owner = PORT_A and s_readdatavalid = '1' then
+            q_a_valid_i <= '1';
+         end if;
+      end if;
+   end process p_qavalid;
 
    p_por : process (wrclock)
    begin
@@ -371,6 +409,24 @@ begin
             -- EVERY write.
             a_settle_cnt  <= (others => '0');
             a_settled     <= '1';
+            -- QL4M65 M2030 real-hardware finding (2026-08-22): a_hold_q
+            -- MUST be updated here too. Without this line, a_settled='1'
+            -- (above) permanently blocks any future read-trigger for THIS
+            -- address until wraddress moves away and comes back - so if
+            -- QNICE's own SD-flush read-back (READ_MDV1_BYTE) later asks
+            -- for the EXACT SAME address the QL just wrote (very common:
+            -- it reads back each dirty sector right after the write that
+            -- dirtied it), neither branch below ever fires, and q_a keeps
+            -- serving whatever a_hold_q held from some earlier, unrelated
+            -- read - stale data gets silently flushed to the SD card as
+            -- if it were the fresh write, and the dirty bit clears as if
+            -- it succeeded (found via a real hardware SAVE+reboot: 4
+            -- sectors persisted with pre-write filler content, LED showed
+            -- "clean" the whole time). The original BRAM
+            -- (dualport_2clk_ram_byteenable) never had this gap - a real
+            -- dual-port RAM serves the just-written value on its own read
+            -- port immediately, which this line restores.
+            a_hold_q      <= data;
          elsif wraddress /= a_addr_prev then
             -- address just moved (a genuine new read target, OR a
             -- writer setting up its NEXT target a cycle or two before
@@ -434,6 +490,18 @@ begin
             if s_read = '1' and s_waitrequest = '0' then
                b_pend_read <= '0';
             end if;
+         end if;
+
+         -- QL4M65 M2030: a_hold_q's OTHER source (a genuine dispatched
+         -- read completing) - moved here from p_arbiter, which used to
+         -- also assign a_hold_q directly. Two different PROCESSES driving
+         -- the same signal simulates fine (std_logic is a resolved type,
+         -- and the two conditions never truly overlap) but is a real
+         -- synthesis error (Vivado DRC MDRV-1, "multiple drivers" -
+         -- inferred two separate registers both fighting to drive q_a).
+         -- Both of a_hold_q's writers now live in this one process.
+         if owner = PORT_A and s_readdatavalid = '1' then
+            a_hold_q <= s_readdata;
          end if;
 
          if por_rst = '1' then
@@ -518,7 +586,9 @@ begin
 
             when PORT_A =>
                if s_readdatavalid = '1' then
-                  a_hold_q <= s_readdata;
+                  -- a_hold_q's own update for this event lives in p_track
+                  -- now (M2030 - see that process's own comment on why:
+                  -- Vivado DRC MDRV-1, two processes can't both drive it).
                   owner    <= NONE;
                elsif req_is_write = '1' and s_write = '0' and s_read = '0' then
                   owner <= NONE;

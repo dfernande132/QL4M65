@@ -687,7 +687,16 @@ seguir para la parte de escritura, una vez la lectura funcione.
    (`WNS=+0.194 ns`). Las 4 FSM de CDC del lado QNICE (`mdv1_loader_core`,
    lectura/escritura del menú) se han dejado intactas por ahora - jubilarlas
    a favor de `qnice2hyperram.vhd` queda como paso posterior independiente.
-   Pendiente: regresión en hardware real (`LOAD`/`DIR`/`SAVE`/recarga).
+   **`M2031` (2026-08-22):** primera prueba en hardware de `M2030` encontró
+   un bug real - la FSM de lectura de vuelta de QNICE (`mdv1_reader_core`)
+   esperaba un número fijo de ciclos calibrado para BRAM, insuficiente para
+   HyperRAM; SAVE seguido de apagado/reencendido persistía sectores con
+   contenido viejo pese al LED marcando "limpio". Arreglado con una señal
+   real de "dato listo" (`q_a_valid`) de extremo a extremo; ver
+   `DECISIONES.md` para el detalle (incluye un bug de síntesis
+   multiple-drivers encontrado al implementarlo). Build R6 compila limpio,
+   timing cumplido (`WNS=+0.111 ns`). Pendiente: regresión en hardware real
+   con `M2031` (`LOAD`/`DIR`/`SAVE`/apagar-encender/recarga).
 5. Ampliar a 2, 3 o 4 unidades.
 
 Diseño completo de la lectura en `.research/microdrive-read-design.md`

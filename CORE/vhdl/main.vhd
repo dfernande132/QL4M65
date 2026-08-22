@@ -309,6 +309,7 @@ signal mdv1_er_en     : std_logic;
 signal mdv1_sector    : std_logic_vector(7 downto 0);
 signal mdv1_wr_commit : std_logic;
 signal mdv1_dl_q      : std_logic_vector(15 downto 0);
+signal mdv1_dl_q_valid : std_logic;
 
 ---------------------------------------------------------------------------
 -- QL4M65 (Milestone 2 phase B, etapa 2): bitmap de sectores sucios +
@@ -1223,6 +1224,7 @@ begin
          dl_data   => mdv1_dl_data,
          dl_wr     => mdv1_dl_wr,
          dl_q      => mdv1_dl_q,
+         dl_q_valid => mdv1_dl_q_valid,
 
          -- QL4M65 fase B (M2022): canal de escritura zx8302 -> mdv1. Van en
          -- la direccion CONTRARIA a gap/tx_empty/rx_ready/dout (que si pasan
@@ -1412,11 +1414,23 @@ begin
    -- Core-clock-domain side: on a request, latch the address, drive mdv1's
    -- own dl_addr for a buffer read (harmless to do even for a bitmap
    -- request - dl_wr stays '0', and the result is only used for genuine
-   -- buffer addresses below), wait 2 cycles for the RAM's own read latency
-   -- (design doc S6.2: 1 would do, 2 gives free margin), then pick the byte
+   -- buffer addresses below), wait for mdv1_dl_q_valid (dpram's own
+   -- "q_a just became fresh for this address" pulse), then pick the byte
    -- from either mdv1_dl_q (buffer, high byte on an even address matching
    -- the loader's own convention) or mdv1_dirty (bitmap, 8 bits per byte
    -- index) and send it back.
+   --
+   -- QL4M65 M2030 (found on real hardware): this used to be a FIXED
+   -- 2-cycle wait (design doc S6.2: "1 would do, 2 gives free margin") -
+   -- correct against the original BRAM (1-cycle read latency), but
+   -- silently wrong once dpram's backing store became HyperRAM-through-
+   -- avm_cache (M2030): a genuine new read can take dozens of cycles
+   -- (8-cycle settle counter alone, before avm_cache/avm_fifo/HyperRAM
+   -- even start). The fixed wait read mdv1_dl_q long before the real
+   -- fetch (or write-through) had landed, silently sending QNICE stale
+   -- data - the SD-flush regression this closes: SAVE, then power off
+   -- and back on, showed several sectors reverted to their pre-write
+   -- content even though the drive LED had already gone back to "clean".
    mdv1_reader_core : process (clk_main_i)
       variable v_bm_idx : integer range 0 to 31;
    begin
@@ -1442,7 +1456,9 @@ begin
                   end if;
 
                when RDC_LATCH1 =>
-                  mdv1_rdcore_state <= RDC_LATCH2;
+                  if mdv1_dl_q_valid = '1' then
+                     mdv1_rdcore_state <= RDC_LATCH2;
+                  end if;
 
                when RDC_LATCH2 =>
                   if unsigned(mdv1_rd_req_addr) >= C_MDV1_DIRTY_BASE and
