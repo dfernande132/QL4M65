@@ -711,16 +711,20 @@ seguir para la parte de escritura, una vez la lectura funcione.
    (`WNS=+0.338 ns`, `WHS=+0.011 ns`, algo ajustado - a vigilar en futuras
    builds de este camino). **Confirmado por el usuario en hardware real:
    toda la regresión pasa.**
-5. Ampliar a 2, 3 o 4 unidades. **Plan acordado (2026-08-23):**
-   `.research/microdrive-second-unit-plan.md` — dos etapas verificables por
-   separado: (1) segundo maestro Avalon en tiempo real para `mdv2` +
-   árbitro nuevo delante de `hr_core_*`, verificado en simulación y luego
-   en hardware con mdv2 presente pero aún no cargable; (2) acceso genérico
-   de QNICE vía `qnice2hyperram.vhd` (offset de dirección, no FSM por
-   unidad), que jubila las 5 FSM de CDC de mdv1 y las sustituye por un
-   único mecanismo que sirve a las dos unidades - decisión explícita de no
-   duplicar las FSM de mdv1 para mdv2 y jubilar después (implicaría
-   implementar el mecanismo de acceso dos veces). Pendiente de empezar.
+5. Ampliar a 2, 3 o 4 unidades. **Plan acordado (2026-08-23, revisado el
+   mismo día contra el código real):** `.research/microdrive-second-unit-plan.md`
+   — dos etapas verificables por separado: (1) segundo maestro Avalon en
+   tiempo real para `mdv2` + `avm_arbit` en `main_clk` antes del FIFO de
+   CDC, verificado en simulación y luego en hardware con mdv2 presente
+   pero aún no cargable; (2) sacar el mecanismo de QNICE que hoy sirve a
+   mdv1 (5 primitivas de CDC + FSM) a un componente parametrizado e
+   instanciarlo dos veces — NO sustituirlo por `qnice2hyperram.vhd` en la
+   misma build (eso sería mezclar el riesgo de la unidad nueva con el
+   riesgo de un protocolo nuevo, justo en el camino que ya dio los tres
+   últimos bugs reales de hardware — `M2027`/`M2031`/`M2032`). El bitmap
+   de sucios se queda en registros del core, no se mueve a HyperRAM.
+   `qnice2hyperram.vhd` queda como etapa 3 opcional y futura. Pendiente de
+   empezar.
 
 Diseño completo de la lectura en `.research/microdrive-read-design.md`
 (pendiente de revisión antes de implementar, ver paso 1 arriba).
