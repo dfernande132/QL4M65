@@ -284,8 +284,11 @@ de AExp para el patrón, aunque QL4M65 no lo haya necesitado hasta ahora).
 releer ambos - de forma independiente (que escribir en uno no afecte al
 otro). Regresión completa, no solo "compila".
 
-**Estado (2026-08-23): compila y sintetiza limpio (R6, `M2034`, `WNS=+0.203 ns`,
-`WHS=+0.050 ns`, `RESULT=BUILD_OK`), pendiente de probar en hardware real.**
+**Estado (2026-08-24): confirmado en hardware real.** `LOAD`/`DIR`/`SAVE`/
+apagar-encender de mdv1 y mdv2 funcionan de forma independiente (`M2034`,
+R6). Único fallo encontrado: el zumbido de motor sintetizado solo sonaba
+en mdv1 - descuido, no problema de diseño, arreglado (ver `DECISIONES.md`)
+y pendiente de confirmar en la siguiente build.
 `mdv_qnice_bridge.vhd` (entidad nueva, sin genéricos, copia verbatim de la
 lógica de `main.vhd` ya probada) instanciada dos veces en `main.vhd`
 (`i_mdv1_bridge`, `i_mdv2_bridge`); `mega65.vhd` con `i_mdv2_csr`/

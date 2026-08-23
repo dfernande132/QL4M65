@@ -276,6 +276,16 @@ signal beeper_audio     : signed(15 downto 0);
 signal mdv1_motor_audio : signed(15 downto 0);
 signal audio_mix        : signed(16 downto 0);
 
+-- QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-24): mdv2's own motor hum -
+-- missed in the original etapa 1/2 implementation (found by the user on
+-- real hardware: mdv2 worked but stayed silent). Same tuning constants as
+-- mdv1's own (MDV1_MOTOR_HALF_PERIOD/MDV1_MOTOR_AMPLITUDE, reused as-is -
+-- no reason for the two drives to sound different), same gap-gated
+-- rhythm, gated on mdv_sel(1)/mdv2_gap instead of mdv_sel(0)/mdv1_gap.
+signal mdv2_motor_cnt   : natural range 0 to MDV1_MOTOR_HALF_PERIOD - 1 := 0;
+signal mdv2_motor_tone  : std_logic := '0';
+signal mdv2_motor_audio : signed(15 downto 0);
+
 ---------------------------------------------------------------------------
 -- QL4M65 (Milestone 2 phase A): microdrive 1 - mdv.v (unmodified) + its
 -- Vivado-clean dpram (mdv_dpram.vhd, BRAM-backed) + the QNICE-clock-domain
@@ -899,13 +909,33 @@ begin
       end if;
    end process mdv1_motor_snd;
 
+   -- QL4M65 Milestone 2 paso 5, etapa 2: mdv2's own counterpart, identical
+   -- logic to mdv1_motor_snd above - see that process's own header for the
+   -- full rationale.
+   mdv2_motor_snd : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if mdv_sel(1) = '0' or mdv2_gap = '1' then
+            mdv2_motor_cnt  <= 0;
+            mdv2_motor_tone <= '0';
+         elsif mdv2_motor_cnt = MDV1_MOTOR_HALF_PERIOD - 1 then
+            mdv2_motor_cnt  <= 0;
+            mdv2_motor_tone <= not mdv2_motor_tone;
+         else
+            mdv2_motor_cnt <= mdv2_motor_cnt + 1;
+         end if;
+      end if;
+   end process mdv2_motor_snd;
+
    beeper_audio     <= to_signed(16#7FFF#, 16) when audio_bit = '1' else to_signed(0, 16);
    mdv1_motor_audio <= to_signed(MDV1_MOTOR_AMPLITUDE, 16) when mdv1_motor_tone = '1' else to_signed(0, 16);
+   mdv2_motor_audio <= to_signed(MDV1_MOTOR_AMPLITUDE, 16) when mdv2_motor_tone = '1' else to_signed(0, 16);
 
    -- Mix in a 17-bit intermediate and saturate before truncating back to
-   -- 16 bits, so a beeper click and the motor hum coinciding can never
-   -- wrap around into a loud glitch.
-   audio_mix <= resize(beeper_audio, 17) + resize(mdv1_motor_audio, 17);
+   -- 16 bits, so a beeper click and both motor hums coinciding can never
+   -- wrap around into a loud glitch (worst case 0x7FFF + 1200 + 1200 =
+   -- 35167, comfortably inside the 17-bit signed range).
+   audio_mix <= resize(beeper_audio, 17) + resize(mdv1_motor_audio, 17) + resize(mdv2_motor_audio, 17);
 
    audio_left_o  <= to_signed(16#7FFF#, 16)   when audio_mix > to_signed(16#7FFF#, 17) else
                     to_signed(-16#8000#, 16)  when audio_mix < to_signed(-16#8000#, 17) else

@@ -81,19 +81,30 @@ type WHS_RECORD_ARRAY_TYPE is array (0 to WHS_RECORDS - 1) of WHS_RECORD_TYPE;
 -- Within a selector's address range, address 0 is the beginning of the string itself, while address 0xFFF of the 4k
 -- window contains the amount of pages, so each zero-terminated string can be up to 4095 bytes = 4094 characters long.
 
+-- QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-24): "Developed by" in
+-- English (was Spanish), status line changed from "in progress" to "OK"
+-- now that Milestone 2's full scope (2 microdrives, load+save both) is
+-- implemented, and the old "No QL-SD, mouse or GoldCard/SMSQE yet." line
+-- replaced with a preview of Milestone 3's own scope - text approved by
+-- the user via a mockup before this edit (see DECISIONES.md).
 constant SCR_WELCOME : string :=
 
    "Sinclair QL for MEGA65 (QL4M65)\n" &
-   "Desarrollado por dfsantos (2026)\n\n\n" &
-   "Milestone 2 - MEGA65 port in progress\n\n" &
+   "Developed by dfsantos (2026)\n\n\n" &
+   "Status: Milestone 2 - OK\n\n" &
 
    "Based on MiSTer-devel/QL_MiSTer\n" &
    "Powered by MiSTer2MEGA65,\n" &
    "done by sy2002 and MJoergen\n\n" &
 
-   "Milestone 2 scope: native QL speed, PAL,\n" &
-   "128k RAM, keyboard, 1 microdrive (read).\n" &
-   "No QL-SD, mouse or GoldCard/SMSQE yet.\n\n\n" &
+   "Milestone 2 includes:\n" &
+   " - Native QL speed, PAL video\n" &
+   " - 128k RAM\n" &
+   " - Keyboard\n" &
+   " - 2 microdrives (load, save, SD write-back)\n\n" &
+
+   "Milestone 3 (next): full speed,\n" &
+   "640k and 4MB RAM.\n\n\n" &
 
    "    Press Space to continue.\n\n\n";
 
