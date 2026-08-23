@@ -6,33 +6,36 @@ A port of the **Sinclair QL** to the **MEGA65**, built on top of the
 based on the [MiSTer-devel/QL_MiSTer](https://github.com/MiSTer-devel/QL_MiSTer)
 core (68008/`fx68k` CPU, `zx8301` video ULA, `zx8302` I/O ULA).
 
-**Current status: Milestone 1 complete. Milestone 2 phase B (microdrive
-read AND write, including persisting writes back to the SD card) complete.**
+**Current status: Milestone 1 complete. Milestone 2 (two independent
+microdrives, HyperRAM-backed, full read/write with automatic SD write-back)
+complete.**
 The QL boots end-to-end on real MEGA65 R6 hardware: RAM check, boot logo,
 F1-F4 screen, 10-second timeout (or F1/F2/F5 response), and into SuperBASIC
 with a working keyboard - both Minerva and MGE tested. System ROM loads
 either automatically from a fixed SD card path at boot or manually via the
 Shell's Options menu, with the core auto-resetting itself after any manual
-ROM change. On top of that, a single microdrive (`mdv1_`) can be loaded from
-a `.MDV` image via the Shell's Options menu and both read and written by
-QDOS/Minerva - `DIR mdv1_`/`LRUN mdv1_xxx` (sustained, continuous reads of
-full-size programs) and `SAVE mdv1_xxx`/reload round-trips both tested
-working on real hardware, **and those writes are now saved back to the
-SD card's `.mdv` file automatically, in the background, with no menu
-interaction required** - the MEGA65's drive-activity LED turns blue
-whenever there are unsaved changes and back to red once they've been
-written out, so a power cycle no longer discards anything. See
-`.research/PORTING-PLAN.md` and `DECISIONES.md` (in the parent directory)
-for the full, detailed log of the whole investigation and every decision
-made along the way - both the microdrive read path and the write path took
-long, genuinely instructive debugging journeys (see the "Microdrive image
-format" note below for the read-side headline lesson).
+ROM change. On top of that, **two independent microdrives** (`mdv1_`,
+`mdv2_`) can each be loaded from a `.MDV` image via the Shell's Options menu
+and both read and written by QDOS/Minerva - `DIR mdv1_`/`LRUN mdv1_xxx`
+(sustained, continuous reads of full-size programs) and `SAVE
+mdv1_xxx`/reload round-trips both tested working on real hardware for both
+units independently, **and those writes are saved back to each drive's own
+`.mdv` file automatically, in the background, with no menu interaction
+required** - each drive's activity LED turns blue whenever there are
+unsaved changes and back to red once they've been written out, so a power
+cycle no longer discards anything. Both drives' image buffers live in real
+HyperRAM (not FPGA BRAM), sharing the physical chip through a small
+round-robin arbiter. See `.research/PORTING-PLAN.md` and `DECISIONES.md`
+(in the parent directory) for the full, detailed log of the whole
+investigation and every decision made along the way - the microdrive read
+path, the write path, the HyperRAM migration, and the second unit each took
+genuinely instructive debugging journeys (see the "Microdrive image format"
+note below for the read-side headline lesson).
 
-Milestone 2 continues towards: moving the microdrive buffer from BRAM to
-HyperRAM, expanding from 1 to up to 4 simultaneous microdrives, memory
-expansion (640 KB / 4096 KB), and CPU speed switching (16 MHz / 24 MHz /
-Full) - see `.research/PORTING-PLAN.md` section 7 for the current milestone
-order and scope of each remaining phase.
+Next up, Milestone 3: memory expansion (640 KB / 4096 KB) and CPU speed
+switching (16 MHz / 24 MHz / Full), both already present in the original
+core as multiples of the base clock - see `.research/PORTING-PLAN.md`
+section 7 for the current milestone order and scope.
 
 Milestone 1 scope
 -----------------
@@ -62,16 +65,16 @@ mouse, or GoldCard/SMSQ,E support - these are planned for later milestones
 (see `.research/PORTING-PLAN.md` section 7 for the current milestone
 order).
 
-Milestone 2 scope (in progress)
---------------------------------
+Milestone 2 scope (complete)
+-----------------------------
 
-- **Microdrive, phase A (done): one drive, read-only.** Load a `.MDV` image
+- **Microdrive, phase A: one drive, read-only.** Load a `.MDV` image
   (QLAY format, exactly 174930 bytes) as `mdv1_` via the Shell's Options
   menu; `DIR mdv1_` and `LRUN mdv1_xxx` both work reliably, including full,
   sustained reads of real programs. `mdv.v` (the microdrive controller
   itself) is unmodified upstream MiSTer-devel code, faithfully emulating
   real 1984 microdrive hardware bit-serially at 200 kbit/s.
-- **Microdrive, phase B (done): full read/write, saved back to the SD card
+- **Microdrive, phase B: full read/write, saved back to the SD card
   automatically.** `SAVE mdv1_xxx` followed by `DIR mdv1_` and `LOAD
   mdv1_xxx` round-trips correctly on real hardware, verified by
   QDOS/Minerva's own write-then-verify logic. Dirty sectors are flushed
@@ -85,8 +88,18 @@ Milestone 2 scope (in progress)
   run any firmware, so writes from the last moment before that can still be
   lost - the same accepted limitation vdrives-based cores and other M2M
   ports with background write-back share.)
-- Still to come: moving the microdrive buffer to HyperRAM, expanding to 2-4
-  simultaneous drives, memory expansion, CPU speed switching.
+- **Microdrive, phase C: migrated from FPGA BRAM to real HyperRAM.** Same
+  read/write/SD-write-back behaviour as phase B, now backed by the MEGA65's
+  actual HyperRAM chip through a small write-through cache, freeing up BRAM
+  for future use and paving the way for more than one drive.
+- **Second microdrive (`mdv2_`): fully independent, same feature set as
+  `mdv1_`.** Both drives share the physical HyperRAM through a round-robin
+  arbiter and can be loaded, read, written, and saved independently -
+  writing to one never affects the other. The QNICE-side loading/read-back
+  mechanism is a single, generic VHDL component instantiated twice, rather
+  than two separate hand-written copies.
+- Each drive has its own activity LED (blue while dirty, red once saved)
+  and its own synthesized motor hum while selected.
 
 ### Microdrive image format: it must be a genuinely valid QLAY `.mdv`
 

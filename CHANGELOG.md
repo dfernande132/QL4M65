@@ -4,6 +4,48 @@ All notable changes to QL4M65 (CoreQL) are documented here, milestone by
 milestone. For a full technical/design log (in Spanish) see
 `DECISIONES.md` and `.research/PORTING-PLAN.md`.
 
+## Milestone 2 complete: two microdrives, HyperRAM-backed, full read/write
+
+- **M2035** - fixed a real omission from M2033/M2034: the second
+  microdrive's synthesized motor hum was never wired up (only mdv1 had
+  one). Also refreshed the boot welcome screen: "Developed by" in
+  English, current status, and a preview of Milestone 3's scope.
+- **M2034** - etapa 2: mdv2 becomes loadable/saveable from the Shell's
+  Options menu. The QNICE-side loader/read-back mechanism was factored
+  out into a single, generic, no-generics VHDL entity
+  (`mdv_qnice_bridge.vhd`) and instantiated twice - the first time this
+  project parametrized a real piece of logic instead of duplicating it,
+  made possible because it's plain VHDL, verifiable in simulation before
+  touching hardware. The QNICE-side assembly routine that streams dirty
+  sectors back to the SD card was duplicated instead, deliberately - it
+  already carries three hard-won hardware bug fixes (M2027/M2031/M2032)
+  and there's no assembler simulator available to verify a riskier rewrite
+  against.
+- **M2033** - etapa 1: a second microdrive (mdv2) gets its own real-time
+  Avalon-MM master and shares the HyperRAM path with mdv1 through a new
+  2-to-1 round-robin arbiter, verified in simulation (a new dual-instance
+  testbench) before hardware. Caught and fixed a real address-collision
+  bug during design review, before it ever reached synthesis: both
+  microdrives' internal buffers would have silently shared the same
+  HyperRAM region without a per-instance base-address generic.
+- **M2030-M2032** - moved mdv1's image buffer from BRAM to real HyperRAM,
+  behind the same write-through cache used elsewhere in the framework.
+  Two real hardware bugs found and fixed along the way: a fixed-cycle
+  read-back wait calibrated for BRAM's 1-cycle latency silently returned
+  stale data once HyperRAM's much longer, variable latency was in the
+  loop (fixed with a genuine "data ready" handshake signal end to end);
+  and that handshake signal, first implemented as a one-cycle pulse,
+  didn't work for a cache hit on the same address requested twice in a
+  row (the exact pattern the menu uses on every return to the Options
+  screen) - redesigned as a level instead.
+
+With this, Milestone 2's full scope is done and confirmed on real
+hardware: native QL speed, PAL video, 128 KB RAM, keyboard, and two fully
+independent microdrives (load, save, automatic background SD write-back,
+per-drive activity LED and motor hum) - both now backed by real HyperRAM
+rather than BRAM. Full technical write-ups for every build in
+`DECISIONES.md` and `.research/PORTING-PLAN.md`.
+
 ## Milestone 2 - Phase B: Microdrive write support (`SAVE`, saved to SD) - complete
 
 - **M2029** - the MEGA65's drive-activity LED turns blue while mdv1 has
