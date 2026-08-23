@@ -18,6 +18,14 @@ set_param general.maxThreads 8
 
 open_project {E:/QL_MEGA65/Fase0/CoreQL/CORE/CORE-R3.xpr}
 
+# QL4M65 Milestone 3, Fase 1 (2026-08-23): same hold-margin fix as
+# build_core.tcl's own R6 flow - see that file's comment for the full
+# diagnosis (hr_rwds domain, HyperRAM read-data capture, WHS=+0.011ns with
+# the default strategy vs +0.213ns with this one, ~19x more margin, no RTL
+# change). Applied here too so R3's own eventual release build gets the
+# same benefit, not just R6's dev builds.
+set_property strategy {Performance_ExplorePostRoutePhysOpt} [get_runs impl_1]
+
 set_property STEPS.SYNTH_DESIGN.TCL.PRE {E:/QL_MEGA65/Fase0/CoreQL/CORE/m2m-rom/synth_pre.tcl} [get_runs synth_1]
 
 set core_ql_dir {E:/QL_MEGA65/Fase0/CoreQL/CORE/QL_MiSTer}

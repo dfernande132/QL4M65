@@ -6,6 +6,26 @@ set_param general.maxThreads 8
 
 open_project {E:/QL_MEGA65/Fase0/CoreQL/CORE/CORE-R6.xpr}
 
+# QL4M65 Milestone 3, Fase 1 (2026-08-23): "Vivado Implementation Defaults"
+# left the hr_rwds clock domain (HyperRAM's read-data-capture path, IDDR
+# sampled off the chip's own RWDS strobe) at WHS=+0.011ns in M3001 - the
+# single tightest hold margin in the entire design by a wide margin (next
+# closest domain had 0.057ns, 5x more), and the one path this project's
+# own build history has flagged as marginal since M2025 without it ever
+# mattering - until qram_avm (this milestone) became the first workload to
+# actually exercise it densely, at which point it caused a real hardware
+# hang (see DECISIONES.md's "Milestone 3" section for the full diagnosis:
+# a hold violation on a source-synchronous read-data path can corrupt a
+# captured bit and desync hyperram_ctrl.vhd's own FSM permanently, hanging
+# everything sharing that physical controller - including QNICE, since it
+# shares the same hr_core_*/framework-level arbiter). Re-implementing with
+# this strategy (same synth_1 result, no RTL change) found a
+# placement/routing solution with WHS=+0.213ns on hr_rwds instead - ~19x
+# more margin, global WHS +0.011ns -> +0.051ns. Set as the permanent
+# default here (not just a one-off diagnostic run) since it is a real,
+# low-risk, zero-RTL-cost improvement every future build should keep.
+set_property strategy {Performance_ExplorePostRoutePhysOpt} [get_runs impl_1]
+
 # QL4M65: re-applied on every build (not just set once by hand in the
 # .xpr) so it can never silently go missing again - see synth_pre.tcl's
 # own header comment for why this is needed at all (M1042 finding).

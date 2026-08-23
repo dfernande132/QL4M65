@@ -196,11 +196,20 @@ rendimiento/sensación real en hardware — a medir, no a asumir.
    `CORE-R6.xpr` actualizado con el fichero nuevo.
 5. **Build R6: hecho (`M3001`).** `RESULT=BUILD_OK`, `WNS=+0.090 ns`,
    `WHS=+0.011 ns`, 0 errores, 0 *critical warnings*. `.cor` empaquetado
-   como `QL4M65-CoreQL-M3001_r6.cor`. **Pendiente de prueba en hardware
-   real**: regresión completa — arranque de Minerva, BASIC, `LOAD`/`DIR`/
-   `SAVE` de mdv1 y mdv2 sin cambios de comportamiento; la RAM principal
-   debe ser indistinguible en corrección, aunque potencialmente algo más
-   lenta en el peor caso de fallo de caché de `avm_cache`.
+   como `QL4M65-CoreQL-M3001_r6.cor`. **Probado en hardware real: FALLA**
+   — arranca, lee mdv1, a veces guarda, se cuelga al poco (una vez incluso
+   con el menú OSD abierto). Diagnóstico completo en `DECISIONES.md`,
+   sección "Milestone 3, Fase 1 — M3001 falla en hardware real": margen de
+   *hold* al límite en el dominio `hr_rwds` (`WHS=+0.011 ns`, el más
+   ajustado del diseño desde `M2025`, nunca antes exigido de verdad —
+   `qram_avm` es la primera carga de trabajo que genera tráfico denso hacia
+   HyperRAM). **`M3002`: mismo RTL, estrategia de implementación
+   `Performance_ExplorePostRoutePhysOpt` (fijada como nuevo valor por
+   defecto en `build_core.tcl`/`build_core_r3.tcl`) — `hr_rwds` sube a
+   `WHS=+0.213 ns` (~19×), global `WNS=+0.191 ns`/`WHS=+0.051 ns`.** `.cor`
+   empaquetado como `QL4M65-CoreQL-M3002_r6.cor`. **Pendiente de
+   confirmación en hardware real** (misma regresión completa que `M3001`
+   no pudo pasar).
 
 ### Fase 2 — Tamaño de RAM seleccionable (640k / 2048k)
 
