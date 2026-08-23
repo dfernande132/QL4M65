@@ -342,6 +342,12 @@
           <Attr Name="UsedIn" Val="simulation"/>
         </FileInfo>
       </File>
+      <File Path="$PPRDIR/vhdl/mdv_qnice_bridge.vhd">
+        <FileInfo>
+          <Attr Name="UsedIn" Val="synthesis"/>
+          <Attr Name="UsedIn" Val="simulation"/>
+        </FileInfo>
+      </File>
       <File Path="$PPRDIR/QL_MiSTer/rtl/T48/opc_decoder.vhd">
         <FileInfo>
           <Attr Name="UsedIn" Val="synthesis"/>

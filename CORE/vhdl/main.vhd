@@ -120,6 +120,19 @@ entity main is
       -- why a single-cycle pulse (the M2004-M2010 behaviour) isn't enough.
       qnice_mdv1_loading_i    : in  std_logic;
 
+      -- QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-23,
+      -- .research/microdrive-second-unit-plan.md section 2.1): mdv2's own
+      -- QNICE-side window, same shape as mdv1's own set above (qnice_clk_i/
+      -- qnice_rst_i are already shared, no per-drive equivalent needed for
+      -- those two).
+      qnice_mdv2_addr_i       : in  std_logic_vector(27 downto 0);
+      qnice_mdv2_data_i       : in  std_logic_vector(15 downto 0);
+      qnice_mdv2_ce_i         : in  std_logic;
+      qnice_mdv2_we_i         : in  std_logic;
+      qnice_mdv2_wait_o       : out std_logic;
+      qnice_mdv2_data_o       : out std_logic_vector(15 downto 0);
+      qnice_mdv2_loading_i    : in  std_logic;
+
       -- QL4M65 (Milestone 2 phase A, M2008): microdrive activity LED - real
       -- QL hardware lights it whenever a drive is selected (zx8302.v's own
       -- "led" output, sel[0] of the mdv_sel shift register); previously
@@ -304,13 +317,6 @@ signal mdv1_dl_data   : std_logic_vector(15 downto 0);
 signal mdv1_download  : std_logic;
 signal mdv1_dl_wr     : std_logic;
 
--- QL4M65 (Milestone 2 phase B, etapa 2): mdv1_dl_addr has two logical
--- owners now (mdv1_loader_core for writes, mdv1_reader_core below for
--- read-back) - each drives its own signal, muxed into the real mdv1_dl_addr
--- near mdv1_reader_core's own declaration further down.
-signal mdv1_ld_dl_addr : std_logic_vector(16 downto 0);
-signal mdv1_rd_dl_addr : std_logic_vector(16 downto 0);
-
 ---------------------------------------------------------------------------
 -- QL4M65 (Milestone 2 phase B, M2022): microdrive write channel, CPU ->
 -- zx8302.v -> mdv1. Etapa 1 del diseño (.research/microdrive-write-design.md
@@ -349,6 +355,16 @@ signal mdv2_byte_raw     : std_logic_vector(7 downto 0);
 signal mdv2_sector    : std_logic_vector(7 downto 0);
 signal mdv2_wr_commit : std_logic;
 
+-- QL4M65 Milestone 2 paso 5, etapa 2: mdv2's own image-load port, same
+-- shape as mdv1's own set (main.vhd:302-305/327-328) - now wired for real
+-- (i_mdv2_bridge below), no longer tied to inert '0'/open.
+signal mdv2_dl_addr    : std_logic_vector(16 downto 0);
+signal mdv2_dl_data    : std_logic_vector(15 downto 0);
+signal mdv2_download   : std_logic;
+signal mdv2_dl_wr      : std_logic;
+signal mdv2_dl_q       : std_logic_vector(15 downto 0);
+signal mdv2_dl_q_valid : std_logic;
+
 ---------------------------------------------------------------------------
 -- QL4M65 (Milestone 2 phase B, etapa 2): bitmap de sectores sucios +
 -- lectura del buffer/bitmap desde QNICE, para el futuro volcado a SD
@@ -373,83 +389,18 @@ signal mdv1_dirty_clear : std_logic;  -- pulso de 1 ciclo de clk_main_i, ver mas
 -- sin una imagen cargada, y no hay forma de cargar una todavia.
 signal mdv2_dirty       : std_logic_vector(255 downto 0) := (others => '0');
 
--- QL4M65: limpiar el bitmap es "QNICE escribe cualquier valor en
--- C_MDV1_DIRTY_CLR". qnice_dev_ce_i/we_i se mantienen durante todo el ciclo
--- de bus de QNICE (varios qnice_clk, igual que cpu_sel/cpu_wr del 68000
--- duran varios cen en zx8302.v) - xpm_cdc_single solo sincroniza el NIVEL,
--- asi que hace falta la MISMA deteccion de flanco en clk_main_i que ya hizo
--- falta en M2023/M2024 (rtl/mdv.v's wr_strobe_prev) para no confundir un
--- nivel sostenido con varios pulsos.
-signal mdv1_clear_req       : std_logic;  -- dominio QNICE, nivel
-signal mdv1_clear_sync      : std_logic;  -- dominio core, nivel ya sincronizado
-signal mdv1_clear_sync_prev : std_logic := '0';
+-- QL4M65 Milestone 2 paso 5, etapa 2: mismo pulso de limpieza que
+-- mdv1_dirty_clear, ahora que mdv2 tiene su propio i_mdv2_bridge que lo
+-- genera (antes inerte, ver p_dirty2's own comment mas abajo).
+signal mdv2_dirty_clear : std_logic;
 
--- Camino de lectura QNICE<-core: dos xpm_cdc_handshake nuevos (peticion de
--- direccion QNICE->core, respuesta de dato core->QNICE), mismo protocolo de
--- 4 fases y misma disciplina de reset que el cargador de escritura ya
--- probado (mdv1_loader_qnice/mdv1_loader_core, ver su cabecera) - nunca
--- sincronizadores a mano (M2011/M2012), reset desde el primer dia en los
--- dos lados (M2017).
-signal qnice_mdv1_data_o_i : std_logic_vector(15 downto 0) := (others => '0');
-
-signal mdv1_rd_addr    : std_logic_vector(27 downto 0);
-signal mdv1_rd_send    : std_logic := '0';
-
-signal mdv1_cdc_req_src_rcv  : std_logic;
-signal mdv1_cdc_req_dest_req : std_logic;
-signal mdv1_cdc_req_dest_ack : std_logic := '0';
-signal mdv1_cdc_req_dest_out : std_logic_vector(27 downto 0);
-
-signal mdv1_rd_result_send : std_logic := '0';
-signal mdv1_rd_result_data : std_logic_vector(15 downto 0);
-
-signal mdv1_cdc_resp_src_rcv  : std_logic;
-signal mdv1_cdc_resp_dest_req : std_logic;
-signal mdv1_cdc_resp_dest_ack : std_logic := '0';
-signal mdv1_cdc_resp_dest_out : std_logic_vector(15 downto 0);
-
-type t_mdv1_rd_state is (RD_IDLE, RD_SEND_WAIT_RCV, RD_SEND_WAIT_RCV_LOW, RD_WAIT_RESP, RD_RESP_WAIT_LOW);
-signal mdv1_rd_state : t_mdv1_rd_state := RD_IDLE;
-
-type t_mdv1_rdcore_state is (RDC_IDLE, RDC_REQ_WAIT_LOW, RDC_LATCH1, RDC_LATCH2, RDC_SEND_WAIT_RCV, RDC_SEND_WAIT_RCV_LOW);
-signal mdv1_rdcore_state : t_mdv1_rdcore_state := RDC_IDLE;
-signal mdv1_rd_req_addr  : std_logic_vector(27 downto 0);
-
--- QL4M65 (M2027): previous-cycle level of the raw read-trigger condition
--- (qnice_mdv1_ce_i='1' and we_i='0'), qnice_clk_i domain - see
--- qnice_mdv1_wait_o's own comment for why this edge detector exists.
-signal mdv1_rd_req_prev : std_logic := '0';
-
--- QL4M65 (M2011): qnice_mdv1_loading_i (QNICE clock domain) synchronized
--- into clk_main_i via xpm_cdc_single (a genuine, unrelated-clocks CDC
--- crossing - a hand-rolled 2-FF process here left Vivado analyzing it as
--- a synchronous path with no timing exception, producing a real WNS
--- failure on the qnice_clk->main_clk path; xpm_cdc_single is auto-
--- recognized by Vivado's timing engine, same reason xpm_cdc_handshake is
--- used for the loader's own word data instead of a hand-rolled handshake).
-signal mdv1_loading_sync : std_logic;
-
--- QNICE-clock-domain byte-pair accumulator (mdv1_ld_word_addr/data feed
--- xpm_cdc_handshake's src_in once a full 16-bit word is assembled - see
--- the design doc: mdv.v's image format is big-endian at the byte level,
--- first file byte -> data(15 downto 8))
-signal mdv1_ld_byte0       : std_logic_vector(7 downto 0);
-signal mdv1_ld_word_addr   : std_logic_vector(16 downto 0);
-signal mdv1_ld_word_data   : std_logic_vector(15 downto 0);
-signal mdv1_ld_send        : std_logic := '0';  -- level-held (see mdv1_loader_qnice), needs a defined power-on value
-signal mdv1_ld_busy        : std_logic := '0';  -- '1' for the whole handshake (send asserted through rcv dropping again) - drives qnice_mdv1_wait_o
-
--- xpm_cdc_handshake's own src/dest signals (33 bits: 17-bit word address + 16-bit word data)
-signal mdv1_cdc_src_in    : std_logic_vector(32 downto 0);
-signal mdv1_cdc_src_rcv   : std_logic;
-signal mdv1_cdc_dest_req  : std_logic;
-signal mdv1_cdc_dest_ack  : std_logic := '0';  -- level-held (see mdv1_loader_core), needs a defined power-on value
-signal mdv1_cdc_dest_out  : std_logic_vector(32 downto 0);
-
--- core-clock-domain loader FSM (drives mdv1_dl_addr/dl_data/dl_wr/download
--- from mdv1_cdc_dest_out once xpm_cdc_handshake delivers a word)
-type t_mdv1_ld_state is (LD_IDLE, LD_WAIT_REQ_LOW);
-signal mdv1_ld_state : t_mdv1_ld_state := LD_IDLE;
+-- QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-23): toda la logica de
+-- carga/lectura QNICE<->core que antes vivia aqui (mdv1_ld_*/mdv1_rd_*/
+-- mdv1_cdc_*/mdv1_clear_*, tres tipos de FSM) se ha extraido, verbatim, a
+-- CORE/vhdl/mdv_qnice_bridge.vhd - ver la cabecera de esa entidad para el
+-- porque y .research/microdrive-second-unit-plan.md section 2.1. Se
+-- instancia dos veces mas abajo (i_mdv1_bridge, i_mdv2_bridge); ninguna
+-- de estas senales existe ya en main.vhd, son internas a esa entidad.
 
 -- IPC link to ipc.vhd (QL4M65 M1031: the real emulated 8049, T48 core +
 -- real firmware ROM - replaces both the embedded 8049 emulation removed
@@ -1003,241 +954,69 @@ begin
       ); -- i_ipc
 
    ---------------------------------------------------------------------------
-   -- QL4M65 (Milestone 2 phase A): microdrive 1 image loader.
-   --
-   -- QNICE-clock-domain side: accumulates two incoming bytes (mdv.v's image
-   -- format is big-endian at the byte level - the first file byte becomes
-   -- the high byte of the word, see rtl/mdv.v:88 and
-   -- .research/microdrive-read-design.md) into one 16-bit word, then hands
-   -- it to xpm_cdc_handshake. qnice_mdv1_wait_o stalls the QNICE bus cycle
-   -- combinationally the instant a word-completing (odd-address) write is
-   -- seen, held through mdv1_ld_busy until the core side acknowledges - the
-   -- QNICE Shell's own generic byte-loading loop (shell.asm's LOAD_IMAGE)
-   -- needs no special-casing, same as Main/Back ROM's own manual load.
-   --
-   -- IMPORTANT (found 2026-08-04, after M2004 hung on hardware mid-load):
-   -- xpm_cdc_handshake's src_send/dest_ack are LEVEL signals that must be
-   -- asserted and HELD until the other side's src_rcv/dest_req responds -
-   -- NOT one-cycle pulses. Confirmed by reading the actual primitive
-   -- source (C:\Xilinx\Vivado\2022.2\data\ip\xpm\xpm_cdc\hdl\xpm_cdc.sv,
-   -- module xpm_cdc_handshake) rather than assuming - its own simulation
-   -- assertions spell out the exact 4-phase protocol: src_send stays high
-   -- until src_rcv='1', then drops, then a NEW send may only start once
-   -- src_rcv has also dropped back to '0'. The first version of this loader
-   -- pulsed both src_send and dest_ack for a single cycle, which let
-   -- xpm_cdc_handshake's internal synchronizers drop the request before
-   -- the other side ever safely captured it - a real handshake deadlock
-   -- (not a timing/setup issue), matching the hang seen in hardware.
-   --
-   -- SECOND BUG (found 2026-08-04, M2005 still hung identically): wait_o
-   -- must depend ONLY on registered state (mdv1_ld_busy), never on the raw
-   -- live qnice_mdv1_ce_i/we_i/addr_i inputs. The QNICE CPU (qnice_cpu.vhd,
-   -- state cs_exepost_store_dst_indirect) holds ce/we/addr asserted for as
-   -- long as it sees WAIT_FOR_DATA='1', and only retracts them the cycle
-   -- AFTER it samples wait='0'. The previous formula OR'd the live ce/we/
-   -- addr(0) straight into wait_o, so the instant mdv1_ld_busy dropped back
-   -- to '0' (transaction genuinely done), that same live term (still '1',
-   -- since the CPU hadn't yet had a chance to react) kept wait_o at '1' -
-   -- the CPU never saw a low cycle to retract on, so it held forever and
-   -- wait_o never had a reason to drop: a permanent deadlock on every single
-   -- odd-byte write, i.e. on the very first word of any .mdv load. This is
-   -- also why M2005's CDC-protocol fix alone did not change the symptom -
-   -- it fixed a real but different bug; this one is what actually blocked
-   -- the loader. Reference: M2M/vhdl/qnice2hyperram.vhd (the mechanism that
-   -- successfully loads .win files) computes its wait_o purely from its own
-   -- registered m_avm_write_o/m_avm_read_o/reading, never from the raw
-   -- incoming s_qnice_cs_i/s_qnice_write_i - same fix, same idiom, applied
-   -- here.
+   -- QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-23,
+   -- .research/microdrive-second-unit-plan.md section 2.1): QNICE<->core
+   -- bridge for each microdrive's buffer - image load and byte/dirty-bitmap
+   -- read-back. Extracted verbatim into mdv_qnice_bridge.vhd (see that
+   -- entity's own header for the full M2004-M2032 bug history behind every
+   -- rule in it: level-held xpm_cdc_handshake handshakes, registered-only
+   -- vs. live-edge-qualified wait_o, reset from day one on both sides of
+   -- every CDC, and the q_a_valid LEVEL semantics M2032 settled on).
+   -- Instantiated twice: mdv1's own instance is a behavior-preserving
+   -- refactor (same signals it always drove); mdv2's is genuinely new.
    ---------------------------------------------------------------------------
 
-   -- QL4M65 (Milestone 2 phase B, etapa 2): qnice_mdv1_wait_o now also
-   -- covers the read-back path (mdv1_reader_qnice, further down) - combined
-   -- here in one place rather than driven from two, since a std_logic
-   -- output port can only have one source. mdv1_ld_busy's own contribution
-   -- stays purely registered (M2006 lesson, see above): a write's DATA is
-   -- captured unconditionally by mdv1_loader_qnice's clocked process on the
-   -- very first ce_i/we_i cycle regardless of wait_o, so there is nothing
-   -- to race there.
-   --
-   -- THIRD BUG (found 2026-08-16, M2026 hardware: every SD flush of mdv1
-   -- corrupted sectors 8/10/18 - see DECISIONES.md's M2027 section for the
-   -- full byte-level diagnosis): the read-back term genuinely DOES need a
-   -- live (non-registered) contribution, unlike mdv1_ld_busy. QNICE's own
-   -- CPU (qnice_cpu.vhd's cs_exeprep_get_src_indirect) both asserts
-   -- ce_i/addr AND checks WAIT_FOR_DATA for the FIRST time in the very
-   -- same qnice_clk cycle for an indirect read - there is no extra setup
-   -- cycle before that first check (unlike cs_fetch, which loops in the
-   -- same state on every retry). mdv1_rd_state only leaves RD_IDLE on the
-   -- clock edge AFTER RD_IDLE itself sees ce_i='1'/we_i='0' (further down),
-   -- so a purely registered-state wait_o is still '0' during that exact
-   -- first cycle - the CPU sees no wait request and immediately captures
-   -- whatever qnice_mdv1_data_o is left over from the PREVIOUS read, one
-   -- full request behind the one actually being asked for, on every single
-   -- call to READ_MDV1_BYTE (m2m-rom.asm). Confirmed by byte-level analysis
-   -- of a real corrupted .mdv: mod[N] == orig[N-1] for the entire 686-byte
-   -- span of every dirty sector, with the very first byte of each sector
-   -- instead carrying over whatever the PRECEDING READ_MDV1_BYTE call (the
-   -- last dirty-bitmap byte, or the previous dirty sector's last byte)
-   -- last returned - exactly what "one response behind" predicts.
-   --
-   -- Fixed by qualifying the live ce_i/we_i term with mdv1_rd_req_prev='0'
-   -- (an actual rising edge, not just a level - same idiom as mdv.v's
-   -- wr_strobe_prev and this file's own mdv1_clear_sync_prev). This is
-   -- deliberately NOT the same shape as M2006's SECOND BUG: that one OR'd
-   -- in a bare level (ce_i='1' and we_i='1'), which stayed true even after
-   -- mdv1_ld_busy legitimately dropped back to '0' (the CPU can hold ce_i
-   -- asserted for one extra cycle after it samples wait_o='0', before it
-   -- reacts and retracts it), permanently re-triggering wait_o with no low
-   -- cycle for the CPU to ever see. Here, that same lingering high ce_i is
-   -- harmless: mdv1_rd_req_prev was ALSO '1' on the cycle before, so the
-   -- edge qualifier is false and the live term stays false throughout the
-   -- retraction cycle - it can only fire again once ce_i has gone low
-   -- first, which only happens for a genuinely new request.
-   qnice_mdv1_wait_o <= '1' when (mdv1_ld_busy = '1' or mdv1_rd_state /= RD_IDLE or
-                                   (qnice_mdv1_ce_i = '1' and qnice_mdv1_we_i = '0' and mdv1_rd_req_prev = '0'))
-                        else '0';
-
-   mdv1_rd_edge : process (qnice_clk_i)
-   begin
-      if rising_edge(qnice_clk_i) then
-         mdv1_rd_req_prev <= qnice_mdv1_ce_i and not qnice_mdv1_we_i;
-      end if;
-   end process mdv1_rd_edge;
-
-   mdv1_loader_qnice : process (qnice_clk_i)
-   begin
-      if rising_edge(qnice_clk_i) then
-         if qnice_rst_i = '1' then
-            -- QL4M65 (M2017): this process had NO reset path at all before
-            -- (same for its core-domain counterpart, mdv1_loader_core) -
-            -- if the xpm_cdc_handshake protocol ever got interrupted
-            -- mid-transaction (e.g. by a core reset landing exactly
-            -- between the two sides' handshake steps), mdv1_ld_busy could
-            -- stay wedged at '1' forever, permanently asserting
-            -- qnice_mdv1_wait_o and hanging every subsequent load attempt
-            -- - recoverable only by a full power cycle (FPGA
-            -- reconfiguration), matching exactly what was observed on
-            -- hardware after M2016. See DECISIONES.md's M2017 section.
-            mdv1_ld_busy <= '0';
-            mdv1_ld_send <= '0';
-         elsif mdv1_ld_busy = '0' then
-            if qnice_mdv1_ce_i = '1' and qnice_mdv1_we_i = '1' then
-               if qnice_mdv1_addr_i(0) = '0' then
-                  -- even address: first byte of the pair, just latch it
-                  mdv1_ld_byte0 <= qnice_mdv1_data_i(7 downto 0);
-               else
-                  -- odd address: second byte - assemble the word and start
-                  -- the handshake (src_send asserted and held, see above)
-                  mdv1_ld_word_addr <= qnice_mdv1_addr_i(17 downto 1);
-                  mdv1_ld_word_data <= mdv1_ld_byte0 & qnice_mdv1_data_i(7 downto 0);
-                  mdv1_ld_send      <= '1';
-                  mdv1_ld_busy      <= '1';
-               end if;
-            end if;
-         elsif mdv1_ld_send = '1' then
-            -- handshake in flight: drop send once the core side confirms
-            -- receipt (src_rcv='1') - do NOT drop it any earlier
-            if mdv1_cdc_src_rcv = '1' then
-               mdv1_ld_send <= '0';
-            end if;
-         else
-            -- send already dropped: wait for src_rcv to also drop before
-            -- allowing the next byte-pair's handshake to start
-            if mdv1_cdc_src_rcv = '0' then
-               mdv1_ld_busy <= '0';
-            end if;
-         end if;
-      end if;
-   end process mdv1_loader_qnice;
-
-   mdv1_cdc_src_in <= mdv1_ld_word_addr & mdv1_ld_word_data;
-
-   i_mdv1_cdc : xpm_cdc_handshake
-      generic map (
-         DEST_EXT_HSK => 1,
-         WIDTH        => 33
-      )
+   i_mdv1_bridge : entity work.mdv_qnice_bridge
       port map (
-         src_clk  => qnice_clk_i,
-         src_in   => mdv1_cdc_src_in,
-         src_send => mdv1_ld_send,
-         src_rcv  => mdv1_cdc_src_rcv,
+         qnice_clk_i     => qnice_clk_i,
+         qnice_rst_i     => qnice_rst_i,
+         qnice_addr_i    => qnice_mdv1_addr_i,
+         qnice_data_i    => qnice_mdv1_data_i,
+         qnice_ce_i      => qnice_mdv1_ce_i,
+         qnice_we_i      => qnice_mdv1_we_i,
+         qnice_wait_o    => qnice_mdv1_wait_o,
+         qnice_data_o    => qnice_mdv1_data_o,
+         qnice_loading_i => qnice_mdv1_loading_i,
 
-         dest_clk => clk_main_i,
-         dest_req => mdv1_cdc_dest_req,
-         dest_ack => mdv1_cdc_dest_ack,
-         dest_out => mdv1_cdc_dest_out
-      ); -- i_mdv1_cdc
+         clk_main_i   => clk_main_i,
+         reset_i      => reset,
 
-   -- Core-clock-domain side: on dest_req, drive mdv1's own dl_addr/dl_data
-   -- for one cycle with dl_wr asserted. dest_ack itself must be asserted
-   -- and HELD until dest_req drops back to '0' (see the loader's own
-   -- header comment above for why - xpm_cdc_handshake's documented
-   -- 4-phase protocol, not a one-cycle pulse).
-   mdv1_loader_core : process (clk_main_i)
-   begin
-      if rising_edge(clk_main_i) then
-         mdv1_dl_wr    <= '0';
+         download_o   => mdv1_download,
+         dl_addr_o    => mdv1_dl_addr,
+         dl_data_o    => mdv1_dl_data,
+         dl_wr_o      => mdv1_dl_wr,
+         dl_q_i       => mdv1_dl_q,
+         dl_q_valid_i => mdv1_dl_q_valid,
 
-         if reset = '1' then
-            -- QL4M65 (M2017): see mdv1_loader_qnice's own comment - this
-            -- side of the handshake had no reset path either.
-            mdv1_cdc_dest_ack <= '0';
-            mdv1_ld_state     <= LD_IDLE;
-         else
+         dirty_i       => mdv1_dirty,
+         dirty_clear_o => mdv1_dirty_clear
+      ); -- i_mdv1_bridge
 
-         case mdv1_ld_state is
-            when LD_IDLE =>
-               if mdv1_cdc_dest_req = '1' then
-                  mdv1_ld_dl_addr <= mdv1_cdc_dest_out(32 downto 16);
-                  mdv1_dl_data <= mdv1_cdc_dest_out(15 downto 0);
-                  mdv1_dl_wr   <= '1';
-                  mdv1_cdc_dest_ack <= '1';
-                  mdv1_ld_state     <= LD_WAIT_REQ_LOW;
-               end if;
-
-            when LD_WAIT_REQ_LOW =>
-               if mdv1_cdc_dest_req = '0' then
-                  mdv1_cdc_dest_ack <= '0';
-                  mdv1_ld_state     <= LD_IDLE;
-               end if;
-         end case;
-         end if;
-      end if;
-   end process mdv1_loader_core;
-
-   -- QL4M65 (M2011): mdv.v's `download` must be a LEVEL held for the whole
-   -- transfer (matching the original core's ioctl_download - see
-   -- QL.sv:534,582 and hps_io's own semantics), not a one-shot pulse at
-   -- word address 0 (the M2004-M2010 behaviour). Pristine mdv.v's own
-   -- `if(ce) begin ... mem_addr <= mem_addr + 1 ... end` that advances the
-   -- BRAM read pointer is unconditional - NOT gated by `sel` or by whether
-   -- the buffer is actually fully written yet. With only a one-cycle
-   -- download pulse, mem_addr starts free-running at 7.5MHz through the
-   -- SAME dual-port BRAM the QNICE loader is still writing, a genuine
-   -- read/write race with no synchronization between the two logical
-   -- pointers - and if mdv_sel(0) is already '1' from an earlier session
-   -- (zx8302.v's mdv_sel shift register has no reset), mdv_present goes
-   -- true as soon as the second word lands, exposing that race directly to
-   -- QDOS. Holding download for the whole load keeps mem_addr pinned at 0
-   -- throughout, eliminating the race entirely - confirmed to be how every
-   -- other M2M sibling core (and the original MiSTer platform itself)
-   -- avoids this exact hazard. See DECISIONES.md's M2011 section.
-   i_mdv1_loading_cdc : xpm_cdc_single
-      generic map (
-         DEST_SYNC_FF   => 4,
-         INIT_SYNC_FF   => 0,
-         SIM_ASSERT_CHK => 0,
-         SRC_INPUT_REG  => 1
-      )
+   i_mdv2_bridge : entity work.mdv_qnice_bridge
       port map (
-         src_clk  => qnice_clk_i,
-         src_in   => qnice_mdv1_loading_i,
-         dest_clk => clk_main_i,
-         dest_out => mdv1_loading_sync
-      ); -- i_mdv1_loading_cdc
+         qnice_clk_i     => qnice_clk_i,
+         qnice_rst_i     => qnice_rst_i,
+         qnice_addr_i    => qnice_mdv2_addr_i,
+         qnice_data_i    => qnice_mdv2_data_i,
+         qnice_ce_i      => qnice_mdv2_ce_i,
+         qnice_we_i      => qnice_mdv2_we_i,
+         qnice_wait_o    => qnice_mdv2_wait_o,
+         qnice_data_o    => qnice_mdv2_data_o,
+         qnice_loading_i => qnice_mdv2_loading_i,
 
-   mdv1_download <= mdv1_loading_sync;
+         clk_main_i   => clk_main_i,
+         reset_i      => reset,
+
+         download_o   => mdv2_download,
+         dl_addr_o    => mdv2_dl_addr,
+         dl_data_o    => mdv2_dl_data,
+         dl_wr_o      => mdv2_dl_wr,
+         dl_q_i       => mdv2_dl_q,
+         dl_q_valid_i => mdv2_dl_q_valid,
+
+         dirty_i       => mdv2_dirty,
+         dirty_clear_o => mdv2_dirty_clear
+      ); -- i_mdv2_bridge
 
    -- rtl/mdv.v, unmodified, instantiated as-is (mixed-language Vivado
    -- project). Its own internal "dpram #(17,88000) vram" instance resolves
@@ -1329,11 +1108,12 @@ begin
    end process mdv1_output_reg;
 
    -- QL4M65 Milestone 2 paso 5, etapa 1 (2026-08-23,
-   -- .research/microdrive-second-unit-plan.md): mdv2, real-time path only.
-   -- download/dl_wr/dl_addr/dl_data tied to "no load in progress"/zero and
-   -- dl_q/dl_q_valid left open - QNICE has no way to load into or read
-   -- back from mdv2 yet (etapa 2). wr_en/wr_strobe/wr_data reuse mdv1's
-   -- own signals (broadcast, see i_mdv1's own instantiation comment).
+   -- .research/microdrive-second-unit-plan.md): mdv2, real-time path.
+   -- QL4M65 etapa 2: download/dl_wr/dl_addr/dl_data/dl_q/dl_q_valid now
+   -- wired for real, to i_mdv2_bridge above (etapa 1 left them tied to "no
+   -- load in progress"/zero/open). wr_en/wr_strobe/wr_data still reuse
+   -- mdv1's own signals (broadcast, see i_mdv1's own instantiation
+   -- comment) - unrelated to the QNICE-side load/read path.
    i_mdv2 : entity work.mdv
       -- QL4M65 Milestone 2 paso 5, etapa 1: MUST differ from i_mdv1's own
       -- C_HMAP_MDV1 - without this, both siblings' internal dpram would
@@ -1359,12 +1139,12 @@ begin
          rx_ready  => mdv2_rx_ready_raw,
          dout      => mdv2_byte_raw,
 
-         download  => '0',
-         dl_addr   => (others => '0'),
-         dl_data   => (others => '0'),
-         dl_wr     => '0',
-         dl_q      => open,
-         dl_q_valid => open,
+         download  => mdv2_download,
+         dl_addr   => mdv2_dl_addr,
+         dl_data   => mdv2_dl_data,
+         dl_wr     => mdv2_dl_wr,
+         dl_q      => mdv2_dl_q,
+         dl_q_valid => mdv2_dl_q_valid,
 
          wr_en     => mdv1_wr_en,
          wr_strobe => mdv1_wr_strobe,
@@ -1427,14 +1207,15 @@ begin
    -- this signal's own port comment.
    mdv1_dirty_o <= '0' when unsigned(mdv1_dirty) = 0 else '1';
 
-   -- QL4M65 Milestone 2 paso 5, etapa 1: mismo bitmap para mdv2, sin
-   -- entrada de "clear" todavia (nada puede limpiarlo hasta la etapa 2 -
-   -- inerte en la practica, ver esta senal's own declaracion mas arriba).
-   -- reset SI se respeta desde ya (comportamiento seguro por defecto).
+   -- QL4M65 Milestone 2 paso 5, etapa 2: mdv2 ahora si tiene "clear" (via
+   -- i_mdv2_bridge's own dirty_clear_o) - ver este bitmap's own
+   -- declaracion mas arriba.
    p_dirty2 : process (clk_main_i)
    begin
       if rising_edge(clk_main_i) then
          if reset = '1' then
+            mdv2_dirty <= (others => '0');
+         elsif mdv2_dirty_clear = '1' then
             mdv2_dirty <= (others => '0');
          elsif mdv2_wr_commit = '1' then
             mdv2_dirty(to_integer(unsigned(mdv2_sector))) <= '1';
@@ -1443,221 +1224,6 @@ begin
    end process p_dirty2;
 
    mdv2_dirty_o <= '0' when unsigned(mdv2_dirty) = 0 else '1';
-
-   -- Clearing the bitmap: QNICE writes any value to C_MDV1_DIRTY_CLR. The
-   -- underlying QNICE bus write cycle holds ce_i/we_i/addr_i stable for
-   -- several qnice_clk cycles (same as a 68000 move.b holds cpu_sel/cpu_wr
-   -- for several cen ticks in zx8302.v) - xpm_cdc_single only synchronizes
-   -- the LEVEL into clk_main_i, so it stays high for several clk_main_i
-   -- cycles too. Rising-edge detection on the synchronized signal turns
-   -- that into exactly one clear pulse, regardless of how long the level is
-   -- held - the exact lesson from M2023/M2024's wr_strobe bug (rtl/mdv.v's
-   -- wr_strobe_prev), applied here before it could bite twice.
-   mdv1_clear_req <= '1' when (qnice_mdv1_ce_i = '1' and qnice_mdv1_we_i = '1'
-                               and unsigned(qnice_mdv1_addr_i) = to_unsigned(C_MDV1_DIRTY_CLR, 28))
-                     else '0';
-
-   i_mdv1_clear_cdc : xpm_cdc_single
-      generic map (
-         DEST_SYNC_FF   => 4,
-         INIT_SYNC_FF   => 0,
-         SIM_ASSERT_CHK => 0,
-         SRC_INPUT_REG  => 1
-      )
-      port map (
-         src_clk  => qnice_clk_i,
-         src_in   => mdv1_clear_req,
-         dest_clk => clk_main_i,
-         dest_out => mdv1_clear_sync
-      ); -- i_mdv1_clear_cdc
-
-   p_clear_edge : process (clk_main_i)
-   begin
-      if rising_edge(clk_main_i) then
-         mdv1_clear_sync_prev <= mdv1_clear_sync;
-      end if;
-   end process p_clear_edge;
-
-   mdv1_dirty_clear <= mdv1_clear_sync and not mdv1_clear_sync_prev;
-
-   ---------------------------------------------------------------------------
-   -- Read-back path: QNICE requests a byte (buffer or bitmap), core answers.
-   -- Two xpm_cdc_handshake instances, exact same 4-phase discipline (level-
-   -- held send/ack, wait_o from registered state only, reset from day one on
-   -- BOTH sides) as mdv1_loader_qnice/mdv1_loader_core above - see that
-   -- process's own header comment for the full M2004/M2005/M2017 history
-   -- behind every one of these rules.
-   ---------------------------------------------------------------------------
-
-   qnice_mdv1_data_o <= qnice_mdv1_data_o_i;
-
-   mdv1_reader_qnice : process (qnice_clk_i)
-   begin
-      if rising_edge(qnice_clk_i) then
-         if qnice_rst_i = '1' then
-            mdv1_rd_state <= RD_IDLE;
-            mdv1_rd_send  <= '0';
-         else
-            case mdv1_rd_state is
-               when RD_IDLE =>
-                  if qnice_mdv1_ce_i = '1' and qnice_mdv1_we_i = '0' then
-                     mdv1_rd_addr  <= qnice_mdv1_addr_i;
-                     mdv1_rd_send  <= '1';
-                     mdv1_rd_state <= RD_SEND_WAIT_RCV;
-                  end if;
-
-               when RD_SEND_WAIT_RCV =>
-                  if mdv1_cdc_req_src_rcv = '1' then
-                     mdv1_rd_send  <= '0';
-                     mdv1_rd_state <= RD_SEND_WAIT_RCV_LOW;
-                  end if;
-
-               when RD_SEND_WAIT_RCV_LOW =>
-                  if mdv1_cdc_req_src_rcv = '0' then
-                     mdv1_rd_state <= RD_WAIT_RESP;
-                  end if;
-
-               when RD_WAIT_RESP =>
-                  if mdv1_cdc_resp_dest_req = '1' then
-                     qnice_mdv1_data_o_i  <= mdv1_cdc_resp_dest_out;
-                     mdv1_cdc_resp_dest_ack <= '1';
-                     mdv1_rd_state <= RD_RESP_WAIT_LOW;
-                  end if;
-
-               when RD_RESP_WAIT_LOW =>
-                  if mdv1_cdc_resp_dest_req = '0' then
-                     mdv1_cdc_resp_dest_ack <= '0';
-                     mdv1_rd_state <= RD_IDLE;
-                  end if;
-            end case;
-         end if;
-      end if;
-   end process mdv1_reader_qnice;
-
-   i_mdv1_read_req_cdc : xpm_cdc_handshake
-      generic map (
-         DEST_EXT_HSK => 1,
-         WIDTH        => 28
-      )
-      port map (
-         src_clk  => qnice_clk_i,
-         src_in   => mdv1_rd_addr,
-         src_send => mdv1_rd_send,
-         src_rcv  => mdv1_cdc_req_src_rcv,
-
-         dest_clk => clk_main_i,
-         dest_req => mdv1_cdc_req_dest_req,
-         dest_ack => mdv1_cdc_req_dest_ack,
-         dest_out => mdv1_cdc_req_dest_out
-      ); -- i_mdv1_read_req_cdc
-
-   i_mdv1_read_resp_cdc : xpm_cdc_handshake
-      generic map (
-         DEST_EXT_HSK => 1,
-         WIDTH        => 16
-      )
-      port map (
-         src_clk  => clk_main_i,
-         src_in   => mdv1_rd_result_data,
-         src_send => mdv1_rd_result_send,
-         src_rcv  => mdv1_cdc_resp_src_rcv,
-
-         dest_clk => qnice_clk_i,
-         dest_req => mdv1_cdc_resp_dest_req,
-         dest_ack => mdv1_cdc_resp_dest_ack,
-         dest_out => mdv1_cdc_resp_dest_out
-      ); -- i_mdv1_read_resp_cdc
-
-   -- Core-clock-domain side: on a request, latch the address, drive mdv1's
-   -- own dl_addr for a buffer read (harmless to do even for a bitmap
-   -- request - dl_wr stays '0', and the result is only used for genuine
-   -- buffer addresses below), wait for mdv1_dl_q_valid (dpram's own
-   -- "q_a just became fresh for this address" pulse), then pick the byte
-   -- from either mdv1_dl_q (buffer, high byte on an even address matching
-   -- the loader's own convention) or mdv1_dirty (bitmap, 8 bits per byte
-   -- index) and send it back.
-   --
-   -- QL4M65 M2030 (found on real hardware): this used to be a FIXED
-   -- 2-cycle wait (design doc S6.2: "1 would do, 2 gives free margin") -
-   -- correct against the original BRAM (1-cycle read latency), but
-   -- silently wrong once dpram's backing store became HyperRAM-through-
-   -- avm_cache (M2030): a genuine new read can take dozens of cycles
-   -- (8-cycle settle counter alone, before avm_cache/avm_fifo/HyperRAM
-   -- even start). The fixed wait read mdv1_dl_q long before the real
-   -- fetch (or write-through) had landed, silently sending QNICE stale
-   -- data - the SD-flush regression this closes: SAVE, then power off
-   -- and back on, showed several sectors reverted to their pre-write
-   -- content even though the drive LED had already gone back to "clean".
-   mdv1_reader_core : process (clk_main_i)
-      variable v_bm_idx : integer range 0 to 31;
-   begin
-      if rising_edge(clk_main_i) then
-         if reset = '1' then
-            mdv1_cdc_req_dest_ack <= '0';
-            mdv1_rd_result_send   <= '0';
-            mdv1_rdcore_state     <= RDC_IDLE;
-         else
-            case mdv1_rdcore_state is
-               when RDC_IDLE =>
-                  if mdv1_cdc_req_dest_req = '1' then
-                     mdv1_rd_req_addr      <= mdv1_cdc_req_dest_out;
-                     mdv1_rd_dl_addr       <= mdv1_cdc_req_dest_out(17 downto 1);
-                     mdv1_cdc_req_dest_ack <= '1';
-                     mdv1_rdcore_state     <= RDC_REQ_WAIT_LOW;
-                  end if;
-
-               when RDC_REQ_WAIT_LOW =>
-                  if mdv1_cdc_req_dest_req = '0' then
-                     mdv1_cdc_req_dest_ack <= '0';
-                     mdv1_rdcore_state     <= RDC_LATCH1;
-                  end if;
-
-               when RDC_LATCH1 =>
-                  if mdv1_dl_q_valid = '1' then
-                     mdv1_rdcore_state <= RDC_LATCH2;
-                  end if;
-
-               when RDC_LATCH2 =>
-                  if unsigned(mdv1_rd_req_addr) >= C_MDV1_DIRTY_BASE and
-                     unsigned(mdv1_rd_req_addr) < C_MDV1_DIRTY_BASE + 32 then
-                     -- dirty bitmap: byte index 0..31 straight from the low
-                     -- 5 bits (C_MDV1_DIRTY_BASE is 32-byte aligned)
-                     v_bm_idx := to_integer(unsigned(mdv1_rd_req_addr(4 downto 0)));
-                     mdv1_rd_result_data <= x"00" & mdv1_dirty(v_bm_idx * 8 + 7 downto v_bm_idx * 8);
-                  elsif mdv1_rd_req_addr(0) = '0' then
-                     mdv1_rd_result_data <= x"00" & mdv1_dl_q(15 downto 8);
-                  else
-                     mdv1_rd_result_data <= x"00" & mdv1_dl_q(7 downto 0);
-                  end if;
-                  mdv1_rd_result_send <= '1';
-                  mdv1_rdcore_state   <= RDC_SEND_WAIT_RCV;
-
-               when RDC_SEND_WAIT_RCV =>
-                  -- mdv1_rd_result_send: not reassigned here, so it simply
-                  -- holds '1' (same "hold by omission" idiom as the
-                  -- loader's own mdv1_ld_send in its equivalent state)
-                  if mdv1_cdc_resp_src_rcv = '1' then
-                     mdv1_rd_result_send <= '0';
-                     mdv1_rdcore_state   <= RDC_SEND_WAIT_RCV_LOW;
-                  end if;
-
-               when RDC_SEND_WAIT_RCV_LOW =>
-                  if mdv1_cdc_resp_src_rcv = '0' then
-                     mdv1_rdcore_state <= RDC_IDLE;
-                  end if;
-            end case;
-         end if;
-      end if;
-   end process mdv1_reader_core;
-
-   -- Port A address mux: the loader (writes, mdv1_loader_core) and this new
-   -- reader both need to drive mdv1's dl_addr, but never at the same time
-   -- in practice (QNICE's own bus is inherently sequential - a load and a
-   -- read-back can't be in flight together). Give the reader priority
-   -- whenever its own state machine is active; the loader otherwise. Same
-   -- "two logical owners, one mux" pattern as mdv.v's own wr_do/dl_wr
-   -- priority mux (M2022, design doc S3.5).
-   mdv1_dl_addr <= mdv1_rd_dl_addr when mdv1_rdcore_state /= RDC_IDLE else mdv1_ld_dl_addr;
 
    video_red_o    <= (others => video_r);
    video_green_o  <= (others => video_g);

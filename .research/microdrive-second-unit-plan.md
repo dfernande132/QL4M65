@@ -228,17 +228,47 @@ HyperRAM en cada confirmación de escritura de sector, introduciendo una
 carrera nueva contra el propio `avm_cache` - todo para ahorrar 256
 flip-flops que ya son baratos en la FPGA. No compensa.
 
-### 2.3 Rutina de ensamblador genérica
+### 2.3 Rutina de ensamblador: duplicada, no parametrizada (revisión 2026-08-23)
 
-`MDV_FLUSH_STEP` (sustituye a `MDV1_FLUSH_STEP` para ambas unidades, no
-una copia `MDV2_FLUSH_STEP`), parametrizada por registro con: índice de
-manejo de fichero SD (`MDV1_MAN_IDX`/`MDV2_MAN_IDX` pasan a ser
-argumentos), y la dirección base del dispositivo QNICE de 2.1 (que ya
-determina, del lado del componente parametrizado, a qué unidad llegan las
-peticiones - la rutina no necesita saber nada de HyperRAM, solo qué
-ventana de dispositivo usar). Lo que la hace genérica es el ID de
-dispositivo, no el mecanismo que hay debajo - el mecanismo es el mismo de
-siempre.
+**Revisión respecto a la versión anterior de esta sección**: la propuesta
+original pedía una única `MDV_FLUSH_STEP` parametrizada por registro
+(índice de manejo de fichero SD, ID de dispositivo QNICE), sustituyendo a
+`MDV1_FLUSH_STEP` para ambas unidades. Implementada la etapa 2 completa
+(2026-08-23), se decidió NO hacerlo así: parametrizar de verdad esta
+rutina en concreto exige que 3 valores por unidad (ID de dispositivo,
+índice de fichero SD, puntero al bloque de estado de 100 palabras)
+sobrevivan correctamente a través de ~260 líneas de ensamblador QNICE con
+más de 25 puntos de uso, ramas y llamadas RSUB/SYSCALL anidadas - sin
+ningún simulador de ensamblador QNICE disponible en este entorno para
+verificarlo antes de hardware real. Esta rutina concreta ya lleva tres
+bugs reales encontrados y corregidos contra hardware (`M2027`, `M2031`,
+`M2032`) - el riesgo de una reescritura no verificable localmente pesa más
+que el ahorro de ~130 líneas duplicadas.
+
+En su lugar: `MDV2_FLUSH_STEP`/`READ_MDV2_BYTE` son copias mecánicas
+literales de `MDV1_FLUSH_STEP`/`READ_MDV1_BYTE` (mismo cuerpo, solo
+renombradas las etiquetas `_MFS_*`→`_MFS2_*` y las referencias a
+`MDV1_*`→`MDV2_*`/`C_DEV_QL_MDV1`→`C_DEV_QL_MDV2`), cada una con su propio
+bloque de estado en RAM. `MDV1_ADDR2WIN` (matemática de dirección pura,
+sin ID de dispositivo) sí se reutiliza sin duplicar - es la única parte
+del mecanismo genuinamente independiente de la unidad. Decisión confirmada
+explícitamente con el usuario (ver AskUserQuestion en la sesión del
+2026-08-23) tras señalar la contradicción con esta sección tal y como
+estaba escrita originalmente.
+
+Este es el lado del componente parametrizado de VHDL (`mdv_qnice_bridge.vhd`,
+sección 2.1) el que sigue siendo la pieza que de verdad importaba
+parametrizar - ese sí que se hizo tal y como pedía el plan, sin duplicar.
+
+**Nota del usuario para el futuro (2026-08-23):** si algún día hay una
+tercera unidad, ahí sí toca parametrizar de verdad `MDV_FLUSH_STEP`/
+`READ_MDV_BYTE`. Con dos copias, duplicar sigue siendo más barato que
+abstraer; con tres deja de serlo. Y para entonces se tendrán dos versiones
+funcionando (mdv1 y mdv2, ambas probadas en hardware real) de las que
+derivar la rutina genérica con confianza, en vez de una sola - la misma
+lógica que ya se aplicó en la sección 2.1 para el puente QNICE en VHDL
+(`mdv_qnice_bridge.vhd` se escribió DESPUÉS de tener mdv1 funcionando, no
+antes).
 
 La RAM de estado (`MDV_DIRTY_SNAP`/`MDV_LAST_DIRTY`/`MDV_BM_TMP`/
 `MDV_FL_*`/`MDV_GATE_CNT`, ~100 palabras) se duplica por unidad - eso es
@@ -253,6 +283,20 @@ de AExp para el patrón, aunque QL4M65 no lo haya necesitado hasta ahora).
 `LOAD mdv1`, `LOAD mdv2`, `DIR` de ambos, `SAVE` en ambos, apagar/encender,
 releer ambos - de forma independiente (que escribir en uno no afecte al
 otro). Regresión completa, no solo "compila".
+
+**Estado (2026-08-23): compila y sintetiza limpio (R6, `M2034`, `WNS=+0.203 ns`,
+`WHS=+0.050 ns`, `RESULT=BUILD_OK`), pendiente de probar en hardware real.**
+`mdv_qnice_bridge.vhd` (entidad nueva, sin genéricos, copia verbatim de la
+lógica de `main.vhd` ya probada) instanciada dos veces en `main.vhd`
+(`i_mdv1_bridge`, `i_mdv2_bridge`); `mega65.vhd` con `i_mdv2_csr`/
+`p_mdv2_size_check` (4ª instancia de `qnice_csr`) y despacho
+`C_DEV_QL_MDV2` en `core_specific_devices`; `globals.vhd` con
+`C_DEV_QL_MDV2` y `C_CRTROMS_MAN_NUM=4`; `config.vhd` con la línea de menú
+"mdv2:%s" (`OPTM_SIZE`/`OPTM_DY` 11→12); `m2m-rom.asm` con
+`MDV2_FLUSH_STEP`/`READ_MDV2_BYTE` (ver 2.3 para por qué son copias, no una
+rutina parametrizada) y su propio bloque de estado en RAM. Ningún byte de
+esto se ha compilado ni probado todavía - siguiente paso: build R6 +
+regresión completa en hardware real.
 
 ---
 

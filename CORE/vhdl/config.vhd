@@ -293,7 +293,9 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 -- write-back is now fully automatic in the background (MDV1_FLUSH_STEP,
 -- called from HANDLE_CORE_IO - see m2m-rom.asm and DECISIONES.md's M2028
 -- section), so a manual "go save now" item no longer makes sense.
-constant OPTM_SIZE         : natural := 11;  -- amount of items including empty lines:
+-- QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-23): added "mdv2:%s" right
+-- below "mdv1:%s" - one extra line, same OPTM_G_LOAD_ROM mechanism.
+constant OPTM_SIZE         : natural := 12;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -311,7 +313,7 @@ constant OPTM_SIZE         : natural := 11;  -- amount of items including empty 
 -- QL4M65 (Milestone 2 phase A): "mdv1:%s" is short, fits comfortably
 -- inside the existing 20 - no need to widen for this addition.
 constant OPTM_DX           : natural := 20;
-constant OPTM_DY           : natural := 11;
+constant OPTM_DY           : natural := 12;
 
 -- QL4M65 M1006: added a "Sinclair QL" headline (OPTM_G_HEADLINE - shown in a
 -- brighter/yellow color by the framework), same pattern as AExp's "Amiga 500"
@@ -335,8 +337,9 @@ constant OPTM_ITEMS        : string :=
    "\n"                     &    -- 6: separator
    " Microdrive\n"          &    -- 7: section heading (plain text, not selectable)
    " mdv1:%s\n"             &    -- 8: load a .MDV microdrive image (SD write-back is automatic, see M2028)
-   "\n"                     &    -- 9: separator
-   " Close Menu\n";               -- 10: close menu
+   " mdv2:%s\n"             &    -- 9: second microdrive image (Milestone 2 paso 5, etapa 2)
+   "\n"                     &    -- 10: separator
+   " Close Menu\n";               -- 11: close menu
 
 -- define your own constants here and choose meaningful names
 -- make sure that your first group uses the value 1 (0 means "no menu item", such as text and line),
@@ -347,6 +350,7 @@ constant OPTM_G_MAINROM         : integer := 1;
 constant OPTM_G_BACKROM         : integer := 2;
 constant OPTM_G_BACKROM_EXTRACT : integer := 3;
 constant OPTM_G_MDV1            : integer := 4;
+constant OPTM_G_MDV2            : integer := 5;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -363,8 +367,9 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_HEADLINE,                   
                                              OPTM_G_LINE,                                     -- 6: separator
                                              OPTM_G_TEXT,                                     -- 7: Microdrive (section heading)
                                              OPTM_G_MDV1 + OPTM_G_LOAD_ROM,                   -- 8: mdv1:%s (3rd manual ROM/CRT slot - Main=0, Back=1, MDV1=2)
-                                             OPTM_G_LINE,                                     -- 9: separator
-                                             OPTM_G_CLOSE                                     -- 10: Close Menu
+                                             OPTM_G_MDV2 + OPTM_G_LOAD_ROM,                   -- 9: mdv2:%s (4th manual ROM/CRT slot)
+                                             OPTM_G_LINE,                                     -- 10: separator
+                                             OPTM_G_CLOSE                                     -- 11: Close Menu
                                            );
 
 --------------------------------------------------------------------------------------------------------------------

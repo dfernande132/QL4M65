@@ -329,6 +329,27 @@ signal qnice_mdv1_we          : std_logic;
 signal qnice_mdv1_wait        : std_logic;
 signal qnice_mdv1_data        : std_logic_vector(15 downto 0);
 
+-- QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-23,
+-- .research/microdrive-second-unit-plan.md section 2.1): mdv2's own CSR +
+-- size-check FSM, mismo patron exacto que mdv1's own set above (mismo
+-- C_MDV1_MAX_BYTES - el formato .mdv es el mismo, el rango de tamano
+-- valido no cambia por unidad).
+signal mdv2_ce                : std_logic;
+signal mdv2_csr_active        : std_logic;
+signal mdv2_csr_data          : std_logic_vector(15 downto 0);
+signal mdv2_csr_wait          : std_logic;
+signal mdv2_req_status        : std_logic_vector( 3 downto 0);
+signal mdv2_req_length        : std_logic_vector(22 downto 0);
+signal mdv2_resp_status       : std_logic_vector( 3 downto 0) := C_CSR_RESP_IDLE;
+signal mdv2_resp_error        : std_logic_vector( 3 downto 0) := x"0";
+signal mdv2_val_state         : t_rom_val_state := VS_IDLE;
+
+signal qnice_mdv2_ce          : std_logic;
+signal qnice_mdv2_we          : std_logic;
+signal qnice_mdv2_wait        : std_logic;
+signal qnice_mdv2_data        : std_logic_vector(15 downto 0);
+signal qnice_mdv2_loading     : std_logic;
+
 -- QL4M65 (Milestone 2 phase A, M2008): microdrive activity LED, core-clock
 -- domain (main.vhd's own "led" tap from zx8302.v - a single level signal,
 -- no CDC needed for a board LED)
@@ -635,6 +656,16 @@ begin
          -- synchronizes it into clk_main_i itself (see its own header).
          qnice_mdv1_loading_i => qnice_mdv1_loading,
 
+         -- QL4M65 Milestone 2 paso 5, etapa 2: mdv2's own QNICE-side
+         -- window, same pass-through pattern as mdv1's own above.
+         qnice_mdv2_addr_i    => qnice_dev_addr_i,
+         qnice_mdv2_data_i    => qnice_dev_data_i,
+         qnice_mdv2_ce_i      => qnice_mdv2_ce,
+         qnice_mdv2_we_i      => qnice_mdv2_we,
+         qnice_mdv2_wait_o    => qnice_mdv2_wait,
+         qnice_mdv2_data_o    => qnice_mdv2_data,
+         qnice_mdv2_loading_i => qnice_mdv2_loading,
+
          -- QL4M65 (Milestone 2 phase A, M2008): microdrive activity LED
          drive_led_o          => main_mdv1_led,
 
@@ -727,6 +758,10 @@ begin
       qnice_mdv1_ce        <= '0';
       qnice_mdv1_we        <= '0';
 
+      mdv2_ce              <= '0';
+      qnice_mdv2_ce        <= '0';
+      qnice_mdv2_we        <= '0';
+
       case qnice_dev_id_i is
 
          -- QL4M65: manual/auto loading of the Main ROM (48KB, $000000-
@@ -791,6 +826,22 @@ begin
                qnice_mdv1_we    <= qnice_dev_we_i;
                qnice_dev_data_o <= qnice_mdv1_data;
                qnice_dev_wait_o <= qnice_mdv1_wait;
+            end if;
+
+         -- QL4M65 Milestone 2 paso 5, etapa 2: mdv2, mismo esquema exacto
+         -- que C_DEV_QL_MDV1 arriba - propia ventana CSR/tamano, propio
+         -- device ID, mismo protocolo de "siempre respuesta" y mismo
+         -- reparto CSR/no-CSR.
+         when C_DEV_QL_MDV2 =>
+            mdv2_ce <= qnice_dev_ce_i;
+            if mdv2_csr_active = '1' then
+               qnice_dev_data_o <= mdv2_csr_data;
+               qnice_dev_wait_o <= mdv2_csr_wait;
+            else
+               qnice_mdv2_ce    <= qnice_dev_ce_i;
+               qnice_mdv2_we    <= qnice_dev_we_i;
+               qnice_dev_data_o <= qnice_mdv2_data;
+               qnice_dev_wait_o <= qnice_mdv2_wait;
             end if;
 
          when others => null;
@@ -989,6 +1040,68 @@ begin
          end if;
       end if;
    end process p_mdv1_size_check;
+
+   -- QL4M65 Milestone 2 paso 5, etapa 2: mdv2's own CSR + size-check FSM,
+   -- mismo patron exacto que i_mdv1_csr/p_mdv1_size_check arriba.
+   i_mdv2_csr : entity work.qnice_csr
+      generic map (
+         G_ERROR_STRINGS => C_ROM_ERROR_STRINGS
+      )
+      port map (
+         qnice_clk_i          => qnice_clk_i,
+         qnice_rst_i          => qnice_rst_i,
+         qnice_addr_i         => qnice_dev_addr_i,
+         qnice_data_i         => qnice_dev_data_i,
+         qnice_ce_i           => mdv2_ce,
+         qnice_we_i           => qnice_dev_we_i,
+         qnice_data_o         => mdv2_csr_data,
+         qnice_wait_o         => mdv2_csr_wait,
+         qnice_csr_o          => mdv2_csr_active,
+         qnice_req_status_o   => mdv2_req_status,
+         qnice_req_length_o   => mdv2_req_length,
+         qnice_resp_status_i  => mdv2_resp_status,
+         qnice_resp_error_i   => mdv2_resp_error,
+         qnice_resp_address_i => (others => '0')
+      ); -- i_mdv2_csr
+
+   qnice_mdv2_loading <= '1' when mdv2_req_status = C_CSR_REQ_LDNG else '0';
+
+   -- Same range check as mdv1's own (C_MDV1_MAX_BYTES - same .mdv format,
+   -- same valid size range regardless of which unit it's loaded into).
+   p_mdv2_size_check : process (qnice_clk_i)
+   begin
+      if falling_edge(qnice_clk_i) then
+         case mdv2_val_state is
+            when VS_IDLE =>
+               if mdv2_req_status = C_CSR_REQ_OK then
+                  if unsigned(mdv2_req_length) <= C_MDV1_MAX_BYTES then
+                     mdv2_resp_status <= C_CSR_RESP_READY;
+                     mdv2_resp_error  <= x"0";
+                  else
+                     mdv2_resp_status <= C_CSR_RESP_ERROR;
+                     mdv2_resp_error  <= x"1";
+                  end if;
+                  mdv2_val_state <= VS_DONE;
+               else
+                  mdv2_resp_status <= C_CSR_RESP_IDLE;
+                  mdv2_resp_error  <= x"0";
+               end if;
+
+            when VS_DONE =>
+               if mdv2_req_status /= C_CSR_REQ_OK then
+                  mdv2_resp_status <= C_CSR_RESP_IDLE;
+                  mdv2_resp_error  <= x"0";
+                  mdv2_val_state   <= VS_IDLE;
+               end if;
+         end case;
+
+         if qnice_rst_i = '1' then
+            mdv2_val_state   <= VS_IDLE;
+            mdv2_resp_status <= C_CSR_RESP_IDLE;
+            mdv2_resp_error  <= x"0";
+         end if;
+      end if;
+   end process p_mdv2_size_check;
 
    ---------------------------------------------------------------------------------------------
    -- Dual Clocks

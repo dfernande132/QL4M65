@@ -730,10 +730,16 @@ seguir para la parte de escritura, una vez la lectura funcione.
    de mdv2, difusión de escritura segura, tráfico de sobrecarga medido) y
    regresión completa de mdv1 en hardware sin cambios (`LOAD`/`DIR`/
    `SAVE`/apagar-encender). Build R6 compilaba limpio, timing cumplido
-   (`WNS=+0.383 ns`). **Etapa 2 pendiente de empezar:** parametrizar el
-   mecanismo de QNICE que hoy sirve a mdv1 e instanciarlo también para
-   mdv2, para poder cargar/guardar en el segundo microdrive de verdad
-   (mdv2 sigue presente en el silicio pero no cargable hasta entonces).
+   (`WNS=+0.383 ns`). **Etapa 2 implementada (2026-08-23), pendiente de
+   build/hardware:** `mdv_qnice_bridge.vhd` (entidad nueva, sin genéricos,
+   copia verbatim de la FSM de QNICE que ya servía a mdv1) instanciada dos
+   veces en `main.vhd`; CSR/despacho de dispositivo de mdv2 en
+   `mega65.vhd`/`globals.vhd`; línea de menú `mdv2:%s` en `config.vhd`;
+   `MDV2_FLUSH_STEP`/`READ_MDV2_BYTE` en `m2m-rom.asm` (copias mecánicas
+   de las de mdv1, no una rutina parametrizada única - ver
+   `.research/microdrive-second-unit-plan.md` sección 2.3 para el porqué).
+   Siguiente paso: build R6 + regresión completa (criterio de cierre en
+   ese mismo documento, sección 2.4).
 
 Diseño completo de la lectura en `.research/microdrive-read-design.md`
 (pendiente de revisión antes de implementar, ver paso 1 arriba).

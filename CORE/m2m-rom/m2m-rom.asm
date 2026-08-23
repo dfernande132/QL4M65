@@ -306,6 +306,28 @@ READ_MDV1_BYTE  INCRB
                 DECRB
                 RET
 
+; READ_MDV2_BYTE: QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-23) - mdv2's
+; own counterpart, identical to READ_MDV1_BYTE above except for the device
+; ID (C_DEV_QL_MDV2). MDV1_ADDR2WIN is reused as-is: the window/offset math
+; is pure address arithmetic, independent of which device it's applied to.
+; Input:  R8 = address hi, R9 = address lo
+; Output: R8 = byte value (0..255)
+READ_MDV2_BYTE  INCRB
+                RSUB    MDV1_ADDR2WIN, 1        ; R8: window, R9: offset
+                MOVE    R8, R0
+                MOVE    R9, R1
+
+                MOVE    M2M$RAMROM_DEV, R8
+                MOVE    C_DEV_QL_MDV2, @R8
+                MOVE    M2M$RAMROM_4KWIN, R8
+                MOVE    R0, @R8
+                MOVE    M2M$RAMROM_DATA, R8
+                ADD     R1, R8
+                MOVE    @R8, R8                 ; R8: byte value
+
+                DECRB
+                RET
+
 ; MDV1_FLUSH_STEP: one resumable step of the mdv1 SD write-back (Milestone
 ; 2 phase B etapa 4, M2028) - replaces the one-shot, blocking FLUSH_MDV1 of
 ; M2026/M2027, called from both HANDLE_CORE_IO below (background, gated)
@@ -634,6 +656,263 @@ _MFS_RET1       MOVE    1, R8
 _MFS_RET        DECRB
                 RET
 
+; MDV2_FLUSH_STEP: QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-23) - mdv2's
+; own resumable SD write-back step, identical logic to MDV1_FLUSH_STEP
+; above (see that routine's own header for the full design rationale),
+; duplicated rather than parametrized: this routine already carries three
+; real hardware bugs' worth of hard-won timing/protocol detail (M2026-
+; M2028), and it is entirely self-contained (own RAM state block, own
+; device ID, no shared mutable state with mdv1's copy) - a mechanical
+; rename carries far less risk than threading per-drive parameters through
+; every line of a routine this delicate, for a routine only ever called
+; from two fixed call sites (HANDLE_CORE_IO, OSM_SEL_PRE) rather than
+; something that scales with more units. MDV1_ADDR2WIN, MDV1_FLUSH_CHUNK,
+; MDV1_GATE_THRESHOLD, C_MDV1_DIRTY_BASE_HI/_LO/_WIN/_CLR_OFS, and the
+; ERR_FATAL_*/HNDL_RM_FILES/CRTROM_MAN_LDF/SD_CHANGED globals are all
+; reused as-is (device-independent or shared-format constants - see their
+; own declarations).
+;
+; Input:
+;   R8: 0=respect the anti-thrashing gate (background), 1=force
+; Output:
+;   R8: 0=clean and idle (nothing left to do), 1=dirty work remains
+MDV2_FLUSH_STEP INCRB
+                MOVE    R8, R0                  ; R0: force flag
+
+                MOVE    SD_CHANGED, R1
+                CMP     1, @R1
+                RBRA    _MFS2_SDOK, !Z
+                MOVE    MDV2_FL_STATE, R1
+                MOVE    0, @R1
+                RBRA    _MFS2_RET0, 1
+
+_MFS2_SDOK      MOVE    CRTROM_MAN_LDF, R1
+                ADD     MDV2_MAN_IDX, R1
+                CMP     0, @R1
+                RBRA    _MFS2_RET0, Z
+
+                MOVE    MDV2_FL_STATE, R1
+                CMP     1, @R1
+                RBRA    _MFS2_CHUNK, Z
+
+_MFS2_RDBM      MOVE    MDV2_BM_TMP, R1
+                XOR     R2, R2
+_MFS2_RDBM_L    MOVE    C_MDV1_DIRTY_BASE_HI, R8
+                MOVE    C_MDV1_DIRTY_BASE_LO, R9
+                ADD     R2, R9
+                RSUB    READ_MDV2_BYTE, 1       ; R8: byte value
+                MOVE    R8, @R1++
+                ADD     1, R2
+                CMP     32, R2
+                RBRA    _MFS2_RDBM_L, !Z
+
+                MOVE    MDV2_BM_TMP, R1
+                MOVE    32, R2
+                XOR     R3, R3
+_MFS2_CHKZ      OR      @R1++, R3
+                SUB     1, R2
+                RBRA    _MFS2_CHKZ, !Z
+                CMP     0, R3
+                RBRA    _MFS2_IDLECLEAN, Z
+
+                CMP     1, R0
+                RBRA    _MFS2_STARTPASS, Z
+
+                MOVE    MDV2_BM_TMP, R1
+                MOVE    MDV2_LAST_DIRTY, R2
+                MOVE    32, R3
+_MFS2_CMPLAST   MOVE    @R1++, R5
+                CMP     @R2++, R5
+                RBRA    _MFS2_NEWDIRT, !Z
+                SUB     1, R3
+                RBRA    _MFS2_CMPLAST, !Z
+
+                MOVE    MDV2_GATE_CNT, R1
+                CMP     0, @R1
+                RBRA    _MFS2_STARTPASS, Z
+                SUB     1, @R1
+                RBRA    _MFS2_RET1, 1
+
+_MFS2_NEWDIRT   MOVE    MDV2_BM_TMP, R1
+                MOVE    MDV2_LAST_DIRTY, R2
+                MOVE    32, R3
+_MFS2_SAVELAST  MOVE    @R1++, @R2++
+                SUB     1, R3
+                RBRA    _MFS2_SAVELAST, !Z
+                MOVE    MDV2_GATE_CNT, R1
+                MOVE    MDV1_GATE_THRESHOLD, @R1
+                RBRA    _MFS2_RET1, 1
+
+_MFS2_IDLECLEAN MOVE    MDV2_GATE_CNT, R1
+                MOVE    MDV1_GATE_THRESHOLD, @R1
+                RBRA    _MFS2_RET0, 1
+
+_MFS2_STARTPASS MOVE    MDV2_BM_TMP, R1
+                MOVE    MDV2_DIRTY_SNAP, R2
+                MOVE    32, R3
+_MFS2_FREEZE    MOVE    @R1++, @R2++
+                SUB     1, R3
+                RBRA    _MFS2_FREEZE, !Z
+                MOVE    MDV2_FL_SECTOR, R1
+                MOVE    0, @R1
+                RBRA    _MFS2_FINDNEXT, 1
+
+_MFS2_CHUNK     MOVE    HNDL_RM_FILES, R7
+                ADD     MDV2_MAN_IDX, R7
+                MOVE    @R7, R7
+
+                MOVE    MDV2_FL_SECTOR, R6
+                MOVE    @R6, R6
+                MOVE    R6, R8
+                MOVE    686, R9
+                SYSCALL(mulu, 1)
+                MOVE    R10, R4
+                MOVE    R11, R5
+
+                MOVE    MDV2_FL_BYTE, R1
+                MOVE    @R1, R1
+                MOVE    MDV1_FLUSH_CHUNK, R2
+
+_MFS2_WLOOP     MOVE    R4, R0
+                MOVE    R5, R3
+                ADD     R1, R0
+                ADDC    0, R3
+
+                MOVE    R3, R8
+                MOVE    R0, R9
+                RSUB    READ_MDV2_BYTE, 1
+
+                MOVE    R8, R0
+                MOVE    R7, R8
+                MOVE    R0, R9
+                SYSCALL(f32_fwrite, 1)
+                CMP     0, R9
+                RBRA    _MFS2_WROK, Z
+                MOVE    ERR_FATAL_WRITE, R8
+                RBRA    FATAL, 1
+
+_MFS2_WROK      ADD     1, R1
+                CMP     686, R1
+                RBRA    _MFS2_CHUNKDONE, Z
+                SUB     1, R2
+                RBRA    _MFS2_WLOOP, !Z
+
+_MFS2_CHUNKDONE MOVE    MDV2_FL_BYTE, R3
+                MOVE    R1, @R3
+
+                MOVE    R7, R8
+                SYSCALL(f32_fflush, 1)
+                CMP     0, R9
+                RBRA    _MFS2_FLUSHOK, Z
+                MOVE    ERR_FATAL_WRITE, R8
+                RBRA    FATAL, 1
+
+_MFS2_FLUSHOK   CMP     686, R1
+                RBRA    _MFS2_RET1, !Z
+
+                MOVE    MDV2_FL_SECTOR, R3
+                ADD     1, @R3
+
+_MFS2_FINDNEXT  MOVE    MDV2_FL_SECTOR, R6
+                MOVE    @R6, R6
+
+_MFS2_SCAN      CMP     255, R6
+                RBRA    _MFS2_PASSDONE, Z
+
+                MOVE    R6, R1
+                SHR     3, R1
+                MOVE    MDV2_DIRTY_SNAP, R2
+                ADD     R1, R2
+                MOVE    @R2, R3
+                MOVE    R6, R1
+                AND     0x0007, R1
+                MOVE    1, R2
+_MFS2_SHIFTB    CMP     0, R1
+                RBRA    _MFS2_SHIFTED, Z
+                SHL     1, R2
+                SUB     1, R1
+                RBRA    _MFS2_SHIFTB, 1
+_MFS2_SHIFTED   AND     R2, R3
+                RBRA    _MFS2_FOUND, !Z
+
+                ADD     1, R6
+                RBRA    _MFS2_SCAN, 1
+
+_MFS2_FOUND     MOVE    MDV2_FL_SECTOR, R1
+                MOVE    R6, @R1
+                MOVE    R6, R8
+                MOVE    686, R9
+                SYSCALL(mulu, 1)
+
+                MOVE    HNDL_RM_FILES, R7
+                ADD     MDV2_MAN_IDX, R7
+                MOVE    @R7, R7
+                MOVE    R7, R8
+                MOVE    R10, R9
+                MOVE    R11, R10
+                SYSCALL(f32_fseek, 1)
+                CMP     0, R9
+                RBRA    _MFS2_SEEKOK, Z
+                MOVE    ERR_FATAL_SEEK, R8
+                RBRA    FATAL, 1
+
+_MFS2_SEEKOK    MOVE    MDV2_FL_BYTE, R1
+                MOVE    0, @R1
+                MOVE    MDV2_FL_STATE, R1
+                MOVE    1, @R1
+                RBRA    _MFS2_RET1, 1
+
+_MFS2_PASSDONE  MOVE    MDV2_FL_STATE, R1
+                MOVE    0, @R1
+
+                MOVE    MDV2_BM_TMP, R1
+                XOR     R2, R2
+_MFS2_RDBM2     MOVE    C_MDV1_DIRTY_BASE_HI, R8
+                MOVE    C_MDV1_DIRTY_BASE_LO, R9
+                ADD     R2, R9
+                RSUB    READ_MDV2_BYTE, 1
+                MOVE    R8, @R1++
+                ADD     1, R2
+                CMP     32, R2
+                RBRA    _MFS2_RDBM2, !Z
+
+                MOVE    MDV2_BM_TMP, R1
+                MOVE    MDV2_DIRTY_SNAP, R2
+                MOVE    32, R3
+_MFS2_CMPCLR    MOVE    @R1++, R5
+                CMP     @R2++, R5
+                RBRA    _MFS2_STILLDIRTY, !Z
+                SUB     1, R3
+                RBRA    _MFS2_CMPCLR, !Z
+
+                MOVE    M2M$RAMROM_DEV, R8
+                MOVE    C_DEV_QL_MDV2, @R8
+                MOVE    M2M$RAMROM_4KWIN, R8
+                MOVE    C_MDV1_DIRTY_WIN, @R8
+                MOVE    M2M$RAMROM_DATA, R8
+                ADD     C_MDV1_DIRTY_CLR_OFS, R8
+                MOVE    1, @R8                  ; any value clears the bitmap
+
+                MOVE    MDV2_LAST_DIRTY, R1
+                XOR     R2, R2
+                MOVE    32, R3
+_MFS2_CLRLAST   MOVE    R2, @R1++
+                SUB     1, R3
+                RBRA    _MFS2_CLRLAST, !Z
+                MOVE    MDV2_GATE_CNT, R1
+                MOVE    MDV1_GATE_THRESHOLD, @R1
+                RBRA    _MFS2_RET0, 1
+
+_MFS2_STILLDIRTY MOVE   MDV2_GATE_CNT, R1
+                MOVE    MDV1_GATE_THRESHOLD, @R1
+                RBRA    _MFS2_RET1, 1
+
+_MFS2_RET0      XOR     R8, R8
+                RBRA    _MFS2_RET, 1
+_MFS2_RET1      MOVE    1, R8
+_MFS2_RET       DECRB
+                RET
+
 ; HANDLE_CORE_IO callback function:
 ;
 ; Called from HANDLE_IO (M2M/rom/shell.asm, "core-io-hook" - see that
@@ -647,6 +926,11 @@ HANDLE_CORE_IO  SYSCALL(enter, 1)
 
                 XOR     R8, R8                  ; 0 = respect the gate
                 RSUB    MDV1_FLUSH_STEP, 1
+
+                ; QL4M65 Milestone 2 paso 5, etapa 2: mdv2's own gated
+                ; background flush, same time-slice pattern as mdv1's above.
+                XOR     R8, R8                  ; 0 = respect the gate
+                RSUB    MDV2_FLUSH_STEP, 1
 
                 SYSCALL(leave, 1)
                 RET
@@ -673,11 +957,21 @@ HANDLE_CORE_IO  SYSCALL(enter, 1)
 OSM_SEL_PRE     INCRB
 
                 CMP     OPTM_G_MDV1, R8
-                RBRA    _OSM_SPR_RET, !Z
-_OSM_SPR_LOOP   MOVE    1, R8                   ; 1 = force
+                RBRA    _OSM_SPR_MDV2, !Z
+_OSM_SPR_LOOP1  MOVE    1, R8                   ; 1 = force
                 RSUB    MDV1_FLUSH_STEP, 1
                 CMP     1, R8
-                RBRA    _OSM_SPR_LOOP, Z        ; work remains: keep going
+                RBRA    _OSM_SPR_LOOP1, Z       ; work remains: keep going
+                RBRA    _OSM_SPR_RET, 1
+
+                ; QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-23): mdv2,
+                ; same force-flush-before-reload logic as mdv1 above.
+_OSM_SPR_MDV2   CMP     OPTM_G_MDV2, R8
+                RBRA    _OSM_SPR_RET, !Z
+_OSM_SPR_LOOP2  MOVE    1, R8                   ; 1 = force
+                RSUB    MDV2_FLUSH_STEP, 1
+                CMP     1, R8
+                RBRA    _OSM_SPR_LOOP2, Z       ; work remains: keep going
 
 _OSM_SPR_RET    XOR     R8, R8
                 XOR     R9, R9
@@ -716,6 +1010,7 @@ OPTM_G_MAINROM         .EQU 1
 OPTM_G_BACKROM         .EQU 2
 OPTM_G_BACKROM_EXTRACT .EQU 3
 OPTM_G_MDV1            .EQU 4
+OPTM_G_MDV2            .EQU 5
 
 ; Mirrors globals.vhd's C_DEV_QL_BACKROM - used by CLEAR_BACK_ROM above.
 C_DEV_QL_BACKROM       .EQU 0x0102
@@ -735,10 +1030,20 @@ C_MDV1_DIRTY_BASE_LO    .EQU 0x0000
 C_MDV1_DIRTY_WIN        .EQU 48                 ; = 0x30000 / 4096
 C_MDV1_DIRTY_CLR_OFS    .EQU 0x0020             ; = 0x30020 - 0x30000
 
-; Mirrors globals.vhd's C_CRTROMS_MAN order (Main=0, Back=1, MDV1=2) -
-; used by MDV1_FLUSH_STEP above to index CRTROM_MAN_LDF/HNDL_RM_FILES.
-; Keep in sync if that array's order in globals.vhd ever changes.
+; QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-23): mirrors globals.vhd's
+; C_DEV_QL_MDV2 - the only new per-drive constant mdv2 actually needs.
+; C_MDV1_DIRTY_BASE_HI/_LO/_WIN/_CLR_OFS above are reused unchanged: the
+; dirty bitmap sits at the same DEVICE-WINDOW-RELATIVE offset for every
+; microdrive (same reasoning as mdv_qnice_bridge.vhd's own header, on the
+; VHDL side of this exact design decision).
+C_DEV_QL_MDV2           .EQU 0x0104
+
+; Mirrors globals.vhd's C_CRTROMS_MAN order (Main=0, Back=1, MDV1=2,
+; MDV2=3) - used by MDV1_FLUSH_STEP/MDV2_FLUSH_STEP above to index
+; CRTROM_MAN_LDF/HNDL_RM_FILES. Keep in sync if that array's order in
+; globals.vhd ever changes.
 MDV1_MAN_IDX            .EQU 2
+MDV2_MAN_IDX            .EQU 3
 
 ; QL4M65 (Milestone 2 phase B, etapa 4, M2028): tuning constants for
 ; MDV1_FLUSH_STEP's background write-back - see that routine's own header
@@ -783,6 +1088,18 @@ MDV1_FL_STATE   .BLOCK  1               ; 0=idle, 1=streaming a sector
 MDV1_FL_SECTOR  .BLOCK  1               ; sector 0..254 being scanned/streamed
 MDV1_FL_BYTE    .BLOCK  1               ; next byte 0..685 within that sector
 MDV1_GATE_CNT   .BLOCK  1               ; anti-thrashing countdown
+
+; QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-23): mdv2's own copy of the
+; same state block, used by MDV2_FLUSH_STEP - see that routine's own
+; header for why this is a duplicate block rather than a parametrized
+; shared one.
+MDV2_DIRTY_SNAP .BLOCK  32
+MDV2_LAST_DIRTY .BLOCK  32
+MDV2_BM_TMP     .BLOCK  32
+MDV2_FL_STATE   .BLOCK  1
+MDV2_FL_SECTOR  .BLOCK  1
+MDV2_FL_BYTE    .BLOCK  1
+MDV2_GATE_CNT   .BLOCK  1
 
 ; M2M Shell variables (only include, if you included "shell.asm" above)
 #include "../../M2M/rom/shell_vars.asm"

@@ -194,6 +194,13 @@ constant C_DEV_QL_BACKROM        : std_logic_vector(15 downto 0) := x"0102";
 constant C_DEV_QL_MDV1            : std_logic_vector(15 downto 0) := x"0103";
 constant C_MDV1_MAX_BYTES         : natural := 174930;
 
+-- QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-23,
+-- .research/microdrive-second-unit-plan.md): mdv2, misma ventana CSR/
+-- device-window-relativa que mdv1 (C_MDV1_DIRTY_BASE/C_MDV1_DIRTY_CLR de
+-- mas abajo se reutilizan tal cual - ver mdv_qnice_bridge.vhd's own
+-- header para el porque), solo un device ID distinto.
+constant C_DEV_QL_MDV2            : std_logic_vector(15 downto 0) := x"0104";
+
 -- QL4M65 (Milestone 2 phase B, etapa 2): read-back path for the eventual SD
 -- flush - .research/microdrive-write-design.md section 6.1. Byte range
 -- 0x0000000..C_MDV1_MAX_BYTES-1 (same window as the loader above) becomes
@@ -202,10 +209,11 @@ constant C_MDV1_MAX_BYTES         : natural := 174930;
 constant C_MDV1_DIRTY_BASE        : natural := 16#30000#; -- 32 bytes, byte m bit n = sector m*8+n
 constant C_MDV1_DIRTY_CLR         : natural := 16#30020#; -- write (any value) clears the whole bitmap
 
-constant C_CRTROMS_MAN_NUM       : natural := 3;                                       -- amount of manually loadable ROMs and carts; maximum is 16
+constant C_CRTROMS_MAN_NUM       : natural := 4;                                       -- amount of manually loadable ROMs and carts; maximum is 16
 constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE, C_DEV_QL_MAINROM,
                                                          C_CRTROMTYPE_DEVICE, C_DEV_QL_BACKROM,
                                                          C_CRTROMTYPE_DEVICE, C_DEV_QL_MDV1,
+                                                         C_CRTROMTYPE_DEVICE, C_DEV_QL_MDV2,
                                                          x"EEEE");                     -- Always finish the array using x"EEEE"
 
 -- Automatically loaded ROMs: These ROMs are loaded before the core starts
