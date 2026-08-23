@@ -676,7 +676,13 @@ seguir para la parte de escritura, una vez la lectura funcione.
    direcciones de HyperRAM, aunque no aplica hasta la fase 4 de este plan).
 2. Un microdrive, solo lectura, en BRAM.
 3. Driver de escritura (ahora que ya se lee).
-4. Migrar el microdrive a HyperRAM. **En curso (2026-08-22, `M2030`):**
+4. Migrar el microdrive a HyperRAM. **HECHO y confirmado en hardware real
+   (2026-08-22, `M2032`)** - `LOAD`→menú, `DIR`, `SAVE`, apagar/encender y
+   releer, todo correcto. Las 4 FSM de CDC del lado QNICE
+   (`mdv1_loader_core`, lectura/escritura del menú) se han dejado intactas
+   - jubilarlas a favor de `qnice2hyperram.vhd` queda como paso posterior
+   independiente, no bloqueante. Resumen del camino (`M2030`→`M2031`→
+   `M2032`, ver `DECISIONES.md` para el detalle completo de cada uno):
    camino de memoria (`avm_cache` compartido para el tráfico en tiempo real
    de `mdv.v`, dirección base `C_HMAP_MDV1`) verificado a fondo en
    simulación (tres bugs reales encontrados/arreglados en `dpram_avm.vhd`,
@@ -702,9 +708,9 @@ seguir para la parte de escritura, una vez la lectura funcione.
    con que `OSM_SEL_PRE` relee el bitmap de sucios en cada vuelta al menú).
    Rediseñado como nivel (comparación de dirección cacheada vs. pedida);
    ver `DECISIONES.md`. Build R6 compila limpio, timing cumplido
-   (`WNS=+0.338 ns`, `WHS=+0.011 ns`, algo ajustado). Pendiente: regresión
-   en hardware real con `M2032` (`LOAD`→menú, `DIR`/`SAVE`/apagar-
-   encender/recarga).
+   (`WNS=+0.338 ns`, `WHS=+0.011 ns`, algo ajustado - a vigilar en futuras
+   builds de este camino). **Confirmado por el usuario en hardware real:
+   toda la regresión pasa.**
 5. Ampliar a 2, 3 o 4 unidades.
 
 Diseño completo de la lectura en `.research/microdrive-read-design.md`
