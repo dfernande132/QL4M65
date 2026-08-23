@@ -724,13 +724,16 @@ seguir para la parte de escritura, una vez la lectura funcione.
    últimos bugs reales de hardware — `M2027`/`M2031`/`M2032`). El bitmap
    de sucios se queda en registros del core, no se mueve a HyperRAM.
    `qnice2hyperram.vhd` queda como etapa 3 opcional y futura.
-   **Etapa 1 implementada y verificada en simulación (`M2033`,
+   **Etapa 1 CERRADA y confirmada en hardware real (`M2033`,
    2026-08-23)** - `mdv2` + `avm_arbit` en tiempo real, cuatro
    comprobaciones limpias en `tb_mdv_dual.vhd` (contención, flujo servido
-   de mdv2, difusión de escritura segura, tráfico de sobrecarga medido).
-   Build R6 compila limpio, timing cumplido (`WNS=+0.383 ns`). Pendiente:
-   regresión de mdv1 en hardware real (mdv2 presente pero aún no
-   cargable - eso es la etapa 2).
+   de mdv2, difusión de escritura segura, tráfico de sobrecarga medido) y
+   regresión completa de mdv1 en hardware sin cambios (`LOAD`/`DIR`/
+   `SAVE`/apagar-encender). Build R6 compilaba limpio, timing cumplido
+   (`WNS=+0.383 ns`). **Etapa 2 pendiente de empezar:** parametrizar el
+   mecanismo de QNICE que hoy sirve a mdv1 e instanciarlo también para
+   mdv2, para poder cargar/guardar en el segundo microdrive de verdad
+   (mdv2 sigue presente en el silicio pero no cargable hasta entonces).
 
 Diseño completo de la lectura en `.research/microdrive-read-design.md`
 (pendiente de revisión antes de implementar, ver paso 1 arriba).
