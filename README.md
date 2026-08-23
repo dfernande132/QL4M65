@@ -128,7 +128,10 @@ story.
 Getting the compiled core
 --------------------------
 
-This repository is source only - no compiled `.cor` file is committed here.
+This repository is source only - no compiled QL4M65 `.cor` file is
+committed here. (The only `.cor` files tracked in this repo are unrelated
+QNICE-FPGA demo bitstreams bundled with the M2M framework's own
+`M2M/QNICE/dist_kit/`, not the QL4M65 core itself.)
 Ready-to-use `.cor` files for MEGA65 **R6** (tested on real hardware) and
 **R3** (compiles clean, not yet tested on real R3 hardware - see the
 release notes), together with a Minerva system ROM, are published on the
