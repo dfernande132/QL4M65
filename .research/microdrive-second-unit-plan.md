@@ -141,14 +141,54 @@ sobre por qué existe el refresco de puerto B).
 
 ### 1.7 Verificación
 
-- **Simulación**: extender `.research/hyperram-migration-sim/` con una
-  segunda instancia de `mdv.v`+`dpram_avm.vhd` compartiendo un `avm_arbit`
-  delante del backend de latencia variable. Caso concreto a probar: mdv1
-  en sesión de escritura mientras mdv2 está en reproducción activa (el
-  escenario real más exigente) - el árbitro no debe dejar que uno mate de
-  hambre al otro, ni introducir un retraso que rompa el margen de tiempo
-  de `mdv.v`. Medir el tráfico de sobrecarga de 1.6 en esta misma
-  simulación.
+- **Simulación (HECHA, 2026-08-23):** `tb_mdv_dual.vhd` en
+  `.research/hyperram-migration-sim/` - dos instancias reales de `mdv.v`,
+  cada una con su propio `dpram_avm.vhd`/`avm_cache`, compartiendo un
+  `avm_arbit` delante de un backend único de latencia variable (10-200
+  ciclos). Escenario probado: mdv1 en sesión de escritura completa
+  mientras mdv2 reproduce activamente en paralelo (el caso más exigente).
+  Resultado: **las cuatro comprobaciones pasan limpio**:
+  1. `TEST_DUAL_MDV1_WRITE_SURVIVES: PASS` - la escritura de mdv1
+     sobrevive a la contención real de mdv2, sin inanición ni timeout.
+  2. Flujo servido de mdv2 (`dout_trace_mdv2.txt`, muestreado durante TODA
+     la ejecución, incluida la ventana de escritura de mdv1): **1831/1831
+     bytes exactos** contra el modelo de referencia sin modificar - la
+     contención no corrompe ni bloquea la reproducción de mdv2.
+  3. `TEST_DUAL_WRITE_BROADCAST_SAFE: PASS` (riesgo #3 de la sección 4,
+     verificado en simulación real, no solo por lectura de código):
+     desseleccionada mdv2 (`sel='0'`), difundidos los mismos
+     `wr_en`/`wr_strobe`/`wr_data` a las dos unidades a la vez (igual que
+     hará `main.vhd` de verdad) - la palabra 0 de mdv2 sigue siendo
+     exactamente la de la imagen cargada, la escritura no se filtró.
+  4. Tráfico de sobrecarga medido (sección 1.6): **2246 transacciones
+     aceptadas de mdv1** (carga + sesión de escritura + su propio
+     refresco de puerto B) frente a **1982 de mdv2** (carga + refresco de
+     puerto B puro, sin selección real de CPU en este test - mem_addr
+     avanza igual, ver M2011) a lo largo de ~4,02M ciclos de `clk_main_i`
+     - aproximadamente una transacción cada ~2000 ciclos por unidad
+     inactiva, coherente con `C_REFRESH_PERIOD=2000`. No se considera alto
+     - no hace falta gatear el refresco por `sel` de momento.
+
+  **Hallazgo real durante la implementación, no anticipado en la versión
+  anterior de este plan:** `mdv_dpram.vhd` guardaba `C_HMAP_MDV1` como una
+  referencia directa al paquete `globals`, no como parámetro - las dos
+  instancias habrían compartido la MISMA dirección base de HyperRAM en
+  silencio, corrompiéndose mutuamente, si se hubiera compilado tal cual.
+  Arreglado añadiendo un generic `G_HMAP_BASE` a la entidad `dpram`
+  (por defecto `C_HMAP_MDV1`, preservando el comportamiento de `M2030`-
+  `M2032` sin cambios para `i_mdv1`) y un nuevo parámetro `HMAP_BASE` en
+  `mdv.v` que lo pasa por nombre a su propia instancia interna de `dpram`
+  - `main.vhd` pasa `C_HMAP_MDV1`/`C_HMAP_MDV2` explícitamente a
+  `i_mdv1`/`i_mdv2` vía `generic map`. Confirmado en simulación que Vivado
+  sí soporta pasar un generic VHDL a un parámetro Verilog en ambos
+  sentidos de la instanciación mixta (`entity work.mdv generic map (...)`
+  desde VHDL hacia el `parameter` de `mdv.v`) - sin precedente previo en
+  este proyecto, verificado antes de confiar en ello para hardware real
+  (la elaboración mostró explícitamente `work.mdv(HMAP_BASE=16'b0)` y
+  `work.mdv(HMAP_BASE=16'b010110)` como dos parametrizaciones distintas).
+  El `assert` de no-solape de la sección 1.4 vive junto a las dos
+  instanciaciones en `main.vhd`.
+
 - **Hardware**: build real con mdv2 presente en el silicio pero **aún no
   cargable desde el menú** (el lado QNICE es el de la etapa 2, sin tocar
   todavía) - regresión completa de mdv1 (`LOAD`/`DIR`/`SAVE`/apagar-
@@ -241,13 +281,13 @@ contenido del buffer en sí, no cómo se rastrea qué está sucio.
    documentó para `C_HMAP_MDV1` sobre la unidad de las constantes
    (bloques de 4kW, no bytes ni palabras directamente) - error de la
    misma familia que `M2003` si se pasa por alto.
-3. Confirmar en simulación (no solo por lectura de código) que la
-   difusión de `wr_en`/`wr_strobe`/`wr_data` a las dos unidades es segura
-   (1.3) - la lectura del código apunta a que sí, pero este proyecto tiene
-   precedente de que "la lectura del código decía que sí" no siempre basta
-   contra el hardware real.
-4. Medir el tráfico de sobrecarga de mdv2 corriendo sin estar seleccionada
-   (1.6) y decidir si merece la pena gatear el refresco por `sel`.
+3. **[HECHO, 2026-08-23]** Confirmado en simulación (`TEST_DUAL_WRITE_BROADCAST_SAFE`,
+   sección 1.7) que la difusión de `wr_en`/`wr_strobe`/`wr_data` a las dos
+   unidades es segura - mdv2 desseleccionada no recibe nada aunque reciba
+   los mismos strobes que mdv1.
+4. **[HECHO, 2026-08-23]** Tráfico de sobrecarga medido (sección 1.7):
+   ~1982 transacciones de mdv2 en ~4,02M ciclos, no se considera alto - no
+   hace falta gatear el refresco por `sel` de momento.
 5. Presupuesto de RAM/ROM de QNICE para el segundo slot de menú
    (`OPTM_G_MDV2`) y la RAM duplicada del componente parametrizado (2.3) -
    comprobar antes de implementar, no después.

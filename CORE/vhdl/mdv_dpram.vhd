@@ -119,7 +119,23 @@ use work.globals.all;
 entity dpram is
    generic (
       ADDRWIDTH : natural := 8;
-      NUMWORDS  : natural := 256   -- unused here: BRAM size is driven by ADDRWIDTH (2**ADDRWIDTH words), matches dpram.v's own behaviour
+      NUMWORDS  : natural := 256;   -- unused here: BRAM size is driven by ADDRWIDTH (2**ADDRWIDTH words), matches dpram.v's own behaviour
+
+      -- QL4M65 Milestone 2 paso 5, etapa 1 (2026-08-23,
+      -- .research/microdrive-second-unit-plan.md): which 4kW-block window
+      -- of the 8MB HyperRAM chip this instance's own buffer lives at -
+      -- see C_HMAP_MDV1/C_HMAP_MDV2 (globals.vhd). A GENERIC, not a
+      -- direct reference to C_HMAP_MDV1, so mdv.v's own second sibling
+      -- (i_mdv2, main.vhd) can override it to C_HMAP_MDV2 without a
+      -- second copy of this entity - mdv.v threads it through to its own
+      -- internal "dpram" instantiation as the new HMAP_BASE parameter
+      -- (mechanical pass-through, same pattern as the existing m_avm_*
+      -- ports - see mdv.v's own header comment). Defaults to C_HMAP_MDV1
+      -- so an instantiation that doesn't override it (there is none left
+      -- in this project - both i_mdv1 and i_mdv2 now pass this
+      -- explicitly) behaves exactly as M2030-M2032 already verified on
+      -- real hardware.
+      G_HMAP_BASE : std_logic_vector(15 downto 0) := C_HMAP_MDV1
    );
    port (
       wrclock   : in  std_logic;
@@ -169,18 +185,19 @@ architecture synthesis of dpram is
 
    constant C_AWIDTH          : natural := 32;
 
-   -- QL4M65 fase C (etapa B): dónde vive mdv1 dentro de los 8MB de
-   -- HyperRAM. C_HMAP_MDV1 (globals.vhd) está en unidades de bloque de
-   -- 4kW (4096 palabras de 16 bits = 8KB); una dirección de PALABRA se
-   -- obtiene añadiendo doce bits cero (× 4096 palabras) - ver
-   -- HyperRAM-for-Beginners.md sección 5.5. avm_cache/HyperRAM
-   -- direccionan por PALABRA, igual que wraddress/rdaddress aquí, así que
-   -- esta constante se suma directamente a cada dirección antes de
-   -- despacharla - sin ella, mdv1 caería en la dirección 0, dentro de
+   -- QL4M65 fase C (etapa B): dónde vive este buffer dentro de los 8MB de
+   -- HyperRAM. G_HMAP_BASE (generic, ver la entidad más arriba - antes era
+   -- una referencia directa a C_HMAP_MDV1, sin variar por instancia) está
+   -- en unidades de bloque de 4kW (4096 palabras de 16 bits = 8KB); una
+   -- dirección de PALABRA se obtiene añadiendo doce bits cero (× 4096
+   -- palabras) - ver HyperRAM-for-Beginners.md sección 5.5. avm_cache/
+   -- HyperRAM direccionan por PALABRA, igual que wraddress/rdaddress aquí,
+   -- así que esta constante se suma directamente a cada dirección antes de
+   -- despacharla - sin ella, el buffer caería en la dirección 0, dentro de
    -- C_HMAP_M2M (reservado para el framework), la misma clase de bug que
    -- el desbordamiento de C_HMAP_QLSD de M2003.
    constant C_BASE_ADDR : unsigned(C_AWIDTH - 1 downto 0) :=
-      resize(unsigned(C_HMAP_MDV1) & "000000000000", C_AWIDTH);
+      resize(unsigned(G_HMAP_BASE) & "000000000000", C_AWIDTH);
 
    -- QL4M65 (raised after the 3000-cycle latency stress test, per
    -- review): 400 was chosen only against the ~2368-6512-cycle real gap

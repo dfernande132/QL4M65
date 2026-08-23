@@ -151,7 +151,23 @@ entity main is
       mdv1_avm_burstcount_o    : out std_logic_vector(7 downto 0);
       mdv1_avm_readdata_i      : in  std_logic_vector(15 downto 0);
       mdv1_avm_readdatavalid_i : in  std_logic;
-      mdv1_avm_waitrequest_i   : in  std_logic
+      mdv1_avm_waitrequest_i   : in  std_logic;
+
+      -- QL4M65 Milestone 2 paso 5, etapa 1 (2026-08-23,
+      -- .research/microdrive-second-unit-plan.md): mdv2's own dirty flag
+      -- and Avalon-MM master, same pattern as mdv1's own above - a
+      -- SEPARATE master (mega65.vhd arbitrates the two before hr_core_*,
+      -- not shared avm_cache instances).
+      mdv2_dirty_o             : out std_logic;
+      mdv2_avm_write_o         : out std_logic;
+      mdv2_avm_read_o          : out std_logic;
+      mdv2_avm_address_o       : out std_logic_vector(31 downto 0);
+      mdv2_avm_writedata_o     : out std_logic_vector(15 downto 0);
+      mdv2_avm_byteenable_o    : out std_logic_vector(1 downto 0);
+      mdv2_avm_burstcount_o    : out std_logic_vector(7 downto 0);
+      mdv2_avm_readdata_i      : in  std_logic_vector(15 downto 0);
+      mdv2_avm_readdatavalid_i : in  std_logic;
+      mdv2_avm_waitrequest_i   : in  std_logic
    );
 end entity main;
 
@@ -312,6 +328,28 @@ signal mdv1_dl_q      : std_logic_vector(15 downto 0);
 signal mdv1_dl_q_valid : std_logic;
 
 ---------------------------------------------------------------------------
+-- QL4M65 Milestone 2 paso 5, etapa 1 (2026-08-23,
+-- .research/microdrive-second-unit-plan.md): mdv2, real-time path only.
+-- Same "live" signals as mdv1's own set above; NO dl_addr/dl_data/
+-- download/dl_wr/dl_q/dl_q_valid yet - QNICE can't load into or read back
+-- from mdv2 until etapa 2 gives it a way to (its i_mdv2 instantiation ties
+-- those ports to "no load in progress" directly, no signals needed for
+-- that yet). wr_en/wr_strobe/wr_data are NOT duplicated here - mdv2
+-- shares mdv1's own signals (broadcast, see i_mdv2's own instantiation
+-- comment for why that's safe).
+---------------------------------------------------------------------------
+signal mdv2_gap       : std_logic;
+signal mdv2_tx_empty  : std_logic;
+signal mdv2_rx_ready  : std_logic;
+signal mdv2_byte      : std_logic_vector(7 downto 0);
+signal mdv2_gap_raw      : std_logic;
+signal mdv2_tx_empty_raw : std_logic;
+signal mdv2_rx_ready_raw : std_logic;
+signal mdv2_byte_raw     : std_logic_vector(7 downto 0);
+signal mdv2_sector    : std_logic_vector(7 downto 0);
+signal mdv2_wr_commit : std_logic;
+
+---------------------------------------------------------------------------
 -- QL4M65 (Milestone 2 phase B, etapa 2): bitmap de sectores sucios +
 -- lectura del buffer/bitmap desde QNICE, para el futuro volcado a SD
 -- (.research/microdrive-write-design.md section 5.2 y 6). Sin cambio
@@ -326,6 +364,14 @@ signal mdv1_dl_q_valid : std_logic;
 -- sectores, y wr_in_range dentro de mdv.v ya lo impide).
 signal mdv1_dirty       : std_logic_vector(255 downto 0) := (others => '0');
 signal mdv1_dirty_clear : std_logic;  -- pulso de 1 ciclo de clk_main_i, ver mas abajo
+
+-- QL4M65 Milestone 2 paso 5, etapa 1: mismo bitmap para mdv2, en pie de
+-- igualdad. Sin mdv2_dirty_clear todavia - QNICE no puede volcar/limpiar
+-- mdv2 hasta la etapa 2 (.research/microdrive-second-unit-plan.md, section
+-- 2.2: el bitmap se queda en registros del core, no se mueve a HyperRAM).
+-- Inerte en la practica en esta etapa: mdv2 no puede tener mdv_present='1'
+-- sin una imagen cargada, y no hay forma de cargar una todavia.
+signal mdv2_dirty       : std_logic_vector(255 downto 0) := (others => '0');
 
 -- QL4M65: limpiar el bitmap es "QNICE escribe cualquier valor en
 -- C_MDV1_DIRTY_CLR". qnice_dev_ce_i/we_i se mantienen durante todo el ciclo
@@ -819,6 +865,12 @@ begin
          mdv1_rx_ready_i  => mdv1_rx_ready,
          mdv1_byte_i      => mdv1_byte,
 
+         -- QL4M65 Milestone 2 paso 5, etapa 1
+         mdv2_gap_i       => mdv2_gap,
+         mdv2_tx_empty_i  => mdv2_tx_empty,
+         mdv2_rx_ready_i  => mdv2_rx_ready,
+         mdv2_byte_i      => mdv2_byte,
+
          -- QL4M65 fase B (M2022): canal de escritura hacia mdv1
          mdv_wr_data_o    => mdv1_wr_data,
          mdv_wr_strobe_o  => mdv1_wr_strobe,
@@ -1192,6 +1244,13 @@ begin
    -- to CORE/vhdl/mdv_dpram.vhd (Vivado-clean, BRAM-backed for phase A -
    -- see that file's own header and .research/microdrive-read-design.md).
    i_mdv1 : entity work.mdv
+      -- QL4M65 Milestone 2 paso 5, etapa 1: explicit even though it
+      -- matches mdv.v's own default - i_mdv2 below MUST differ (see its
+      -- own comment), so both are spelled out rather than leaving one
+      -- implicit.
+      generic map (
+         HMAP_BASE => C_HMAP_MDV1
+      )
       port map (
          clk      => clk_main_i,
          ce       => ce_bus_p,  -- native QL speed - see M2009 revert note above
@@ -1229,6 +1288,13 @@ begin
          -- QL4M65 fase B (M2022): canal de escritura zx8302 -> mdv1. Van en
          -- la direccion CONTRARIA a gap/tx_empty/rx_ready/dout (que si pasan
          -- por mdv1_output_reg, M2015) - no deben pasar por ese registro.
+         --
+         -- QL4M65 Milestone 2 paso 5, etapa 1: estas mismas tres senales
+         -- (mdv1_wr_en/mdv1_wr_strobe/mdv1_wr_data) se difunden tambien a
+         -- i_mdv2 sin enrutar (ver esa instancia mas abajo) - mdv.v se
+         -- protege solo (wr_session = wr_en && mdv_present, mdv_present =
+         -- sel && mdv_end!=0, mdv.v:150/266) asi que la unidad no
+         -- seleccionada nunca procesa un wr_strobe real aunque lo reciba.
          wr_en     => mdv1_wr_en,
          wr_strobe => mdv1_wr_strobe,
          wr_data   => mdv1_wr_data,
@@ -1262,6 +1328,80 @@ begin
       end if;
    end process mdv1_output_reg;
 
+   -- QL4M65 Milestone 2 paso 5, etapa 1 (2026-08-23,
+   -- .research/microdrive-second-unit-plan.md): mdv2, real-time path only.
+   -- download/dl_wr/dl_addr/dl_data tied to "no load in progress"/zero and
+   -- dl_q/dl_q_valid left open - QNICE has no way to load into or read
+   -- back from mdv2 yet (etapa 2). wr_en/wr_strobe/wr_data reuse mdv1's
+   -- own signals (broadcast, see i_mdv1's own instantiation comment).
+   i_mdv2 : entity work.mdv
+      -- QL4M65 Milestone 2 paso 5, etapa 1: MUST differ from i_mdv1's own
+      -- C_HMAP_MDV1 - without this, both siblings' internal dpram would
+      -- silently share the exact same HyperRAM address range and corrupt
+      -- each other's data (found by design review before this was ever
+      -- built - see .research/microdrive-second-unit-plan.md section 1.4
+      -- and the elaboration-time assert near i_mdv2's own instantiation
+      -- below, which exists specifically to catch this class of mistake
+      -- if it's ever reintroduced).
+      generic map (
+         HMAP_BASE => C_HMAP_MDV2
+      )
+      port map (
+         clk      => clk_main_i,
+         ce       => ce_bus_p,
+         reset    => '0',
+         reverse  => '0',
+
+         sel      => mdv_sel(1),
+
+         gap       => mdv2_gap_raw,
+         tx_empty  => mdv2_tx_empty_raw,
+         rx_ready  => mdv2_rx_ready_raw,
+         dout      => mdv2_byte_raw,
+
+         download  => '0',
+         dl_addr   => (others => '0'),
+         dl_data   => (others => '0'),
+         dl_wr     => '0',
+         dl_q      => open,
+         dl_q_valid => open,
+
+         wr_en     => mdv1_wr_en,
+         wr_strobe => mdv1_wr_strobe,
+         wr_data   => mdv1_wr_data,
+         sector    => mdv2_sector,
+         wr_commit => mdv2_wr_commit,
+
+         m_avm_write         => mdv2_avm_write_o,
+         m_avm_read          => mdv2_avm_read_o,
+         m_avm_address       => mdv2_avm_address_o,
+         m_avm_writedata     => mdv2_avm_writedata_o,
+         m_avm_byteenable    => mdv2_avm_byteenable_o,
+         m_avm_burstcount    => mdv2_avm_burstcount_o,
+         m_avm_readdata      => mdv2_avm_readdata_i,
+         m_avm_readdatavalid => mdv2_avm_readdatavalid_i,
+         m_avm_waitrequest   => mdv2_avm_waitrequest_i
+      ); -- i_mdv2
+
+   mdv2_output_reg : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         mdv2_gap       <= mdv2_gap_raw;
+         mdv2_tx_empty  <= mdv2_tx_empty_raw;
+         mdv2_rx_ready  <= mdv2_rx_ready_raw;
+         mdv2_byte      <= mdv2_byte_raw;
+      end if;
+   end process mdv2_output_reg;
+
+   -- QL4M65 Milestone 2 paso 5, etapa 1: C_HMAP_MDV1/C_HMAP_MDV2 deben ser
+   -- rangos disjuntos - un solape aqui corromperia datos en silencio (cada
+   -- avm_cache de mdv_dpram solo ve su propio trafico, ninguna de las dos
+   -- instancias puede detectar que la otra esta escribiendo el mismo hueco
+   -- de HyperRAM por debajo). Tres lineas, en tiempo de elaboracion.
+   assert unsigned(C_HMAP_MDV2) >= unsigned(C_HMAP_MDV1) + C_HMAP_MDV_BLOCKS
+      report "main.vhd: C_HMAP_MDV1/C_HMAP_MDV2 overlap - fix globals.vhd before synthesizing"
+      severity failure;
+
    ---------------------------------------------------------------------------
    -- QL4M65 (Milestone 2 phase B, etapa 2): dirty-sector bitmap + read-back
    -- from QNICE. See .research/microdrive-write-design.md sections 5.2/6.
@@ -1286,6 +1426,23 @@ begin
    -- QL4M65 (M2029): combinational OR-reduce, already in clk_main_i - see
    -- this signal's own port comment.
    mdv1_dirty_o <= '0' when unsigned(mdv1_dirty) = 0 else '1';
+
+   -- QL4M65 Milestone 2 paso 5, etapa 1: mismo bitmap para mdv2, sin
+   -- entrada de "clear" todavia (nada puede limpiarlo hasta la etapa 2 -
+   -- inerte en la practica, ver esta senal's own declaracion mas arriba).
+   -- reset SI se respeta desde ya (comportamiento seguro por defecto).
+   p_dirty2 : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if reset = '1' then
+            mdv2_dirty <= (others => '0');
+         elsif mdv2_wr_commit = '1' then
+            mdv2_dirty(to_integer(unsigned(mdv2_sector))) <= '1';
+         end if;
+      end if;
+   end process p_dirty2;
+
+   mdv2_dirty_o <= '0' when unsigned(mdv2_dirty) = 0 else '1';
 
    -- Clearing the bitmap: QNICE writes any value to C_MDV1_DIRTY_CLR. The
    -- underlying QNICE bus write cycle holds ce_i/we_i/addr_i stable for

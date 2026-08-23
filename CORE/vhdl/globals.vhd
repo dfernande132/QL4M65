@@ -101,11 +101,28 @@ constant C_HMAP_QL            : std_logic_vector(15 downto 0) := x"0200";     --
 -- at its start. mdv.v's own dpram is addressed with 17 bits (0..131071
 -- words), of which real .mdv images only ever use up to 87999 (174930
 -- bytes / 2 - .research/microdrive-read-design.md) - 22 4kW windows
--- (90112 words) covers that with margin. NOT yet subdivided further within
--- the QL's 4MB block - when Milestone 3 migrates the QL's own main RAM to
--- HyperRAM too, its own placement must avoid this range (or the whole map
--- gets redesigned at that point - not a concern until that milestone starts).
+-- (90112 words) covers that with margin.
+--
+-- QL4M65 Milestone 2 paso 5 (2026-08-23, .research/microdrive-second-unit-plan.md
+-- section 1.5): the QL's real hardware protocol supports up to 8
+-- microdrives (mdv_sel, an 8-bit shift register in zx8302.v) - the full
+-- map is drawn out here now, 22 blocks per unit x 8 units = 176 of the
+-- QL's 512-block (4MB) reservation, even though only mdv1/mdv2 are
+-- actually instantiated yet. Same lesson as M2003's C_HMAP_QLSD overflow,
+-- applied ahead of time: Milestone 3 (QL main RAM -> HyperRAM) needs to
+-- know what's taken before picking its own placement, and it's cheaper to
+-- write this down once than to rediscover it under time pressure later.
+--   mdv1: C_HMAP_QL + 0*22   mdv5: C_HMAP_QL + 4*22
+--   mdv2: C_HMAP_QL + 1*22   mdv6: C_HMAP_QL + 5*22
+--   mdv3: C_HMAP_QL + 2*22   mdv7: C_HMAP_QL + 6*22
+--   mdv4: C_HMAP_QL + 3*22   mdv8: C_HMAP_QL + 7*22
+-- (176 blocks total = 1408KB of the chip's 8MB - comfortably inside the
+-- QL's own 4MB/512-block reservation, with 336 blocks = 2.625MB still
+-- free within it for Milestone 3 and beyond.)
+constant C_HMAP_MDV_BLOCKS     : natural := 22;
 constant C_HMAP_MDV1           : std_logic_vector(15 downto 0) := C_HMAP_QL;
+constant C_HMAP_MDV2           : std_logic_vector(15 downto 0) :=
+   std_logic_vector(unsigned(C_HMAP_QL) + C_HMAP_MDV_BLOCKS);
 
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System

@@ -357,6 +357,34 @@ signal main_mdv1_avm_readdata      : std_logic_vector(15 downto 0);
 signal main_mdv1_avm_readdatavalid : std_logic;
 signal main_mdv1_avm_waitrequest   : std_logic;
 
+-- QL4M65 Milestone 2 paso 5, etapa 1 (2026-08-23,
+-- .research/microdrive-second-unit-plan.md): mdv2's own Avalon-MM master,
+-- same pattern as mdv1's own above - arbitrated together (i_avm_arbit_mdv,
+-- below) before the shared i_avm_fifo_mdv1 CDC.
+signal main_mdv2_avm_write         : std_logic;
+signal main_mdv2_avm_read          : std_logic;
+signal main_mdv2_avm_address       : std_logic_vector(31 downto 0);
+signal main_mdv2_avm_writedata     : std_logic_vector(15 downto 0);
+signal main_mdv2_avm_byteenable    : std_logic_vector(1 downto 0);
+signal main_mdv2_avm_burstcount    : std_logic_vector(7 downto 0);
+signal main_mdv2_avm_readdata      : std_logic_vector(15 downto 0);
+signal main_mdv2_avm_readdatavalid : std_logic;
+signal main_mdv2_avm_waitrequest   : std_logic;
+signal main_mdv2_dirty             : std_logic;
+
+-- QL4M65 Milestone 2 paso 5, etapa 1: the arbitrated stream feeding
+-- i_avm_fifo_mdv1's slave side, in main_clk (see plan section 1.1 for why
+-- the arbiter sits here, before the CDC, rather than after it).
+signal main_mdv_arb_avm_write         : std_logic;
+signal main_mdv_arb_avm_read          : std_logic;
+signal main_mdv_arb_avm_address       : std_logic_vector(31 downto 0);
+signal main_mdv_arb_avm_writedata     : std_logic_vector(15 downto 0);
+signal main_mdv_arb_avm_byteenable    : std_logic_vector(1 downto 0);
+signal main_mdv_arb_avm_burstcount    : std_logic_vector(7 downto 0);
+signal main_mdv_arb_avm_readdata      : std_logic_vector(15 downto 0);
+signal main_mdv_arb_avm_readdatavalid : std_logic;
+signal main_mdv_arb_avm_waitrequest   : std_logic;
+
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
 ---------------------------------------------------------------------------------------------
@@ -367,16 +395,68 @@ signal main_mdv1_avm_waitrequest   : std_logic;
 
 begin
 
-   -- QL4M65 (Milestone 2 phase C, etapa B): mdv1's buffer is the first
-   -- real HyperRAM consumer in this project (C_HMAP_MDV1, globals.vhd) -
-   -- ascal/QNICE don't use hr_core_* yet, so it's a single master, no
-   -- avm_arbit needed (unlike e.g. AExp's two-master ADF chain). Domain
-   -- resets follow the framework's own rule (HyperRAM-for-Beginners.md
-   -- S5.8 / AExp's own avm_fifo comment): the slave side resets from the
-   -- core's own reset (main_reset_m2m_i), the master side from the
-   -- framework's HyperRAM reset (hr_rst_i) - never cross them, or one
-   -- side thinks a transaction is still in flight after the other has
-   -- forgotten it.
+   -- QL4M65 (Milestone 2 phase C, etapa B): mdv1's buffer was the first
+   -- real HyperRAM consumer in this project (C_HMAP_MDV1, globals.vhd).
+   --
+   -- QL4M65 Milestone 2 paso 5, etapa 1 (2026-08-23,
+   -- .research/microdrive-second-unit-plan.md section 1.1): now a SECOND
+   -- real-time master (mdv2), arbitrated HERE, in main_clk, BEFORE the CDC
+   -- - not one avm_fifo per master arbitrated after in hr_clk (that
+   -- pattern, used e.g. by AExp's two-master ADF chain, exists there
+   -- because ITS two masters live in different clock domains from each
+   -- other; mdv1/mdv2 both live in clk_main_i, so one CDC crossing instead
+   -- of two is strictly better - fewer resources, one place to reason
+   -- about the crossing). G_PREFER_SWAP is genuinely arbitrary here (both
+   -- masters are equally real-time, both have the same ~592 ce tick /
+   -- ~7900 clk_main_i cycle margin already documented in dpram_avm.vhd) -
+   -- written down explicitly rather than left to the default.
+   i_avm_arbit_mdv : entity work.avm_arbit
+      generic map (
+         G_PREFER_SWAP  => false,  -- arbitrary, see comment above
+         G_ADDRESS_SIZE => 32,
+         G_DATA_SIZE    => 16
+      )
+      port map (
+         clk_i                  => main_clk,
+         rst_i                  => main_reset_m2m_i,
+
+         s0_avm_write_i         => main_mdv1_avm_write,
+         s0_avm_read_i          => main_mdv1_avm_read,
+         s0_avm_address_i       => main_mdv1_avm_address,
+         s0_avm_writedata_i     => main_mdv1_avm_writedata,
+         s0_avm_byteenable_i    => main_mdv1_avm_byteenable,
+         s0_avm_burstcount_i    => main_mdv1_avm_burstcount,
+         s0_avm_readdata_o      => main_mdv1_avm_readdata,
+         s0_avm_readdatavalid_o => main_mdv1_avm_readdatavalid,
+         s0_avm_waitrequest_o   => main_mdv1_avm_waitrequest,
+
+         s1_avm_write_i         => main_mdv2_avm_write,
+         s1_avm_read_i          => main_mdv2_avm_read,
+         s1_avm_address_i       => main_mdv2_avm_address,
+         s1_avm_writedata_i     => main_mdv2_avm_writedata,
+         s1_avm_byteenable_i    => main_mdv2_avm_byteenable,
+         s1_avm_burstcount_i    => main_mdv2_avm_burstcount,
+         s1_avm_readdata_o      => main_mdv2_avm_readdata,
+         s1_avm_readdatavalid_o => main_mdv2_avm_readdatavalid,
+         s1_avm_waitrequest_o   => main_mdv2_avm_waitrequest,
+
+         m_avm_write_o          => main_mdv_arb_avm_write,
+         m_avm_read_o           => main_mdv_arb_avm_read,
+         m_avm_address_o        => main_mdv_arb_avm_address,
+         m_avm_writedata_o      => main_mdv_arb_avm_writedata,
+         m_avm_byteenable_o     => main_mdv_arb_avm_byteenable,
+         m_avm_burstcount_o     => main_mdv_arb_avm_burstcount,
+         m_avm_readdata_i       => main_mdv_arb_avm_readdata,
+         m_avm_readdatavalid_i  => main_mdv_arb_avm_readdatavalid,
+         m_avm_waitrequest_i    => main_mdv_arb_avm_waitrequest
+      ); -- i_avm_arbit_mdv
+
+   -- Domain resets follow the framework's own rule (HyperRAM-for-
+   -- Beginners.md S5.8 / AExp's own avm_fifo comment): the slave side
+   -- resets from the core's own reset (main_reset_m2m_i), the master side
+   -- from the framework's HyperRAM reset (hr_rst_i) - never cross them,
+   -- or one side thinks a transaction is still in flight after the other
+   -- has forgotten it.
    i_avm_fifo_mdv1 : entity work.avm_fifo
       generic map (
          G_WR_DEPTH     => 16,
@@ -388,15 +468,15 @@ begin
       port map (
          s_clk_i               => main_clk,
          s_rst_i               => main_reset_m2m_i,
-         s_avm_waitrequest_o   => main_mdv1_avm_waitrequest,
-         s_avm_write_i         => main_mdv1_avm_write,
-         s_avm_read_i          => main_mdv1_avm_read,
-         s_avm_address_i       => main_mdv1_avm_address,
-         s_avm_writedata_i     => main_mdv1_avm_writedata,
-         s_avm_byteenable_i    => main_mdv1_avm_byteenable,
-         s_avm_burstcount_i    => main_mdv1_avm_burstcount,
-         s_avm_readdata_o      => main_mdv1_avm_readdata,
-         s_avm_readdatavalid_o => main_mdv1_avm_readdatavalid,
+         s_avm_waitrequest_o   => main_mdv_arb_avm_waitrequest,
+         s_avm_write_i         => main_mdv_arb_avm_write,
+         s_avm_read_i          => main_mdv_arb_avm_read,
+         s_avm_address_i       => main_mdv_arb_avm_address,
+         s_avm_writedata_i     => main_mdv_arb_avm_writedata,
+         s_avm_byteenable_i    => main_mdv_arb_avm_byteenable,
+         s_avm_burstcount_i    => main_mdv_arb_avm_burstcount,
+         s_avm_readdata_o      => main_mdv_arb_avm_readdata,
+         s_avm_readdatavalid_o => main_mdv_arb_avm_readdatavalid,
          m_clk_i               => hr_clk_i,
          m_rst_i               => hr_rst_i,
          m_avm_waitrequest_i   => hr_core_waitrequest_i,
@@ -572,7 +652,19 @@ begin
          mdv1_avm_burstcount_o    => main_mdv1_avm_burstcount,
          mdv1_avm_readdata_i      => main_mdv1_avm_readdata,
          mdv1_avm_readdatavalid_i => main_mdv1_avm_readdatavalid,
-         mdv1_avm_waitrequest_i   => main_mdv1_avm_waitrequest
+         mdv1_avm_waitrequest_i   => main_mdv1_avm_waitrequest,
+
+         -- QL4M65 Milestone 2 paso 5, etapa 1
+         mdv2_dirty_o             => main_mdv2_dirty,
+         mdv2_avm_write_o         => main_mdv2_avm_write,
+         mdv2_avm_read_o          => main_mdv2_avm_read,
+         mdv2_avm_address_o       => main_mdv2_avm_address,
+         mdv2_avm_writedata_o     => main_mdv2_avm_writedata,
+         mdv2_avm_byteenable_o    => main_mdv2_avm_byteenable,
+         mdv2_avm_burstcount_o    => main_mdv2_avm_burstcount,
+         mdv2_avm_readdata_i      => main_mdv2_avm_readdata,
+         mdv2_avm_readdatavalid_i => main_mdv2_avm_readdatavalid,
+         mdv2_avm_waitrequest_i   => main_mdv2_avm_waitrequest
       ); -- i_main
 
    ---------------------------------------------------------------------------------------------
@@ -970,8 +1062,14 @@ begin
    -- no new CDC needed. See DECISIONES.md's M2029 section.
    ---------------------------------------------------------------------------------------
 
-   main_drive_led_o     <= main_mdv1_led or main_mdv1_dirty;
-   main_drive_led_col_o <= x"0000FF" when main_mdv1_dirty = '1' else x"FF0000";  -- 24-bit RGB
+   -- QL4M65 Milestone 2 paso 5, etapa 1: main_mdv1_led already reflects
+   -- ANY drive selected, not just drive 1 - it's zx8302.v's own `led`
+   -- output (now |mdv_sel[1:0], see that file's own comment), the name is
+   -- just a leftover from when mdv1 was the only drive. The dirty/blue
+   -- condition needs both bitmaps ORed explicitly, since each drive
+   -- tracks its own independently (main.vhd's p_dirty/p_dirty2).
+   main_drive_led_o     <= main_mdv1_led or main_mdv1_dirty or main_mdv2_dirty;
+   main_drive_led_col_o <= x"0000FF" when (main_mdv1_dirty = '1' or main_mdv2_dirty = '1') else x"FF0000";  -- 24-bit RGB
 
 end architecture synthesis;
 
