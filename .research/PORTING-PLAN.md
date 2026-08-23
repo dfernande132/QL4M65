@@ -14,7 +14,9 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-24 — **Milestone 2 CERRADO por completo y confirmado en hardware real. Publicado en GitHub.**)
+## 0. Estado actual del proyecto (actualizado: 2026-08-23 — **Milestone 2 cerrado. Milestone 3 en marcha: `M3001` compilado (RAM principal 128k migrada de BRAM a HyperRAM), pendiente de regresión en hardware real.**)
+
+**Milestone 3 arrancado (2026-08-23).** Plan por escrito en `.research/milestone3-memory-speed-plan.md` (revisado y aprobado por el usuario antes de tocar código, incluida la decisión de bajar el tope de RAM de 4096k a 2048k para no chocar con la reserva de HyperRAM de los microdrives). Fase 1 (128k de RAM principal, BRAM→HyperRAM, mismo tamaño): diseño de `qram_avm.vhd` + simulación aislada (encontró y arregló un bug real de protocolo antes de compilar) + cableado real en `main.vhd`/`mega65.vhd`/`globals.vhd`/`CORE-R6.xpr` + pantalla de bienvenida actualizada. **`M3001` compila limpio: `RESULT=BUILD_OK`, `WNS=+0.090 ns`, `WHS=+0.011 ns`, 0 errores.** `.cor` empaquetado. Detalle completo en `DECISIONES.md`, sección "Milestone 3 — arranque y Fase 1". **Pendiente de prueba en hardware real** (regresión completa: Minerva, BASIC, microdrives).
 
 **Milestone 2 fase A (microdrive, solo lectura): cerrada en `M2018`, publicada en GitHub.** El bug de lectura sostenida (investigación `M2004`-`M2017`) nunca estuvo en el RTL — las imágenes de prueba (`CHESS.MDV`, `Quill2.mdv`, etc.) estaban corruptas de origen, confirmado simulando `mdv.v` + el checksum real de Minerva (`Fase0/tools/mdvcheck.py`). `M2019`-`M2021` añadieron y afinaron un zumbido sintetizado del motor. **Regla vigente: pasar `mdvcheck.py` a cualquier `.mdv` antes de usarla como caso de prueba en hardware.** Detalle completo de toda la investigación en `DECISIONES.md`.
 

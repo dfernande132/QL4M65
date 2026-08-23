@@ -81,30 +81,42 @@ type WHS_RECORD_ARRAY_TYPE is array (0 to WHS_RECORDS - 1) of WHS_RECORD_TYPE;
 -- Within a selector's address range, address 0 is the beginning of the string itself, while address 0xFFF of the 4k
 -- window contains the amount of pages, so each zero-terminated string can be up to 4095 bytes = 4094 characters long.
 
--- QL4M65 Milestone 2 paso 5, etapa 2 (2026-08-24): "Developed by" in
--- English (was Spanish), status line changed from "in progress" to "OK"
--- now that Milestone 2's full scope (2 microdrives, load+save both) is
--- implemented, and the old "No QL-SD, mouse or GoldCard/SMSQE yet." line
--- replaced with a preview of Milestone 3's own scope - text approved by
--- the user via a mockup before this edit (see DECISIONES.md).
+-- QL4M65 Milestone 3, Fase 1 (2026-08-23): status line moved to
+-- "Milestone 3 - In Progress" now that Milestone 3 work has actually
+-- started (RAM principal migrando a HyperRAM), "Milestone 2 includes"
+-- became "QL Core includes" (that scope is done, not this milestone's own
+-- news anymore), and the old one-line "Milestone 3 (next)" preview
+-- expanded into a proper "in development" section - text as given by the
+-- user for this build, with two numbers checked against the RTL before
+-- committing to them: the CPU speed figures (7.5/24/42 MHz) are the
+-- EFFECTIVE 68008 clock (ce_bus_p/ce_bus_n toggle at roughly double that,
+-- two phases per real CPU cycle - see PORTING-PLAN.md section 3's own
+-- FRACT_BUS_QL/16/24/FULL table, which already documents this ÷2), not a
+-- mistake as they first looked next to that table's raw phase-toggle
+-- numbers; the RAM ceiling was corrected from the user's initial "4MB" to
+-- "2048k" to match this session's own decision (.research/milestone3-
+-- memory-speed-plan.md section 3) to cap it there instead.
 constant SCR_WELCOME : string :=
 
    "Sinclair QL for MEGA65 (QL4M65)\n" &
    "Developed by dfsantos (2026)\n\n\n" &
-   "Status: Milestone 2 - OK\n\n" &
+   "Status: Milestone 3 - In Progress\n\n" &
 
    "Based on MiSTer-devel/QL_MiSTer\n" &
    "Powered by MiSTer2MEGA65,\n" &
    "done by sy2002 and MJoergen\n\n" &
 
-   "Milestone 2 includes:\n" &
+   "QL Core includes:\n" &
    " - Native QL speed, PAL video\n" &
    " - 128k RAM\n" &
    " - Keyboard\n" &
-   " - 2 microdrives (load, save, SD write-back)\n\n" &
+   " - 2 microdrives (full operation)\n\n" &
 
-   "Milestone 3 (next): full speed,\n" &
-   "640k and 4MB RAM.\n\n\n" &
+   "In development:\n" &
+   " - CPU speed\n" &
+   "     (7.5 MHz / 24 MHz / 42 MHz)\n" &
+   " - RAM\n" &
+   "     640k and 2048k RAM.\n\n\n" &
 
    "    Press Space to continue.\n\n\n";
 
@@ -226,7 +238,7 @@ constant SEL_CORENAME      : std_logic_vector(15 downto 0) := x"0200";
 
 -- Currently this is only used in the debug console. Use the welcome screen and the
 -- help system to display the name and version of your core to the end user
-constant CORENAME          : string := "QL4M65 Milestone 2";
+constant CORENAME          : string := "QL4M65 Milestone 3";
 
 --------------------------------------------------------------------------------------------------------------------
 -- "Help" menu / Options menu  (Selectors 0x0300 .. 0x0312): DO NOT TOUCH

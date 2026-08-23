@@ -124,6 +124,25 @@ constant C_HMAP_MDV1           : std_logic_vector(15 downto 0) := C_HMAP_QL;
 constant C_HMAP_MDV2           : std_logic_vector(15 downto 0) :=
    std_logic_vector(unsigned(C_HMAP_QL) + C_HMAP_MDV_BLOCKS);
 
+-- QL4M65 Milestone 3, Fase 1 (2026-08-23, .research/milestone3-memory-
+-- speed-plan.md section 3): main QL RAM's own HyperRAM window, placed
+-- right after the FULL 8-microdrive reservation above (176 blocks) so it
+-- never has to move if mdv3-8 ever get built - same "reserve the max
+-- upfront" precedent as that reservation itself. Sized for the milestone's
+-- own upper bound, 2048k (not the original core's 4096k - the user
+-- explicitly capped it here to sidestep the address-budget conflict that a
+-- full 4MB RAM window would have with the microdrive reservation, both
+-- living inside the QL's single 4MB/512-block half of the 8MB chip): 2048k
+-- = 2097152 bytes = 1048576 words = 256 4kW blocks. Fase 1 itself only
+-- instantiates 128k (16 blocks) of this window - see qram_avm.vhd's own
+-- G_ADDR_WIDTH generic - the rest stays reserved, unused, for Fase 2 (RAM
+-- size menu option) to grow into without moving the base address.
+--   176 (mdv1-8) + 256 (qram, 2048k max) = 432 of 512 blocks used,
+--   80 blocks (625KB) left free within C_HMAP_QL after this.
+constant C_HMAP_QRAM_BLOCKS    : natural := 256;
+constant C_HMAP_QRAM           : std_logic_vector(15 downto 0) :=
+   std_logic_vector(unsigned(C_HMAP_QL) + 8 * C_HMAP_MDV_BLOCKS);
+
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System
 ----------------------------------------------------------------------------------------------------------

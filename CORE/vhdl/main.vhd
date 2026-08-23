@@ -180,7 +180,23 @@ entity main is
       mdv2_avm_burstcount_o    : out std_logic_vector(7 downto 0);
       mdv2_avm_readdata_i      : in  std_logic_vector(15 downto 0);
       mdv2_avm_readdatavalid_i : in  std_logic;
-      mdv2_avm_waitrequest_i   : in  std_logic
+      mdv2_avm_waitrequest_i   : in  std_logic;
+
+      -- QL4M65 Milestone 3, Fase 1 (2026-08-23, .research/milestone3-
+      -- memory-speed-plan.md): main QL RAM's own Avalon-MM master
+      -- (qram_avm.vhd, replacing the BRAM this used to be), same layering
+      -- as mdv1/mdv2's own master ports above - straight through to
+      -- mega65.vhd, which arbitrates all three (avm_arbit_general) before
+      -- the shared avm_fifo CDC into hr_core_*.
+      qram_avm_write_o         : out std_logic;
+      qram_avm_read_o          : out std_logic;
+      qram_avm_address_o       : out std_logic_vector(31 downto 0);
+      qram_avm_writedata_o     : out std_logic_vector(15 downto 0);
+      qram_avm_byteenable_o    : out std_logic_vector(1 downto 0);
+      qram_avm_burstcount_o    : out std_logic_vector(7 downto 0);
+      qram_avm_readdata_i      : in  std_logic_vector(15 downto 0);
+      qram_avm_readdatavalid_i : in  std_logic;
+      qram_avm_waitrequest_i   : in  std_logic
    );
 end entity main;
 
@@ -225,6 +241,16 @@ signal cpu_vram_wr  : std_logic;  -- $020000-$02FFFF: lower half also mirrors in
 
 signal ram_delay_dtack : std_logic;
 signal cpu_dtack       : std_logic;
+
+-- QL4M65 Milestone 3, Fase 1: level from qram_avm.vhd, '1' once the
+-- CURRENT main RAM access has genuinely completed (write accepted, or
+-- read data valid) - see qram_avm.vhd's own header for why this must be a
+-- LEVEL, not a pulse (same lesson already learned for mdv1's q_a_valid_o
+-- in M2030-M2032). Only meaningful while cpu_ram='1'; cpu_dtack's own
+-- formula below only consults it in that case (see qram_ready_gated_dtack
+-- comment there) - it stays '0' the rest of the time, since qram_avm is
+-- never given cpu_rd/cpu_wr for a non-RAM access.
+signal qram_ready   : std_logic;
 
 signal ram_q_a      : std_logic_vector(15 downto 0);  -- main RAM read data
 signal vram_q_b     : std_logic_vector(15 downto 0);  -- VRAM read data (video side)
@@ -585,10 +611,18 @@ begin
               x"FFFF";
 
    -- ql_timing's wait-states apply uniformly (matches QL.sv's own default
-   -- case - even ROM/IO reads share the contended-memory timing window);
-   -- no extra RAM-controller dtack needed since main RAM is BRAM here, not
-   -- SDRAM (see DECISIONES.md: BRAM now, HyperRAM later)
-   cpu_dtack <= not ram_delay_dtack;
+   -- case - even ROM/IO reads share the contended-memory timing window).
+   -- QL4M65 Milestone 3, Fase 1: main RAM moved from BRAM (1-cycle
+   -- synchronous, no extra wait needed) to HyperRAM via qram_avm.vhd - a
+   -- genuinely new access can now take many cycles to resolve, so
+   -- cpu_dtack must also wait for qram_ready whenever the access is
+   -- actually main RAM (cpu_ram='1'). "or not cpu_ram" is required, not
+   -- decorative: qram_avm is only ever driven with cpu_rd/cpu_wr when
+   -- cpu_ram='1' (see this entity's own i_qram instantiation below), so
+   -- qram_ready sits permanently at '0' for every ROM/IO/VRAM-only access
+   -- - without this term, cpu_dtack would never assert for anything BUT
+   -- RAM, hanging the CPU on its very first ROM fetch.
+   cpu_dtack <= (not ram_delay_dtack) and (qram_ready or not cpu_ram);
 
    ql_rom_addr_o <= cpu_addr(15 downto 1);
 
@@ -658,37 +692,39 @@ begin
    cpu_int_ack <= '1' when cpu_fc = "111" else '0';
 
    ---------------------------------------------------------------------------
-   -- QL4M65: memory - main RAM (128k, BRAM for now) and VRAM (64k)
-   --
-   -- Both use the M2M framework's dualport_2clk_ram_byteenable; only one
-   -- port is actually needed for main RAM (only the CPU touches it), the
-   -- other side is tied off, same pattern as AExp's chip_ram_u/l. VRAM
-   -- genuinely needs both ports (CPU writes, ZX8301 reads) - see
-   -- DECISIONES.md Anexo A for why the CPU's own reads of the VRAM address
-   -- range still come from main RAM, not from this VRAM instance (VRAM
-   -- mirrors CPU writes for the video controller's exclusive use).
+   -- QL4M65 Milestone 3, Fase 1 (2026-08-23, .research/milestone3-memory-
+   -- speed-plan.md): main RAM (128k) - HyperRAM via qram_avm.vhd, replacing
+   -- the BRAM (dualport_2clk_ram_byteenable) this used to be. VRAM (64k,
+   -- below) stays in BRAM, unchanged - real-time video read port, not part
+   -- of this migration (see PORTING-PLAN.md section 4 for why).
    ---------------------------------------------------------------------------
 
-   i_main_ram : entity work.dualport_2clk_ram_byteenable
+   i_qram : entity work.qram_avm
       generic map (
-         G_ADDR_WIDTH => 16,
-         G_DATA_WIDTH => 16
+         G_ADDR_WIDTH => 16   -- 128k bytes = 64K words - Fase 2 widens this for the 640k/2048k menu option, without moving G_HMAP_BASE
       )
       port map (
-         a_clk_i        => clk_main_i,
-         a_address_i    => cpu_addr(16 downto 1),
-         a_data_i       => cpu_dout,
-         a_byteenable_i => cpu_uds & cpu_lds,
-         a_wren_i       => cpu_wr and cpu_ram,
-         a_q_o          => ram_q_a,
+         clk_i       => clk_main_i,
+         rst_i       => reset,
 
-         b_clk_i        => clk_main_i,
-         b_address_i    => (others => '0'),
-         b_data_i       => (others => '0'),
-         b_byteenable_i => (others => '0'),
-         b_wren_i       => '0',
-         b_q_o          => open
-      ); -- i_main_ram
+         cpu_addr_i  => cpu_addr(16 downto 1),
+         cpu_wdata_i => cpu_dout,
+         cpu_be_i    => cpu_uds & cpu_lds,
+         cpu_rd_i    => cpu_rd and cpu_ram,
+         cpu_wr_i    => cpu_wr and cpu_ram,
+         cpu_rdata_o => ram_q_a,
+         cpu_ready_o => qram_ready,
+
+         m_avm_write_o         => qram_avm_write_o,
+         m_avm_read_o          => qram_avm_read_o,
+         m_avm_address_o       => qram_avm_address_o,
+         m_avm_writedata_o     => qram_avm_writedata_o,
+         m_avm_byteenable_o    => qram_avm_byteenable_o,
+         m_avm_burstcount_o    => qram_avm_burstcount_o,
+         m_avm_readdata_i      => qram_avm_readdata_i,
+         m_avm_readdatavalid_i => qram_avm_readdatavalid_i,
+         m_avm_waitrequest_i   => qram_avm_waitrequest_i
+      ); -- i_qram
 
    i_vram : entity work.dualport_2clk_ram_byteenable
       generic map (
