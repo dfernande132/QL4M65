@@ -98,15 +98,21 @@ type WHS_RECORD_ARRAY_TYPE is array (0 to WHS_RECORDS - 1) of WHS_RECORD_TYPE;
 -- "Speed" Options menu radio group, main.vhd's cpu_speed_sel) - "Native QL
 -- speed" became "CPU speed" with all four effective clocks listed, and the
 -- "In development" section is gone entirely: this was the last item of
--- Milestone 3's original scope. Status line stays "In Progress" until this
--- build is confirmed on real hardware (same discipline already followed
--- for the RAM radio group) - flip to "OK" once confirmed, matching how
--- "Milestone 2 - OK" only landed after real hardware confirmation too.
+-- Milestone 3's original scope.
+--
+-- QL4M65 V1.0 (2026-08-24): Milestone 3 confirmed on real hardware
+-- (RAM 128k/640k/1024k and all four CPU speeds, including microdrive
+-- LOAD/SAVE at Full speed - Match Point) - status line moves from
+-- "Milestone 3 - In Progress" to "Version 1.0", the first public release
+-- of this core. Internal Mxxxx build numbers keep tracking individual
+-- commits/builds as before (DECISIONES.md) - this is just the user-facing
+-- label, same split CORENAME already has (debug-console-only internal
+-- name vs. this welcome screen).
 constant SCR_WELCOME : string :=
 
    "Sinclair QL for MEGA65 (QL4M65)\n" &
    "Developed by dfsantos (2026)\n\n\n" &
-   "Status: Milestone 3 - In Progress\n\n" &
+   "Status: Version 1.0\n\n" &
 
    "Based on MiSTer-devel/QL_MiSTer\n" &
    "Powered by MiSTer2MEGA65,\n" &
@@ -239,7 +245,7 @@ constant SEL_CORENAME      : std_logic_vector(15 downto 0) := x"0200";
 
 -- Currently this is only used in the debug console. Use the welcome screen and the
 -- help system to display the name and version of your core to the end user
-constant CORENAME          : string := "QL4M65 Milestone 3";
+constant CORENAME          : string := "QL4M65 V1.0";
 
 --------------------------------------------------------------------------------------------------------------------
 -- "Help" menu / Options menu  (Selectors 0x0300 .. 0x0312): DO NOT TOUCH

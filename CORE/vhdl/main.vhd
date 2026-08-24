@@ -308,6 +308,32 @@ signal audio_bit    : std_logic;                      -- ZX8302's single-bit bee
 -- gap-gated rhythm from M2020.
 constant MDV1_MOTOR_HALF_PERIOD : natural := 420000;  -- 84MHz / (2*420000) ~= 100Hz hum
 constant MDV1_MOTOR_AMPLITUDE   : natural := 1200;    -- quieter background hum
+
+-- QL4M65 Milestone 3 (2026-08-24, found by the user on real hardware: no
+-- motor hum at all at Full speed): MDV1_MOTOR_HALF_PERIOD above is a FIXED
+-- main_clk-cycle count, tuned for native speed's own mdv1_gap rhythm. But
+-- mdv.v's own gap timing is driven by ce_bus_p, so it speeds up right along
+-- with cpu_speed_sel - at Full (~5.6x native), mdv1_gap now toggles ~5.6x
+-- more often in real main_clk-cycle terms, so the counter below gets reset
+-- (mdv1_gap='1' branch) well before it can ever count up to the fixed
+-- 420000 needed to flip mdv1_motor_tone - permanent silence, not a gradual
+-- pitch change, exactly the reported symptom. Fix: scale the half-period
+-- down by the same ratio cpu_speed_sel speeds the bus up by (420000 *
+-- FRACT_BUS_QL/FRACT_BUS_X, precomputed here since this toolchain's
+-- port-map lesson from earlier in this same file already showed inline
+-- conditional expressions are risky - a plain mux into a signal is safer
+-- and matches this file's existing style everywhere else). This exactly
+-- tracks how much shorter mdv1_gap's own real-time low period became, so
+-- the counter can always complete at least one toggle within it - keeps
+-- the hum AUDIBLE at every speed (the actual bug) rather than staying
+-- pitch-locked at ~100Hz: the perceived pitch rises with speed as a side
+-- effect, which is the physically sensible outcome (spin a real motor
+-- faster, it sounds higher-pitched too), not an artifact to avoid.
+constant MDV_MOTOR_HALF_PERIOD_16   : natural := 196885;  -- 420000 * FRACT_BUS_QL/FRACT_BUS_16
+constant MDV_MOTOR_HALF_PERIOD_24   : natural := 131241;  -- 420000 * FRACT_BUS_QL/FRACT_BUS_24
+constant MDV_MOTOR_HALF_PERIOD_FULL : natural := 75000;   -- 420000 * FRACT_BUS_QL/FRACT_BUS_FULL
+signal mdv_motor_half_period : natural range 0 to MDV1_MOTOR_HALF_PERIOD;
+
 signal mdv1_motor_cnt   : natural range 0 to MDV1_MOTOR_HALF_PERIOD - 1 := 0;
 signal mdv1_motor_tone  : std_logic := '0';
 signal beeper_audio     : signed(15 downto 0);
@@ -320,6 +346,8 @@ signal audio_mix        : signed(16 downto 0);
 -- mdv1's own (MDV1_MOTOR_HALF_PERIOD/MDV1_MOTOR_AMPLITUDE, reused as-is -
 -- no reason for the two drives to sound different), same gap-gated
 -- rhythm, gated on mdv_sel(1)/mdv2_gap instead of mdv_sel(0)/mdv1_gap.
+-- Milestone 3: shares mdv_motor_half_period with mdv1 above - same speed,
+-- same fix, one mux for both.
 signal mdv2_motor_cnt   : natural range 0 to MDV1_MOTOR_HALF_PERIOD - 1 := 0;
 signal mdv2_motor_tone  : std_logic := '0';
 signal mdv2_motor_audio : signed(15 downto 0);
@@ -655,6 +683,14 @@ begin
                 FRACT_BUS_24   when cpu_speed_sel = "10" else
                 FRACT_BUS_16   when cpu_speed_sel = "01" else
                 FRACT_BUS_QL;
+
+   -- QL4M65 Milestone 3: mdv1/mdv2 motor hum half-period, scaled down at
+   -- higher CPU speeds - see MDV_MOTOR_HALF_PERIOD_16/24/FULL's own
+   -- declaration comment for why (fixes real silence at Full speed).
+   mdv_motor_half_period <= MDV_MOTOR_HALF_PERIOD_FULL when cpu_speed_sel = "11" else
+                             MDV_MOTOR_HALF_PERIOD_24   when cpu_speed_sel = "10" else
+                             MDV_MOTOR_HALF_PERIOD_16   when cpu_speed_sel = "01" else
+                             MDV1_MOTOR_HALF_PERIOD;
 
    -- QL4M65 Milestone 3: contention only applies at native speed, exactly
    -- like the original core's own ql_mode (QL.sv, cpu_speed == 0) - at
@@ -1035,7 +1071,7 @@ begin
          if mdv_sel(0) = '0' or mdv1_gap = '1' then
             mdv1_motor_cnt  <= 0;
             mdv1_motor_tone <= '0';
-         elsif mdv1_motor_cnt = MDV1_MOTOR_HALF_PERIOD - 1 then
+         elsif mdv1_motor_cnt = mdv_motor_half_period - 1 then
             mdv1_motor_cnt  <= 0;
             mdv1_motor_tone <= not mdv1_motor_tone;
          else
@@ -1053,7 +1089,7 @@ begin
          if mdv_sel(1) = '0' or mdv2_gap = '1' then
             mdv2_motor_cnt  <= 0;
             mdv2_motor_tone <= '0';
-         elsif mdv2_motor_cnt = MDV1_MOTOR_HALF_PERIOD - 1 then
+         elsif mdv2_motor_cnt = mdv_motor_half_period - 1 then
             mdv2_motor_cnt  <= 0;
             mdv2_motor_tone <= not mdv2_motor_tone;
          else
