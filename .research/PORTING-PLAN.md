@@ -14,11 +14,13 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-24 — **Milestone 2 cerrado. Milestone 3: RAM principal 128k/640k/1024k seleccionable desde el menú OSD, todas en BRAM (`M3003`), pendiente de confirmación en hardware real.**)
+## 0. Estado actual del proyecto (actualizado: 2026-08-24 — **Milestone 2 cerrado. Milestone 3: RAM principal 128k/640k/1024k seleccionable desde el menú OSD, todas en BRAM (`M3003`) — confirmado en hardware real, las tres opciones funcionan. Queda pendiente la selección de velocidad de CPU.**)
 
 **Milestone 3 arrancado (2026-08-23), con un pivote de arquitectura real a mitad de camino.** Primer intento (`M3001`/`M3002`): RAM principal migrada de BRAM a HyperRAM (`qram_avm.vhd`), diseño y simulación cuidadosos, pero **falló en hardware real** (cuelgue al hacer `LOAD`/`SAVE` de microdrive, incluso con el menú OSD abierto). El primer diagnóstico (margen de *hold* al límite en `hr_rwds`, `M3002` lo mejoró ~19×) no fue la causa completa - un programa BASIC que solo hace tráfico intenso de RAM (sin tocar microdrives) funcionaba perfectamente, lo que descartó la densidad de tráfico como explicación y apuntó a algo más fundamental. Investigación pedida por el usuario en tres fuentes reales de este mismo framework (`Fase0/AExp`, `Fase0/MiSTer2MEGA65.wiki`, `Fase0/C64MEGA65`) confirmó, de forma independiente y explícita en las tres: **la RAM principal de una CPU no debe vivir en HyperRAM en este framework** - ni AExp (Amiga, chip RAM en BRAM) ni C64MEGA65 (REU en HyperRAM, pero accedido por DMA, nunca por la CPU directamente) lo hacen, y la propia wiki de M2M lo dice explícitamente ("exactly what BRAM should not be spent on" para tráfico DMA/tolerante a latencia - lo contrario de lo que necesita la CPU).
 
-**Pivote (`M3003`): `qram_avm.vhd` borrado, RAM principal de vuelta a BRAM**, ahora con tamaño seleccionable (128k/640k/1024k, primer grupo de radio real de este proyecto en el menú OSD, reset simple del core al cambiar - reutilizando el mismo mecanismo ya probado para la carga manual de ROM). El tope de 1024k (no 2048k/4096k) es una medida real, no una estimación: comparando la BRAM usada con y sin la RAM principal en BRAM (124/365 tiles con ella en `M2030`, 92/365 sin ella en `M3001`/`M3002`), 128k y 640k caben con holgura, 1024k cabe justo. **`M3003` compila limpio: `RESULT=BUILD_OK`, `WNS=+0.073 ns`, `WHS=+0.058 ns`, BRAM 348/365 (95.34%)** - confirma la aritmética con datos reales, no solo extrapolación (92+256=348 exacto). `.cor` empaquetado. Detalle completo, incluida la aritmética de BRAM y por qué se descartó también la SDRAM física sin usar de la R6, en `DECISIONES.md`, sección "Milestone 3 — `M3002` también falla: pivote de HyperRAM a BRAM". **Pendiente de confirmación en hardware real.**
+**Pivote (`M3003`): `qram_avm.vhd` borrado, RAM principal de vuelta a BRAM**, ahora con tamaño seleccionable (128k/640k/1024k, primer grupo de radio real de este proyecto en el menú OSD, reset simple del core al cambiar - reutilizando el mismo mecanismo ya probado para la carga manual de ROM). El tope de 1024k (no 2048k/4096k) es una medida real, no una estimación: comparando la BRAM usada con y sin la RAM principal en BRAM (124/365 tiles con ella en `M2030`, 92/365 sin ella en `M3001`/`M3002`), 128k y 640k caben con holgura, 1024k cabe justo. `M3003` compiló limpio: `RESULT=BUILD_OK`, `WNS=+0.073 ns`, `WHS=+0.058 ns`, BRAM 348/365 (95.34%) - confirma la aritmética con datos reales, no solo extrapolación (92+256=348 exacto). **Confirmado en hardware real (2026-08-24): las tres opciones de RAM (128k/640k/1024k) funcionan, cada una dispara el reset simple del core y QDOS arranca detectando el tamaño correcto.** Regresión de microdrives sin cambios de comportamiento - confirma que el cuelgue de `M3001`/`M3002` era enteramente atribuible a tener la RAM principal en HyperRAM. **Con esto, la parte de RAM de Milestone 3 queda cerrada.** Detalle completo, incluida la aritmética de BRAM y por qué se descartó también la SDRAM física sin usar de la R6, en `DECISIONES.md`, sección "Milestone 3 — `M3002` también falla: pivote de HyperRAM a BRAM".
+
+**Pendiente del alcance original de Milestone 3**: solo queda la selección de velocidad de CPU (16MHz/24MHz/Full vs. la nativa ~7.5MHz actual) - no empezada todavía. Ver sección 7 más abajo para el detalle de esa parte del plan (`FRACT_BUS_16`/`FRACT_BUS_24`/`FRACT_BUS_FULL`, y el riesgo de ancho de banda a velocidad Full que ya se documentó en `.research/milestone3-memory-speed-plan.md` sección 4 - documento históricamente centrado en el enfoque de HyperRAM ya superado, pero esa sección concreta sobre velocidad de CPU sigue siendo válida).
 
 **Milestone 2 fase A (microdrive, solo lectura): cerrada en `M2018`, publicada en GitHub.** El bug de lectura sostenida (investigación `M2004`-`M2017`) nunca estuvo en el RTL — las imágenes de prueba (`CHESS.MDV`, `Quill2.mdv`, etc.) estaban corruptas de origen, confirmado simulando `mdv.v` + el checksum real de Minerva (`Fase0/tools/mdvcheck.py`). `M2019`-`M2021` añadieron y afinaron un zumbido sintetizado del motor. **Regla vigente: pasar `mdvcheck.py` a cualquier `.mdv` antes de usarla como caso de prueba en hardware.** Detalle completo de toda la investigación en `DECISIONES.md`.
 
@@ -757,12 +759,34 @@ Diseño completo de la lectura en `.research/microdrive-read-design.md`
 
 ### Milestone 3 — Ampliación de memoria y velocidad
 
-Los tres tamaños de RAM del requisito inicial (128k/640k/4096k, todos sobre
+Planteamiento original (esta sección, escrita antes de implementar nada):
+los tres tamaños de RAM del requisito inicial (128k/640k/4096k, todos sobre
 HyperRAM) seleccionables desde el menú OSD, más los modos de velocidad de CPU
-(16MHz/24MHz/Full) — todos ellos ya presentes en el core original como
-múltiplos del reloj base (sección 3), así que es principalmente exponer las
-opciones de `config.vhd` y verificar que la HyperRAM aguanta el ancho de banda
-a la velocidad más alta ("Full", 84 MHz de bus).
+(16MHz/24MHz/Full).
+
+**RAM — CERRADA, pero con un planteamiento distinto al original (2026-08-24).**
+Poner la RAM principal de la CPU sobre HyperRAM se implementó (`M3001`) y
+compiló limpio, pero **falló en hardware real** (cuelgue en `LOAD`/`SAVE` de
+microdrive). La investigación (tres fuentes reales de este mismo framework -
+AExp, C64MEGA65, la wiki de M2M - pedida explícitamente por el usuario, ver
+`DECISIONES.md` sección "Milestone 3 — `M3002` también falla: pivote de
+HyperRAM a BRAM") confirmó que la RAM principal de una CPU no debe vivir en
+HyperRAM en este framework en absoluto - ni un solo core de referencia lo
+hace. Pivote: RAM principal de vuelta a BRAM, con el tope bajado de 4096k a
+**1024k** (medido con datos reales de BRAM del propio chip, no estimado -
+2048k/4096k no caben en la Artix-7 200T bajo ningún planteamiento).
+**`M3003`: 128k/640k/1024k seleccionables desde el menú OSD, las tres en
+BRAM, confirmado en hardware real (2026-08-24) - las tres opciones
+funcionan.**
+
+**Velocidad de CPU — pendiente, no empezada.** Los modos 16MHz/24MHz/Full ya
+están presentes en el core original como múltiplos del reloj base (sección 3
+de este documento), así que es principalmente exponer las opciones en
+`config.vhd`/`main.vhd` (mismo mecanismo de grupo de radio que ya se usó para
+la RAM) y verificar el ancho de banda a la velocidad más alta ("Full", 84 MHz
+de bus) - riesgo ya anticipado en `.research/milestone3-memory-speed-plan.md`
+sección 4 (documento centrado en el enfoque de HyperRAM ya superado para la
+RAM, pero esa sección sobre velocidad de CPU sigue siendo válida).
 
 ### Milestone 4 — QL-SD / QXL.WIN (pausado 2026-08-04, no cancelado)
 
