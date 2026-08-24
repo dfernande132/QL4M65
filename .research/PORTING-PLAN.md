@@ -14,7 +14,7 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 ---
 
-## 0. Estado actual del proyecto (actualizado: 2026-08-24 — **Milestone 3 CERRADO y confirmado en hardware real. Bug real de sonido a velocidad Full encontrado y arreglado. Builds de cierre V1.0 compiladas para R6 y R3 (`QL4M65-CoreQL-V1.0_r6/r3.cor`), pendientes de confirmación en hardware y de publicación en GitHub.**)
+## 0. Estado actual del proyecto (actualizado: 2026-08-24 — **V1.0 CERRADA y confirmada por completo en hardware real** - RAM 128k/640k/1024k, velocidad de CPU nativo/16MHz/24MHz/Full, dos microdrives con carga/guardado y sonido a las cuatro velocidades. `.cor` V1.0 empaquetados para R6 y R3, README reescrito con capturas reales. **Pendiente únicamente**: decisión con el usuario sobre cuándo publicar en GitHub.)
 
 **Milestone 3 arrancado (2026-08-23), con un pivote de arquitectura real a mitad de camino.** Primer intento (`M3001`/`M3002`): RAM principal migrada de BRAM a HyperRAM (`qram_avm.vhd`), diseño y simulación cuidadosos, pero **falló en hardware real** (cuelgue al hacer `LOAD`/`SAVE` de microdrive, incluso con el menú OSD abierto). El primer diagnóstico (margen de *hold* al límite en `hr_rwds`, `M3002` lo mejoró ~19×) no fue la causa completa - un programa BASIC que solo hace tráfico intenso de RAM (sin tocar microdrives) funcionaba perfectamente, lo que descartó la densidad de tráfico como explicación y apuntó a algo más fundamental. Investigación pedida por el usuario en tres fuentes reales de este mismo framework (`Fase0/AExp`, `Fase0/MiSTer2MEGA65.wiki`, `Fase0/C64MEGA65`) confirmó, de forma independiente y explícita en las tres: **la RAM principal de una CPU no debe vivir en HyperRAM en este framework** - ni AExp (Amiga, chip RAM en BRAM) ni C64MEGA65 (REU en HyperRAM, pero accedido por DMA, nunca por la CPU directamente) lo hacen, y la propia wiki de M2M lo dice explícitamente ("exactly what BRAM should not be spent on" para tráfico DMA/tolerante a latencia - lo contrario de lo que necesita la CPU).
 
@@ -28,7 +28,11 @@ estructura de carpetas (ver "Estado de la carpeta CoreQL" al final).
 
 **Builds de cierre V1.0 (2026-08-24)**: pantalla de bienvenida y `CORENAME` actualizados a "Version 1.0" (mostrados al usuario antes de compilar). R6: `RESULT=BUILD_OK`, `WNS=+0.074 ns`, `WHS=+0.050 ns`. R3 (primera compilación desde `M2035`, por petición del usuario): `RESULT=BUILD_OK`, `WNS=+0.075 ns`, `WHS=+0.050 ns`, mismo presupuesto de BRAM que R6 (348/365). `.cor` empaquetados: `QL4M65-CoreQL-V1.0_r6.cor`/`_r3.cor`.
 
-Pendiente: confirmación en hardware real del arreglo de sonido; decisión con el usuario sobre publicar la release "V1.0" en GitHub (todo se prepara en local primero - README/CHANGELOG - antes de pedir el `git push`/`gh release create`). Milestone 4 (QL-SD/QXL.WIN) sigue pausado desde 2026-08-04, no cancelado.
+**Confirmado en hardware real (2026-08-24, usuario): "ya está todo ok. probado y funcionando."** El arreglo del sonido a velocidad Full queda confirmado - con esto, **V1.0 verificada por completo en hardware real, sin ninguna regresión ni cuelgue conocido.**
+
+`README.md` reescrito para V1.0 con 5 capturas de pantalla reales del usuario (menú OSD, ajedrez, arranque de Minerva, `MyLISP` -necesita 640k de RAM-, Match Point a velocidad Full) - commit local hecho.
+
+Pendiente: decisión con el usuario sobre cuándo publicar la release "V1.0" en GitHub (`git push`/`gh release create` - nunca sin petición explícita cada vez). Milestone 4 (QL-SD/QXL.WIN) sigue pausado desde 2026-08-04, no cancelado.
 
 **Milestone 2 fase A (microdrive, solo lectura): cerrada en `M2018`, publicada en GitHub.** El bug de lectura sostenida (investigación `M2004`-`M2017`) nunca estuvo en el RTL — las imágenes de prueba (`CHESS.MDV`, `Quill2.mdv`, etc.) estaban corruptas de origen, confirmado simulando `mdv.v` + el checksum real de Minerva (`Fase0/tools/mdvcheck.py`). `M2019`-`M2021` añadieron y afinaron un zumbido sintetizado del motor. **Regla vigente: pasar `mdvcheck.py` a cualquier `.mdv` antes de usarla como caso de prueba en hardware.** Detalle completo de toda la investigación en `DECISIONES.md`.
 
