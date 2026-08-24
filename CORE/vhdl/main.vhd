@@ -182,21 +182,15 @@ entity main is
       mdv2_avm_readdatavalid_i : in  std_logic;
       mdv2_avm_waitrequest_i   : in  std_logic;
 
-      -- QL4M65 Milestone 3, Fase 1 (2026-08-23, .research/milestone3-
-      -- memory-speed-plan.md): main QL RAM's own Avalon-MM master
-      -- (qram_avm.vhd, replacing the BRAM this used to be), same layering
-      -- as mdv1/mdv2's own master ports above - straight through to
-      -- mega65.vhd, which arbitrates all three (avm_arbit_general) before
-      -- the shared avm_fifo CDC into hr_core_*.
-      qram_avm_write_o         : out std_logic;
-      qram_avm_read_o          : out std_logic;
-      qram_avm_address_o       : out std_logic_vector(31 downto 0);
-      qram_avm_writedata_o     : out std_logic_vector(15 downto 0);
-      qram_avm_byteenable_o    : out std_logic_vector(1 downto 0);
-      qram_avm_burstcount_o    : out std_logic_vector(7 downto 0);
-      qram_avm_readdata_i      : in  std_logic_vector(15 downto 0);
-      qram_avm_readdatavalid_i : in  std_logic;
-      qram_avm_waitrequest_i   : in  std_logic
+      -- QL4M65 Milestone 3, Fase 1 (2026-08-24, revised after M3001/M3002:
+      -- see DECISIONES.md's "Milestone 3 - pivote de HyperRAM a BRAM"): the
+      -- RAM-size Options menu selection (config.vhd's OPTM_G_RAMSIZE radio
+      -- group, mega65.vhd's C_MENU_RAM_128/640/1024) - read at reset only
+      -- (RAM size is a boot-time decision, same as the original MiSTer
+      -- core's own CONF_STR item; m2m-rom.asm's OSM_SEL_POST pulses a
+      -- plain core reset on this group so a changed selection takes effect
+      -- immediately, same mechanism already used for Main/Back ROM loads).
+      osm_control_i            : in  std_logic_vector(255 downto 0)
    );
 end entity main;
 
@@ -232,25 +226,27 @@ signal cpu_rd       : std_logic;
 signal cpu_wr       : std_logic;
 signal cpu_io       : std_logic;
 
--- Address decode (milestone 1 scope only: ROM + internal I/O + 128k RAM -
--- no GoldCard, no QL-SD, no microdrive, no extended RAM configs)
+-- Address decode (no GoldCard, no QL-SD, no microdrive-mapped memory -
+-- those aren't part of the CPU's linear address space)
 signal ql_io        : std_logic;  -- $018000-$01BFFF: ZX8301/ZX8302 internal I/O
 signal cpu_rom      : std_logic;  -- $000000-$00FFFF: system ROM (Minerva)
-signal cpu_ram      : std_logic;  -- $020000-$03FFFF: 128k main RAM
+signal cpu_ram      : std_logic;  -- $020000-(ram_top_c): main RAM, size selected at reset (128k/640k/1024k)
 signal cpu_vram_wr  : std_logic;  -- $020000-$02FFFF: lower half also mirrors into VRAM
 
 signal ram_delay_dtack : std_logic;
 signal cpu_dtack       : std_logic;
 
--- QL4M65 Milestone 3, Fase 1: level from qram_avm.vhd, '1' once the
--- CURRENT main RAM access has genuinely completed (write accepted, or
--- read data valid) - see qram_avm.vhd's own header for why this must be a
--- LEVEL, not a pulse (same lesson already learned for mdv1's q_a_valid_o
--- in M2030-M2032). Only meaningful while cpu_ram='1'; cpu_dtack's own
--- formula below only consults it in that case (see qram_ready_gated_dtack
--- comment there) - it stays '0' the rest of the time, since qram_avm is
--- never given cpu_rd/cpu_wr for a non-RAM access.
-signal qram_ready   : std_logic;
+-- QL4M65 Milestone 3, Fase 1 (2026-08-24, revised after M3001/M3002's
+-- real-hardware hang - see DECISIONES.md's "Milestone 3 - pivote de
+-- HyperRAM a BRAM"): RAM size is an Options-menu radio choice
+-- (config.vhd's OPTM_G_RAMSIZE, osm_control_i bits C_MENU_RAM_128/640/1024
+-- from mega65.vhd), latched into this 2-bit register ONLY at reset - RAM
+-- size is a boot-time decision (same as the original MiSTer core's own
+-- CONF_STR item), never changed mid-operation; m2m-rom.asm's OSM_SEL_POST
+-- pulses a reset on this group so a new selection is picked up right away.
+-- "10"=1024k, "01"=640k, "00"=128k (also the safe fallback if, somehow,
+-- no radio member reads back set - matches Milestone 1/2's fixed size).
+signal ram_size_sel : std_logic_vector(1 downto 0) := "00";
 
 signal ram_q_a      : std_logic_vector(15 downto 0);  -- main RAM read data
 signal vram_q_b     : std_logic_vector(15 downto 0);  -- VRAM read data (video side)
@@ -580,12 +576,42 @@ begin
 
    reset <= reset_soft_i or reset_hard_i;
 
+   -- QL4M65 Milestone 3, Fase 1 (2026-08-24): latch the RAM-size Options
+   -- menu selection at reset only - see ram_size_sel's own declaration
+   -- comment above for why (boot-time decision, not runtime). Priority
+   -- chain (1024k checked first) matches the wiki's own suggested pattern
+   -- for reading a radio group's bits; falls back to "00" (128k) if,
+   -- somehow, no member reads back set (e.g. before the Shell has ever
+   -- initialised osm_control_i) - same safe default as Milestone 1/2's
+   -- fixed size.
+   p_ram_size : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if reset = '1' then
+            if osm_control_i(C_MENU_RAM_1024) = '1' then
+               ram_size_sel <= "10";
+            elsif osm_control_i(C_MENU_RAM_640) = '1' then
+               ram_size_sel <= "01";
+            else
+               ram_size_sel <= "00";
+            end if;
+         end if;
+      end if;
+   end process p_ram_size;
+
    ---------------------------------------------------------------------------
-   -- QL4M65: address decode (milestone 1 scope - see PORTING-PLAN.md
-   -- section 4/CONF_STR table: fixed 128k RAM, no GoldCard/QL-SD/microdrive)
+   -- QL4M65: address decode (RAM size selectable 128k/640k/1024k - see
+   -- ram_size_sel above; no GoldCard/QL-SD/microdrive-mapped memory)
    ---------------------------------------------------------------------------
 
-   cpu_addr <= (cpu_addr16 & ((not cpu_uds) and cpu_lds)) and x"03FFFF";
+   -- QL4M65 Milestone 3, Fase 1: widened from x"03FFFF" (18 bits, 256k -
+   -- Milestone 1's fixed 128k RAM scope) to x"1FFFFF" (21 bits, 2MB) to
+   -- cover the 1024k tier's own top address ($11FFFF). Safe for the
+   -- smaller regions (ROM $000000-$00FFFF, I/O $018000-$01BFFF): widening
+   -- this mask only changes behaviour for addresses that have bits set
+   -- ABOVE the old 18-bit boundary, which ROM/IO addresses never do -
+   -- their own decode below is completely unaffected by the mask's width.
+   cpu_addr <= (cpu_addr16 & ((not cpu_uds) and cpu_lds)) and x"1FFFFF";
 
    cpu_rd <= cpu_as and cpu_rw and (cpu_uds or cpu_lds);
    cpu_wr <= cpu_as and (not cpu_rw) and (cpu_uds or cpu_lds);
@@ -593,7 +619,22 @@ begin
 
    ql_io       <= '1' when unsigned(cpu_addr) >= x"018000" and unsigned(cpu_addr) <= x"01BFFF" else '0';
    cpu_rom     <= '1' when unsigned(cpu_addr) <= x"00FFFF" else '0';
-   cpu_ram     <= '1' when unsigned(cpu_addr) >= x"020000" and unsigned(cpu_addr) <= x"03FFFF" else '0';
+
+   -- QL4M65 Milestone 3, Fase 1: one contiguous RAM region starting at
+   -- $020000 (unchanged from Milestone 1/2), its TOP depending on the
+   -- selected size - deliberately NOT the original MiSTer core's own
+   -- scattered/gapped layout for its 640k/896k tiers (QL.sv's cpu_ram512/
+   -- cpu_ram768, see .research/milestone3-memory-speed-plan.md): those
+   -- gaps exist for real vintage expansion-board compatibility reasons
+   -- that don't apply here, and a single contiguous region is simpler to
+   -- reason about while still satisfying Minerva's own RAM-size probe
+   -- (which just walks upward from $020000 until it stops seeing real
+   -- memory - contiguous or gapped, it can't tell the difference).
+   cpu_ram <= '1' when unsigned(cpu_addr) >= x"020000" and
+                        ((ram_size_sel = "00" and unsigned(cpu_addr) <= x"03FFFF") or  -- 128k: $020000-$03FFFF
+                         (ram_size_sel = "01" and unsigned(cpu_addr) <= x"0BFFFF") or  -- 640k: $020000-$0BFFFF
+                         (ram_size_sel = "10" and unsigned(cpu_addr) <= x"11FFFF"))    -- 1024k: $020000-$11FFFF
+              else '0';
    cpu_vram_wr <= '1' when unsigned(cpu_addr) >= x"020000" and unsigned(cpu_addr) <= x"02FFFF" else '0';
 
    -- The ZX8301 has only one write-only register, at $18063
@@ -611,18 +652,15 @@ begin
               x"FFFF";
 
    -- ql_timing's wait-states apply uniformly (matches QL.sv's own default
-   -- case - even ROM/IO reads share the contended-memory timing window).
-   -- QL4M65 Milestone 3, Fase 1: main RAM moved from BRAM (1-cycle
-   -- synchronous, no extra wait needed) to HyperRAM via qram_avm.vhd - a
-   -- genuinely new access can now take many cycles to resolve, so
-   -- cpu_dtack must also wait for qram_ready whenever the access is
-   -- actually main RAM (cpu_ram='1'). "or not cpu_ram" is required, not
-   -- decorative: qram_avm is only ever driven with cpu_rd/cpu_wr when
-   -- cpu_ram='1' (see this entity's own i_qram instantiation below), so
-   -- qram_ready sits permanently at '0' for every ROM/IO/VRAM-only access
-   -- - without this term, cpu_dtack would never assert for anything BUT
-   -- RAM, hanging the CPU on its very first ROM fetch.
-   cpu_dtack <= (not ram_delay_dtack) and (qram_ready or not cpu_ram);
+   -- case - even ROM/IO reads share the contended-memory timing window);
+   -- no extra RAM-controller dtack needed, main RAM is BRAM (1-cycle
+   -- synchronous) regardless of which size is selected - see DECISIONES.md's
+   -- "Milestone 3 - pivote de HyperRAM a BRAM" for why HyperRAM was
+   -- abandoned for this (M3001/M3002's real-hardware hang, and three
+   -- independent precedents - AExp, C64MEGA65's REU case study, and the
+   -- M2M wiki itself - agreeing that a CPU's own directly-addressed RAM
+   -- doesn't belong on HyperRAM in this framework).
+   cpu_dtack <= not ram_delay_dtack;
 
    ql_rom_addr_o <= cpu_addr(15 downto 1);
 
@@ -692,39 +730,37 @@ begin
    cpu_int_ack <= '1' when cpu_fc = "111" else '0';
 
    ---------------------------------------------------------------------------
-   -- QL4M65 Milestone 3, Fase 1 (2026-08-23, .research/milestone3-memory-
-   -- speed-plan.md): main RAM (128k) - HyperRAM via qram_avm.vhd, replacing
-   -- the BRAM (dualport_2clk_ram_byteenable) this used to be. VRAM (64k,
-   -- below) stays in BRAM, unchanged - real-time video read port, not part
-   -- of this migration (see PORTING-PLAN.md section 4 for why).
+   -- QL4M65 Milestone 3, Fase 1 (2026-08-24): main RAM - BRAM, sized for the
+   -- largest selectable tier (1024k = 2^19 words) always, regardless of
+   -- which size is actually selected - cpu_ram's own decode (above) is what
+   -- limits how much of it the CPU can actually see, matching how the
+   -- original MiSTer core's own SDRAM was always physically present at full
+   -- size and only the address decode changed per menu option. Reverted
+   -- from qram_avm.vhd/HyperRAM (M3001/M3002) - see DECISIONES.md's
+   -- "Milestone 3 - pivote de HyperRAM a BRAM" for why. Both ports tied the
+   -- same way as before (only the CPU touches main RAM; port B unused).
    ---------------------------------------------------------------------------
 
-   i_qram : entity work.qram_avm
+   i_main_ram : entity work.dualport_2clk_ram_byteenable
       generic map (
-         G_ADDR_WIDTH => 16   -- 128k bytes = 64K words - Fase 2 widens this for the 640k/2048k menu option, without moving G_HMAP_BASE
+         G_ADDR_WIDTH => 19,  -- 1024k bytes = 512K words (largest selectable tier)
+         G_DATA_WIDTH => 16
       )
       port map (
-         clk_i       => clk_main_i,
-         rst_i       => reset,
+         a_clk_i        => clk_main_i,
+         a_address_i    => cpu_addr(19 downto 1),
+         a_data_i       => cpu_dout,
+         a_byteenable_i => cpu_uds & cpu_lds,
+         a_wren_i       => cpu_wr and cpu_ram,
+         a_q_o          => ram_q_a,
 
-         cpu_addr_i  => cpu_addr(16 downto 1),
-         cpu_wdata_i => cpu_dout,
-         cpu_be_i    => cpu_uds & cpu_lds,
-         cpu_rd_i    => cpu_rd and cpu_ram,
-         cpu_wr_i    => cpu_wr and cpu_ram,
-         cpu_rdata_o => ram_q_a,
-         cpu_ready_o => qram_ready,
-
-         m_avm_write_o         => qram_avm_write_o,
-         m_avm_read_o          => qram_avm_read_o,
-         m_avm_address_o       => qram_avm_address_o,
-         m_avm_writedata_o     => qram_avm_writedata_o,
-         m_avm_byteenable_o    => qram_avm_byteenable_o,
-         m_avm_burstcount_o    => qram_avm_burstcount_o,
-         m_avm_readdata_i      => qram_avm_readdata_i,
-         m_avm_readdatavalid_i => qram_avm_readdatavalid_i,
-         m_avm_waitrequest_i   => qram_avm_waitrequest_i
-      ); -- i_qram
+         b_clk_i        => clk_main_i,
+         b_address_i    => (others => '0'),
+         b_data_i       => (others => '0'),
+         b_byteenable_i => (others => '0'),
+         b_wren_i       => '0',
+         b_q_o          => open
+      ); -- i_main_ram
 
    i_vram : entity work.dualport_2clk_ram_byteenable
       generic map (

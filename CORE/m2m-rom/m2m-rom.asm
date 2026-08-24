@@ -179,11 +179,19 @@ PREP_START      INCRB
 ; build (M2026). Milestone 2 phase B etapa 4 (M2028) replaced it with a
 ; fully automatic background flush (MDV1_FLUSH_STEP, called from
 ; HANDLE_CORE_IO below) - see DECISIONES.md's M2028 section.
+;
+; QL4M65 Milestone 3, Fase 1 (2026-08-24): OPTM_G_RAMSIZE (the RAM-size
+; radio group, config.vhd) gets the exact same plain core-only reset as a
+; Main/Back ROM load - RAM size is read once at reset (main.vhd's
+; ram_size_sel latch), so a changed selection only takes effect once this
+; pulse happens, same mechanism, same reason.
 OSM_SEL_POST    INCRB
 
                 CMP     OPTM_G_MAINROM, R8
                 RBRA    _OSM_SP_RESET, Z
                 CMP     OPTM_G_BACKROM, R8
+                RBRA    _OSM_SP_RESET, Z
+                CMP     OPTM_G_RAMSIZE, R8
                 RBRA    _OSM_SP_RESET, Z
                 CMP     OPTM_G_BACKROM_EXTRACT, R8
                 RBRA    _OSM_SP_BEXTR, Z
@@ -1003,14 +1011,16 @@ CUSTOM_MSG      XOR     R8, R8
 ; Add your core specific constants and strings here
 
 ; Mirrors config.vhd's OPTM_G_MAINROM/OPTM_G_BACKROM/OPTM_G_BACKROM_EXTRACT/
-; OPTM_G_MDV1 (the "Main ROM:%s"/"Back ROM:%s"/"Extract Back ROM"/
-; "mdv1:%s" menu items' group IDs) - used by OSM_SEL_POST/OSM_SEL_PRE
-; above. Keep in sync if config.vhd ever changes these.
+; OPTM_G_MDV1/OPTM_G_MDV2/OPTM_G_RAMSIZE (the "Main ROM:%s"/"Back ROM:%s"/
+; "Extract Back ROM"/"mdv1:%s"/"mdv2:%s"/RAM-size radio group's group IDs)
+; - used by OSM_SEL_POST/OSM_SEL_PRE above. Keep in sync if config.vhd
+; ever changes these.
 OPTM_G_MAINROM         .EQU 1
 OPTM_G_BACKROM         .EQU 2
 OPTM_G_BACKROM_EXTRACT .EQU 3
 OPTM_G_MDV1            .EQU 4
 OPTM_G_MDV2            .EQU 5
+OPTM_G_RAMSIZE         .EQU 6
 
 ; Mirrors globals.vhd's C_DEV_QL_BACKROM - used by CLEAR_BACK_ROM above.
 C_DEV_QL_BACKROM       .EQU 0x0102

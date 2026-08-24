@@ -124,24 +124,29 @@ constant C_HMAP_MDV1           : std_logic_vector(15 downto 0) := C_HMAP_QL;
 constant C_HMAP_MDV2           : std_logic_vector(15 downto 0) :=
    std_logic_vector(unsigned(C_HMAP_QL) + C_HMAP_MDV_BLOCKS);
 
--- QL4M65 Milestone 3, Fase 1 (2026-08-23, .research/milestone3-memory-
--- speed-plan.md section 3): main QL RAM's own HyperRAM window, placed
--- right after the FULL 8-microdrive reservation above (176 blocks) so it
--- never has to move if mdv3-8 ever get built - same "reserve the max
--- upfront" precedent as that reservation itself. Sized for the milestone's
--- own upper bound, 2048k (not the original core's 4096k - the user
--- explicitly capped it here to sidestep the address-budget conflict that a
--- full 4MB RAM window would have with the microdrive reservation, both
--- living inside the QL's single 4MB/512-block half of the 8MB chip): 2048k
--- = 2097152 bytes = 1048576 words = 256 4kW blocks. Fase 1 itself only
--- instantiates 128k (16 blocks) of this window - see qram_avm.vhd's own
--- G_ADDR_WIDTH generic - the rest stays reserved, unused, for Fase 2 (RAM
--- size menu option) to grow into without moving the base address.
---   176 (mdv1-8) + 256 (qram, 2048k max) = 432 of 512 blocks used,
---   80 blocks (625KB) left free within C_HMAP_QL after this.
-constant C_HMAP_QRAM_BLOCKS    : natural := 256;
-constant C_HMAP_QRAM           : std_logic_vector(15 downto 0) :=
-   std_logic_vector(unsigned(C_HMAP_QL) + 8 * C_HMAP_MDV_BLOCKS);
+-- QL4M65 Milestone 3, Fase 1 (2026-08-23): main QL RAM was briefly given
+-- its own HyperRAM window here (C_HMAP_QRAM, qram_avm.vhd) - reverted
+-- 2026-08-24 after M3001/M3002 hung on real hardware and three independent
+-- precedents (AExp's own chip RAM, C64MEGA65's REU case study, the M2M
+-- wiki's own explicit guidance) all agreed a CPU's directly-addressed main
+-- RAM belongs in BRAM, not HyperRAM, in this framework - see
+-- DECISIONES.md's "Milestone 3 - pivote de HyperRAM a BRAM" for the full
+-- story. Main RAM (128k/640k/1024k, selectable from the Options menu) is
+-- BRAM again, main.vhd/mega65.vhd - no HyperRAM window needed for it.
+
+-- QL4M65 Milestone 3, Fase 1 (2026-08-24): RAM-size Options menu radio
+-- group (config.vhd's OPTM_G_RAMSIZE, lines 8-10 of OPTM_ITEMS) - flat
+-- line indices read from osm_control_i by main.vhd's own ram_size_sel
+-- latch. See the On-Screen-Menu (OSM) wiki page section 11 for why these
+-- must be literal 0-based line counts, not derived. First genuine radio
+-- group this project has ever needed (every earlier Options item was a
+-- manual ROM/CRT load, a momentary action, or a close/separator line) -
+-- defined here (not mega65.vhd, the wiki's usual convention) because the
+-- RAM decode logic that consumes them lives in main.vhd, not mega65.vhd,
+-- and both already share this package.
+constant C_MENU_RAM_128       : natural := 8;
+constant C_MENU_RAM_640       : natural := 9;
+constant C_MENU_RAM_1024      : natural := 10;
 
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System

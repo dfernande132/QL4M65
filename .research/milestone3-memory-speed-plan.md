@@ -1,5 +1,18 @@
 # Milestone 3 — plan: RAM ampliada + velocidad de CPU sobre HyperRAM
 
+> **SUPERSEDIDO (2026-08-24).** El enfoque de este documento (RAM principal
+> de la CPU sobre HyperRAM vía `qram_avm.vhd`) se implementó (`M3001`),
+> compiló limpio, y **falló en hardware real** (cuelgue en `LOAD`/`SAVE` de
+> microdrive). El primer diagnóstico (margen de *hold* en `hr_rwds`, `M3002`)
+> mejoró las cosas pero no arregló el cuelgue. Investigación en tres fuentes
+> reales (AExp, C64MEGA65, la wiki de M2M) confirmó que la RAM principal de
+> una CPU no debe vivir en HyperRAM en este framework en absoluto - ver
+> `DECISIONES.md`, sección "Milestone 3 — `M3002` también falla: pivote de
+> HyperRAM a BRAM", para el diagnóstico completo y la nueva arquitectura
+> (128k/640k/1024k, las tres en BRAM, seleccionables desde el menú OSD).
+> Este documento se deja tal cual como registro histórico de la
+> investigación - no describe lo que el proyecto hace ahora.
+
 Fecha: 2026-08-23 (arranque de sesión). Estado: **propuesta para revisión del
 usuario, nada implementado todavía** — mismo protocolo que
 `.research/microdrive-second-unit-plan.md` en Milestone 2.

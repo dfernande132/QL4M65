@@ -393,37 +393,6 @@ signal main_mdv2_avm_readdatavalid : std_logic;
 signal main_mdv2_avm_waitrequest   : std_logic;
 signal main_mdv2_dirty             : std_logic;
 
--- QL4M65 Milestone 3, Fase 1 (2026-08-23, .research/milestone3-memory-
--- speed-plan.md): main QL RAM's own Avalon-MM master (qram_avm.vhd),
--- same pattern as mdv1/mdv2's own above - a THIRD real-time master
--- sharing the same arbiter+CDC path (i_avm_arbit_mdv widened from 2 to 3
--- slaves, avm_arbit_general instead of avm_arbit - both already part of
--- the M2M framework, unmodified).
-signal main_qram_avm_write         : std_logic;
-signal main_qram_avm_read          : std_logic;
-signal main_qram_avm_address       : std_logic_vector(31 downto 0);
-signal main_qram_avm_writedata     : std_logic_vector(15 downto 0);
-signal main_qram_avm_byteenable    : std_logic_vector(1 downto 0);
-signal main_qram_avm_burstcount    : std_logic_vector(7 downto 0);
-signal main_qram_avm_readdata      : std_logic_vector(15 downto 0);
-signal main_qram_avm_readdatavalid : std_logic;
-signal main_qram_avm_waitrequest   : std_logic;
-
--- QL4M65 Milestone 3, Fase 1: packed 3-slave buses for
--- avm_arbit_general (mdv1=index 0, mdv2=index 1, qram=index 2 - the
--- concatenation order below, highest index leftmost, matches that
--- entity's own internal slice convention: slice N occupies bits
--- (N+1)*WIDTH-1 downto N*WIDTH).
-signal main_arb3_avm_write         : std_logic_vector(2 downto 0);
-signal main_arb3_avm_read          : std_logic_vector(2 downto 0);
-signal main_arb3_avm_address       : std_logic_vector(3*32-1 downto 0);
-signal main_arb3_avm_writedata     : std_logic_vector(3*16-1 downto 0);
-signal main_arb3_avm_byteenable    : std_logic_vector(3*2-1 downto 0);
-signal main_arb3_avm_burstcount    : std_logic_vector(3*8-1 downto 0);
-signal main_arb3_avm_readdata      : std_logic_vector(3*16-1 downto 0);
-signal main_arb3_avm_readdatavalid : std_logic_vector(2 downto 0);
-signal main_arb3_avm_waitrequest   : std_logic_vector(2 downto 0);
-
 -- QL4M65 Milestone 2 paso 5, etapa 1: the arbitrated stream feeding
 -- i_avm_fifo_mdv1's slave side, in main_clk (see plan section 1.1 for why
 -- the arbiter sits here, before the CDC, rather than after it).
@@ -460,34 +429,9 @@ begin
    -- of two is strictly better - fewer resources, one place to reason
    -- about the crossing).
    --
-   -- QL4M65 Milestone 3, Fase 1 (2026-08-23): now a THIRD master (main
-   -- RAM, qram_avm.vhd) - avm_arbit (fixed 2-way) replaced by
-   -- avm_arbit_general (3 or 4 way, both unmodified parts of the M2M
-   -- framework, avm_arbit_general simply builds a tree of avm_arbit
-   -- instances internally) rather than hand-rolling a second arbitration
-   -- tier. Concatenation order (main_arb3_avm_*'s own declaration
-   -- comment): mdv1=index 0, mdv2=index 1, qram=index 2 - arbitrary,
-   -- same as the old G_PREFER_SWAP note below, no priority is implied.
-   main_arb3_avm_write      <= main_qram_avm_write      & main_mdv2_avm_write      & main_mdv1_avm_write;
-   main_arb3_avm_read       <= main_qram_avm_read       & main_mdv2_avm_read       & main_mdv1_avm_read;
-   main_arb3_avm_address    <= main_qram_avm_address    & main_mdv2_avm_address    & main_mdv1_avm_address;
-   main_arb3_avm_writedata  <= main_qram_avm_writedata  & main_mdv2_avm_writedata  & main_mdv1_avm_writedata;
-   main_arb3_avm_byteenable <= main_qram_avm_byteenable & main_mdv2_avm_byteenable & main_mdv1_avm_byteenable;
-   main_arb3_avm_burstcount <= main_qram_avm_burstcount & main_mdv2_avm_burstcount & main_mdv1_avm_burstcount;
-
-   main_mdv1_avm_readdata      <= main_arb3_avm_readdata(1*16-1 downto 0*16);
-   main_mdv2_avm_readdata      <= main_arb3_avm_readdata(2*16-1 downto 1*16);
-   main_qram_avm_readdata      <= main_arb3_avm_readdata(3*16-1 downto 2*16);
-   main_mdv1_avm_readdatavalid <= main_arb3_avm_readdatavalid(0);
-   main_mdv2_avm_readdatavalid <= main_arb3_avm_readdatavalid(1);
-   main_qram_avm_readdatavalid <= main_arb3_avm_readdatavalid(2);
-   main_mdv1_avm_waitrequest   <= main_arb3_avm_waitrequest(0);
-   main_mdv2_avm_waitrequest   <= main_arb3_avm_waitrequest(1);
-   main_qram_avm_waitrequest   <= main_arb3_avm_waitrequest(2);
-
-   i_avm_arbit_mdv : entity work.avm_arbit_general
+   i_avm_arbit_mdv : entity work.avm_arbit
       generic map (
-         G_NUM_SLAVES   => 3,
+         G_PREFER_SWAP  => false,  -- arbitrary, see comment above
          G_ADDRESS_SIZE => 32,
          G_DATA_SIZE    => 16
       )
@@ -495,15 +439,25 @@ begin
          clk_i                  => main_clk,
          rst_i                  => main_reset_m2m_i,
 
-         s_avm_write_i          => main_arb3_avm_write,
-         s_avm_read_i           => main_arb3_avm_read,
-         s_avm_address_i        => main_arb3_avm_address,
-         s_avm_writedata_i      => main_arb3_avm_writedata,
-         s_avm_byteenable_i     => main_arb3_avm_byteenable,
-         s_avm_burstcount_i     => main_arb3_avm_burstcount,
-         s_avm_readdata_o       => main_arb3_avm_readdata,
-         s_avm_readdatavalid_o  => main_arb3_avm_readdatavalid,
-         s_avm_waitrequest_o    => main_arb3_avm_waitrequest,
+         s0_avm_write_i         => main_mdv1_avm_write,
+         s0_avm_read_i          => main_mdv1_avm_read,
+         s0_avm_address_i       => main_mdv1_avm_address,
+         s0_avm_writedata_i     => main_mdv1_avm_writedata,
+         s0_avm_byteenable_i    => main_mdv1_avm_byteenable,
+         s0_avm_burstcount_i    => main_mdv1_avm_burstcount,
+         s0_avm_readdata_o      => main_mdv1_avm_readdata,
+         s0_avm_readdatavalid_o => main_mdv1_avm_readdatavalid,
+         s0_avm_waitrequest_o   => main_mdv1_avm_waitrequest,
+
+         s1_avm_write_i         => main_mdv2_avm_write,
+         s1_avm_read_i          => main_mdv2_avm_read,
+         s1_avm_address_i       => main_mdv2_avm_address,
+         s1_avm_writedata_i     => main_mdv2_avm_writedata,
+         s1_avm_byteenable_i    => main_mdv2_avm_byteenable,
+         s1_avm_burstcount_i    => main_mdv2_avm_burstcount,
+         s1_avm_readdata_o      => main_mdv2_avm_readdata,
+         s1_avm_readdatavalid_o => main_mdv2_avm_readdatavalid,
+         s1_avm_waitrequest_o   => main_mdv2_avm_waitrequest,
 
          m_avm_write_o          => main_mdv_arb_avm_write,
          m_avm_read_o           => main_mdv_arb_avm_read,
@@ -741,15 +695,7 @@ begin
          mdv2_avm_readdatavalid_i => main_mdv2_avm_readdatavalid,
          mdv2_avm_waitrequest_i   => main_mdv2_avm_waitrequest,
 
-         qram_avm_write_o         => main_qram_avm_write,
-         qram_avm_read_o          => main_qram_avm_read,
-         qram_avm_address_o       => main_qram_avm_address,
-         qram_avm_writedata_o     => main_qram_avm_writedata,
-         qram_avm_byteenable_o    => main_qram_avm_byteenable,
-         qram_avm_burstcount_o    => main_qram_avm_burstcount,
-         qram_avm_readdata_i      => main_qram_avm_readdata,
-         qram_avm_readdatavalid_i => main_qram_avm_readdatavalid,
-         qram_avm_waitrequest_i   => main_qram_avm_waitrequest
+         osm_control_i            => main_osm_control_i
       ); -- i_main
 
    ---------------------------------------------------------------------------------------------
