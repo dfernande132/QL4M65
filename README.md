@@ -6,100 +6,101 @@ A port of the **Sinclair QL** to the **MEGA65**, built on top of the
 based on the [MiSTer-devel/QL_MiSTer](https://github.com/MiSTer-devel/QL_MiSTer)
 core (68008/`fx68k` CPU, `zx8301` video ULA, `zx8302` I/O ULA).
 
-**Current status: Milestone 1 complete. Milestone 2 (two independent
-microdrives, HyperRAM-backed, full read/write with automatic SD write-back)
-complete.**
-The QL boots end-to-end on real MEGA65 R6 hardware: RAM check, boot logo,
-F1-F4 screen, 10-second timeout (or F1/F2/F5 response), and into SuperBASIC
-with a working keyboard - both Minerva and MGE tested. System ROM loads
-either automatically from a fixed SD card path at boot or manually via the
-Shell's Options menu, with the core auto-resetting itself after any manual
-ROM change. On top of that, **two independent microdrives** (`mdv1_`,
-`mdv2_`) can each be loaded from a `.MDV` image via the Shell's Options menu
-and both read and written by QDOS/Minerva - `DIR mdv1_`/`LRUN mdv1_xxx`
-(sustained, continuous reads of full-size programs) and `SAVE
-mdv1_xxx`/reload round-trips both tested working on real hardware for both
-units independently, **and those writes are saved back to each drive's own
-`.mdv` file automatically, in the background, with no menu interaction
-required** - each drive's activity LED turns blue whenever there are
-unsaved changes and back to red once they've been written out, so a power
-cycle no longer discards anything. Both drives' image buffers live in real
-HyperRAM (not FPGA BRAM), sharing the physical chip through a small
-round-robin arbiter. See `.research/PORTING-PLAN.md` and `DECISIONES.md`
+**Current status: Version 1.0.** The QL boots end-to-end on real MEGA65 R6
+hardware: RAM check, boot logo, F1-F4 screen, 10-second timeout (or
+F1/F2/F5 response), and into SuperBASIC with a working keyboard - both
+Minerva and MGE tested. Selectable RAM size (128k/640k/1024k) and CPU
+speed (native/16MHz/24MHz/Full), two independent read/write microdrives
+with automatic background SD save, and manual or automatic system ROM
+loading are all in place and confirmed working on real hardware, including
+real QL software (games, a custom Lisp interpreter) loaded from microdrive,
+tested up to Full CPU speed. See `.research/PORTING-PLAN.md` and `DECISIONES.md`
 (in the parent directory) for the full, detailed log of the whole
-investigation and every decision made along the way - the microdrive read
-path, the write path, the HyperRAM migration, and the second unit each took
-genuinely instructive debugging journeys (see the "Microdrive image format"
-note below for the read-side headline lesson).
+investigation and every decision made along the way.
 
-Next up, Milestone 3: memory expansion (640 KB / 4096 KB) and CPU speed
-switching (16 MHz / 24 MHz / Full), both already present in the original
-core as multiples of the base clock - see `.research/PORTING-PLAN.md`
-section 7 for the current milestone order and scope.
+Screenshots
+-----------
 
-Milestone 1 scope
+The Options menu's new RAM and Speed radio groups, set to 1024k and Full
+(and Minerva confirming "1024K" at boot in the background):
+
+![The Options menu: RAM and Speed](doc/demopics/ql4m65-0.jpeg)
+
+| | |
+|---|---|
+| ![Chess on QL4M65](doc/demopics/ql4m65-1.jpeg) | ![Minerva boot screen](doc/demopics/ql4m65-2.jpeg) |
+| ![MyLISP, a custom Lisp interpreter for the QL, needs 640k RAM](doc/demopics/ql4m65-3.jpeg) | ![Match Point, loaded from microdrive at Full CPU speed](doc/demopics/ql4m65-4.jpeg) |
+
+A chess program; the Minerva boot screen (Toolkit II + QDOS banner);
+`MyLISP`, a custom Lisp interpreter for the QL that needs the 640k RAM
+option to run, loaded from `mdv1_`; and Match Point (tennis), loaded from
+microdrive and played at Full CPU speed - all on real MEGA65 hardware.
+
+Feature overview
 -----------------
 
-- Native QL CPU speed (no QL/16MHz/24MHz/Full speed switch yet)
-- PAL video only
-- 128 KB RAM (implemented in FPGA BRAM for now; HyperRAM planned for a later
-  milestone)
-- System ROM: **Main ROM** (48 KB - Minerva, MGE, JS...) and **Back ROM**
-  (16 KB - TK2, Pascal...) as two independent, fixed-size slots. Each
+- **CPU speed**: native QL speed (~7.5 MHz effective) plus 16 MHz, 24 MHz
+  and Full (~42 MHz), selectable from the Shell's Options menu - the same
+  four speeds the original MiSTer core's own `O78,CPU speed` option
+  offers. Memory contention timing (the original QL's video/CPU bus
+  sharing) is only modelled at native speed, exactly like the original
+  core; the CPU, `zx8302` and both microdrives all scale together, so
+  turbo mode speeds up microdrive transfers too, just like it did on real
+  1980s turbo-QL expansion boards.
+- **RAM**: 128 KB, 640 KB or 1024 KB, selectable from the Shell's Options
+  menu - all implemented in FPGA BRAM (not HyperRAM; see the note below on
+  why). Changing either the RAM size or the CPU speed triggers a simple,
+  automatic core reset so the new setting takes effect immediately, no
+  hard reset needed.
+- **System ROM**: **Main ROM** (48 KB - Minerva, MGE, JS...) and **Back
+  ROM** (16 KB - TK2, Pascal...) as two independent, fixed-size slots. Each
   auto-loads at boot from a fixed SD card path (`/ql4m65/main.rom` /
-  `/ql4m65/back.rom`, both optional) and can also be changed at any time via
-  the Shell's Options menu ("Main ROM:%s" / "Back ROM:%s" / "Extract Back
-  ROM" to clear the Back ROM slot) - the core resets itself automatically
-  after any manual change, no hard reset needed.
-- Keyboard: MEGA65 keys mapped to the QL's matrix (replacing the real
-  hardware's Intel 8049 IPC microcontroller with a real emulated one running
-  the real community-patched firmware, `ipc.vhd`), using a deliberately
-  MEGA65-native symbol layout - whatever's silkscreened on a MEGA65 key is
-  what it types on the QL, not necessarily what the real Sinclair QL
-  keyboard has in that position. Full key-by-key rationale in
+  `/ql4m65/back.rom`, both optional) and can also be changed at any time
+  via the Shell's Options menu ("Main ROM:%s" / "Back ROM:%s" / "Extract
+  Back ROM" to clear the Back ROM slot) - the core resets itself
+  automatically after any manual change, no hard reset needed.
+- **Two independent microdrives** (`mdv1_`, `mdv2_`), each loadable from a
+  `.MDV` image via the Shell's Options menu and both fully read/write from
+  QDOS/Minerva - `DIR mdv1_`/`LRUN mdv1_xxx` (sustained, continuous reads
+  of full-size programs) and `SAVE mdv1_xxx`/reload round-trips both
+  tested working on real hardware for both units independently, **and
+  those writes are saved back to each drive's own `.mdv` file
+  automatically, in the background, with no menu interaction required** -
+  each drive's activity LED turns blue whenever there are unsaved changes
+  and back to red once they've been written out, so a power cycle no
+  longer discards anything. Each drive also has its own synthesized motor
+  hum while selected, audible at every CPU speed.
+- **Keyboard**: MEGA65 keys mapped to the QL's matrix (replacing the real
+  hardware's Intel 8049 IPC microcontroller with a real emulated one
+  running the real community-patched firmware, `ipc.vhd`), using a
+  deliberately MEGA65-native symbol layout - whatever's silkscreened on a
+  MEGA65 key is what it types on the QL, not necessarily what the real
+  Sinclair QL keyboard has in that position. Full key-by-key rationale in
   `.research/keyboard-mapping-design.md`.
+- PAL video.
 
-Not yet in scope for Milestone 1: microdrive (`.MDV`, now underway as
-Milestone 2, see below), QL-SD (`QXL.WIN`), memory/CPU-speed expansion,
-mouse, or GoldCard/SMSQ,E support - these are planned for later milestones
-(see `.research/PORTING-PLAN.md` section 7 for the current milestone
-order).
+Not yet in scope: QL-SD (`QXL.WIN`), mouse, or GoldCard/SMSQ,E support -
+see `.research/PORTING-PLAN.md` section 7 for what's planned next.
 
-Milestone 2 scope (complete)
------------------------------
+### Why RAM is in BRAM, not HyperRAM
 
-- **Microdrive, phase A: one drive, read-only.** Load a `.MDV` image
-  (QLAY format, exactly 174930 bytes) as `mdv1_` via the Shell's Options
-  menu; `DIR mdv1_` and `LRUN mdv1_xxx` both work reliably, including full,
-  sustained reads of real programs. `mdv.v` (the microdrive controller
-  itself) is unmodified upstream MiSTer-devel code, faithfully emulating
-  real 1984 microdrive hardware bit-serially at 200 kbit/s.
-- **Microdrive, phase B: full read/write, saved back to the SD card
-  automatically.** `SAVE mdv1_xxx` followed by `DIR mdv1_` and `LOAD
-  mdv1_xxx` round-trips correctly on real hardware, verified by
-  QDOS/Minerva's own write-then-verify logic. Dirty sectors are flushed
-  back to the `.mdv` file on the SD card **in the background, with no menu
-  interaction** - no "Save" menu item to remember to use - and survive a
-  full power cycle; verified with `Fase0/tools/mdvcheck.py` reporting 0
-  checksum failures on the saved-and-reloaded image. The MEGA65's
-  drive-activity LED turns blue while there are unsaved sectors and back to
-  red once they're written out, so it's obvious when it's safe to power
-  off. (A physical reset button press or an abrupt power loss still doesn't
-  run any firmware, so writes from the last moment before that can still be
-  lost - the same accepted limitation vdrives-based cores and other M2M
-  ports with background write-back share.)
-- **Microdrive, phase C: migrated from FPGA BRAM to real HyperRAM.** Same
-  read/write/SD-write-back behaviour as phase B, now backed by the MEGA65's
-  actual HyperRAM chip through a small write-through cache, freeing up BRAM
-  for future use and paving the way for more than one drive.
-- **Second microdrive (`mdv2_`): fully independent, same feature set as
-  `mdv1_`.** Both drives share the physical HyperRAM through a round-robin
-  arbiter and can be loaded, read, written, and saved independently -
-  writing to one never affects the other. The QNICE-side loading/read-back
-  mechanism is a single, generic VHDL component instantiated twice, rather
-  than two separate hand-written copies.
-- Each drive has its own activity LED (blue while dirty, red once saved)
-  and its own synthesized motor hum while selected.
+An earlier build put the main, CPU-addressed RAM on the MEGA65's HyperRAM
+chip instead of FPGA BRAM, reasoning that HyperRAM would be needed anyway
+for the largest RAM size. It compiled clean and passed timing, but hung on
+real hardware during microdrive `LOAD`/`SAVE`. Investigating how two other
+M2M cores on this same MEGA65 hardware handle their own main RAM (AExp, an
+unreleased Amiga port, keeps its Chip+Slow RAM entirely in BRAM;
+[C64MEGA65](https://github.com/MJoergen/C64MEGA65)'s HyperRAM-backed REU is
+only ever accessed by its own DMA controller, never by the 6502 directly) -
+and the M2M framework's own
+documentation - confirmed that a CPU's directly-addressed main memory
+doesn't belong on HyperRAM in this framework: HyperRAM works well for
+DMA-style, latency-tolerant traffic (like the two microdrives above), not
+for a bus a CPU blocks on every cycle. RAM went back to BRAM, sized for
+the largest selectable tier (1024 KB - measured against this FPGA's real
+BRAM budget, not guessed; 2048 KB/4096 KB genuinely don't fit). Full
+diagnosis, including the exact real-hardware symptom that gave it away, in
+`DECISIONES.md`'s "Milestone 3" sections.
 
 ### Microdrive image format: it must be a genuinely valid QLAY `.mdv`
 
@@ -134,18 +135,18 @@ QNICE-FPGA demo bitstreams bundled with the M2M framework's own
 `M2M/QNICE/dist_kit/`, not the QL4M65 core itself.)
 Ready-to-use `.cor` files for MEGA65 **R6** (tested on real hardware) and
 **R3** (compiles clean, not yet tested on real R3 hardware - see the
-release notes), together with a Minerva system ROM, are published on the
-[GitHub Releases page](https://github.com/dfernande132/QL4M65/releases) - see the instructions file bundled
-with each release for exactly where each file goes on the SD card. Minerva
-and TK2 are GPL/GNU-licensed and can be redistributed, which is why they're
-included; other QL ROMs (MGE, JS, ...) are not, since their licensing is
-unclear or restrictive - for those, see the
-[Sinclair QL ROM archive](https://sinclairql.net/djw/qlrom/index.html),
+release notes), together with a Minerva system ROM, are published on
+the [GitHub Releases page](https://github.com/dfernande132/QL4M65/releases)
+- see the instructions file bundled with each release for exactly where
+each file goes on the SD card. Minerva and TK2 are GPL/GNU-licensed and can
+be redistributed, which is why they're included; other QL ROMs (MGE, JS,
+...) are not, since their licensing is unclear or restrictive - for those,
+see the [Sinclair QL ROM archive](https://sinclairql.net/djw/qlrom/index.html),
 which has the full set. The
 [MEGA65 community on Discord](https://discord.com/channels/719326990221574164/1177364456896999485)
 is also a good place to ask if you're missing something. Building the core
 yourself from source requires your own copy of a QL system ROM placed on
-the SD card (see Milestone 1 scope above).
+the SD card (see the feature overview above).
 
 Repository layout
 ------------------
