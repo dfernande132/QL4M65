@@ -92,7 +92,16 @@ type WHS_RECORD_ARRAY_TYPE is array (0 to WHS_RECORDS - 1) of WHS_RECORD_TYPE;
 -- belongs in BRAM, not HyperRAM, and 1024k (measured, not guessed - see
 -- that DECISIONES.md section's own BRAM tile arithmetic) is the real
 -- ceiling this chip has room for once ROM/VRAM/T48 are accounted for.
--- CPU speed stays the only "in development" item.
+--
+-- QL4M65 Milestone 3 (2026-08-24): CPU speed also moved to "QL Core
+-- includes" now that 16MHz/24MHz/Full are genuinely selectable too (same
+-- "Speed" Options menu radio group, main.vhd's cpu_speed_sel) - "Native QL
+-- speed" became "CPU speed" with all four effective clocks listed, and the
+-- "In development" section is gone entirely: this was the last item of
+-- Milestone 3's original scope. Status line stays "In Progress" until this
+-- build is confirmed on real hardware (same discipline already followed
+-- for the RAM radio group) - flip to "OK" once confirmed, matching how
+-- "Milestone 2 - OK" only landed after real hardware confirmation too.
 constant SCR_WELCOME : string :=
 
    "Sinclair QL for MEGA65 (QL4M65)\n" &
@@ -104,14 +113,11 @@ constant SCR_WELCOME : string :=
    "done by sy2002 and MJoergen\n\n" &
 
    "QL Core includes:\n" &
-   " - Native QL speed, PAL video\n" &
+   " - PAL video\n" &
+   " - CPU speed: 7.5/16/24/42 MHz\n" &
    " - RAM: 128k / 640k / 1024k\n" &
    " - Keyboard\n" &
-   " - 2 microdrives (full operation)\n\n" &
-
-   "In development:\n" &
-   " - CPU speed\n" &
-   "     (7.5 MHz / 24 MHz / 42 MHz)\n\n\n" &
+   " - 2 microdrives (full operation)\n\n\n" &
 
    "    Press Space to continue.\n\n\n";
 
@@ -322,7 +328,7 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 -- pulses a plain core-only reset on this group too (same M2M$CSR
 -- reset/un-reset pulse already used for Main/Back ROM loads) so a changed
 -- RAM size takes effect immediately, exactly like a changed ROM does.
-constant OPTM_SIZE         : natural := 17;  -- amount of items including empty lines:
+constant OPTM_SIZE         : natural := 23;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -340,7 +346,7 @@ constant OPTM_SIZE         : natural := 17;  -- amount of items including empty 
 -- QL4M65 (Milestone 2 phase A): "mdv1:%s" is short, fits comfortably
 -- inside the existing 20 - no need to widen for this addition.
 constant OPTM_DX           : natural := 20;
-constant OPTM_DY           : natural := 17;
+constant OPTM_DY           : natural := 23;
 
 -- QL4M65 M1006: added a "Sinclair QL" headline (OPTM_G_HEADLINE - shown in a
 -- brighter/yellow color by the framework), same pattern as AExp's "Amiga 500"
@@ -367,11 +373,17 @@ constant OPTM_ITEMS        : string :=
    " 640k\n"                &    -- 9: radio member
    " 1024k\n"               &    -- 10: radio member
    "\n"                     &    -- 11: separator
-   " Microdrive\n"          &    -- 12: section heading (plain text, not selectable)
-   " mdv1:%s\n"             &    -- 13: load a .MDV microdrive image (SD write-back is automatic, see M2028)
-   " mdv2:%s\n"             &    -- 14: second microdrive image (Milestone 2 paso 5, etapa 2)
-   "\n"                     &    -- 15: separator
-   " Close Menu\n";               -- 16: close menu
+   " Speed\n"               &    -- 12: section heading (plain text, not selectable)
+   " QL native\n"           &    -- 13: radio member (default) - ~7.5MHz effective, contended-memory timing active
+   " 16 MHz\n"              &    -- 14: radio member
+   " 24 MHz\n"              &    -- 15: radio member
+   " Full\n"                &    -- 16: radio member - ~42MHz effective, no contention (matches QL.sv's own ql_mode)
+   "\n"                     &    -- 17: separator
+   " Microdrive\n"          &    -- 18: section heading (plain text, not selectable)
+   " mdv1:%s\n"             &    -- 19: load a .MDV microdrive image (SD write-back is automatic, see M2028)
+   " mdv2:%s\n"             &    -- 20: second microdrive image (Milestone 2 paso 5, etapa 2)
+   "\n"                     &    -- 21: separator
+   " Close Menu\n";               -- 22: close menu
 
 -- define your own constants here and choose meaningful names
 -- make sure that your first group uses the value 1 (0 means "no menu item", such as text and line),
@@ -384,6 +396,7 @@ constant OPTM_G_BACKROM_EXTRACT : integer := 3;
 constant OPTM_G_MDV1            : integer := 4;
 constant OPTM_G_MDV2            : integer := 5;
 constant OPTM_G_RAMSIZE         : integer := 6;
+constant OPTM_G_SPEED           : integer := 7;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -399,15 +412,21 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_HEADLINE,                   
                                              OPTM_G_BACKROM_EXTRACT + OPTM_G_SINGLESEL,       -- 5: Extract Back ROM (momentary action)
                                              OPTM_G_LINE,                                     -- 6: separator
                                              OPTM_G_TEXT,                                     -- 7: RAM (section heading)
-                                             OPTM_G_RAMSIZE + OPTM_G_STDSEL,                  -- 8: 128k (default - radio group, mega65.vhd's C_MENU_RAM_128)
+                                             OPTM_G_RAMSIZE + OPTM_G_STDSEL,                  -- 8: 128k (default - radio group, globals.vhd's C_MENU_RAM_128)
                                              OPTM_G_RAMSIZE,                                  -- 9: 640k (C_MENU_RAM_640)
                                              OPTM_G_RAMSIZE,                                  -- 10: 1024k (C_MENU_RAM_1024)
                                              OPTM_G_LINE,                                     -- 11: separator
-                                             OPTM_G_TEXT,                                     -- 12: Microdrive (section heading)
-                                             OPTM_G_MDV1 + OPTM_G_LOAD_ROM,                   -- 13: mdv1:%s (3rd manual ROM/CRT slot - Main=0, Back=1, MDV1=2)
-                                             OPTM_G_MDV2 + OPTM_G_LOAD_ROM,                   -- 14: mdv2:%s (4th manual ROM/CRT slot)
-                                             OPTM_G_LINE,                                     -- 15: separator
-                                             OPTM_G_CLOSE                                     -- 16: Close Menu
+                                             OPTM_G_TEXT,                                     -- 12: Speed (section heading)
+                                             OPTM_G_SPEED + OPTM_G_STDSEL,                    -- 13: QL native (default - radio group, globals.vhd's C_MENU_SPEED_NATIVE)
+                                             OPTM_G_SPEED,                                    -- 14: 16 MHz (C_MENU_SPEED_16)
+                                             OPTM_G_SPEED,                                    -- 15: 24 MHz (C_MENU_SPEED_24)
+                                             OPTM_G_SPEED,                                    -- 16: Full (C_MENU_SPEED_FULL)
+                                             OPTM_G_LINE,                                     -- 17: separator
+                                             OPTM_G_TEXT,                                     -- 18: Microdrive (section heading)
+                                             OPTM_G_MDV1 + OPTM_G_LOAD_ROM,                   -- 19: mdv1:%s (3rd manual ROM/CRT slot - Main=0, Back=1, MDV1=2)
+                                             OPTM_G_MDV2 + OPTM_G_LOAD_ROM,                   -- 20: mdv2:%s (4th manual ROM/CRT slot)
+                                             OPTM_G_LINE,                                     -- 21: separator
+                                             OPTM_G_CLOSE                                     -- 22: Close Menu
                                            );
 
 --------------------------------------------------------------------------------------------------------------------

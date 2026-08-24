@@ -148,6 +148,14 @@ constant C_MENU_RAM_128       : natural := 8;
 constant C_MENU_RAM_640       : natural := 9;
 constant C_MENU_RAM_1024      : natural := 10;
 
+-- QL4M65 Milestone 3 (2026-08-24): CPU speed Options menu radio group
+-- (config.vhd's OPTM_G_SPEED, lines 13-16 of OPTM_ITEMS) - same convention
+-- as C_MENU_RAM_* above, consumed by main.vhd's cpu_speed_sel latch.
+constant C_MENU_SPEED_NATIVE  : natural := 13;
+constant C_MENU_SPEED_16      : natural := 14;
+constant C_MENU_SPEED_24      : natural := 15;
+constant C_MENU_SPEED_FULL    : natural := 16;
+
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System
 ----------------------------------------------------------------------------------------------------------

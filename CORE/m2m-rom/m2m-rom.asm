@@ -185,6 +185,10 @@ PREP_START      INCRB
 ; Main/Back ROM load - RAM size is read once at reset (main.vhd's
 ; ram_size_sel latch), so a changed selection only takes effect once this
 ; pulse happens, same mechanism, same reason.
+;
+; QL4M65 Milestone 3 (2026-08-24): OPTM_G_SPEED (the CPU-speed radio group)
+; gets the same treatment - main.vhd's cpu_speed_sel is also a reset-only
+; latch.
 OSM_SEL_POST    INCRB
 
                 CMP     OPTM_G_MAINROM, R8
@@ -192,6 +196,8 @@ OSM_SEL_POST    INCRB
                 CMP     OPTM_G_BACKROM, R8
                 RBRA    _OSM_SP_RESET, Z
                 CMP     OPTM_G_RAMSIZE, R8
+                RBRA    _OSM_SP_RESET, Z
+                CMP     OPTM_G_SPEED, R8
                 RBRA    _OSM_SP_RESET, Z
                 CMP     OPTM_G_BACKROM_EXTRACT, R8
                 RBRA    _OSM_SP_BEXTR, Z
@@ -1011,16 +1017,17 @@ CUSTOM_MSG      XOR     R8, R8
 ; Add your core specific constants and strings here
 
 ; Mirrors config.vhd's OPTM_G_MAINROM/OPTM_G_BACKROM/OPTM_G_BACKROM_EXTRACT/
-; OPTM_G_MDV1/OPTM_G_MDV2/OPTM_G_RAMSIZE (the "Main ROM:%s"/"Back ROM:%s"/
-; "Extract Back ROM"/"mdv1:%s"/"mdv2:%s"/RAM-size radio group's group IDs)
-; - used by OSM_SEL_POST/OSM_SEL_PRE above. Keep in sync if config.vhd
-; ever changes these.
+; OPTM_G_MDV1/OPTM_G_MDV2/OPTM_G_RAMSIZE/OPTM_G_SPEED (the "Main ROM:%s"/
+; "Back ROM:%s"/"Extract Back ROM"/"mdv1:%s"/"mdv2:%s"/RAM-size radio
+; group's/Speed radio group's group IDs) - used by OSM_SEL_POST/OSM_SEL_PRE
+; above. Keep in sync if config.vhd ever changes these.
 OPTM_G_MAINROM         .EQU 1
 OPTM_G_BACKROM         .EQU 2
 OPTM_G_BACKROM_EXTRACT .EQU 3
 OPTM_G_MDV1            .EQU 4
 OPTM_G_MDV2            .EQU 5
 OPTM_G_RAMSIZE         .EQU 6
+OPTM_G_SPEED           .EQU 7
 
 ; Mirrors globals.vhd's C_DEV_QL_BACKROM - used by CLEAR_BACK_ROM above.
 C_DEV_QL_BACKROM       .EQU 0x0102

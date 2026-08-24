@@ -248,6 +248,22 @@ signal cpu_dtack       : std_logic;
 -- no radio member reads back set - matches Milestone 1/2's fixed size).
 signal ram_size_sel : std_logic_vector(1 downto 0) := "00";
 
+-- QL4M65 Milestone 3 (2026-08-24): CPU speed Options menu radio group
+-- (config.vhd's OPTM_G_SPEED, osm_control_i bits C_MENU_SPEED_NATIVE/16/
+-- 24/FULL from globals.vhd) - same boot-time-only latch pattern as
+-- ram_size_sel above, same reset-pulse mechanism in m2m-rom.asm.
+-- "00"=native (also the safe fallback), "01"=16MHz, "10"=24MHz, "11"=Full.
+signal cpu_speed_sel : std_logic_vector(1 downto 0) := "00";
+
+-- QL4M65 Milestone 3: ql_timing's own enable, one cycle removed from a
+-- plain "'1' when cpu_speed_sel=... else '0'" written directly inline in
+-- its port map - Vivado's synth_design rejected that (ERROR [Synth
+-- 8-2716] "syntax error near 'when'"), a VHDL-2008 conditional expression
+-- this particular Vivado version's port-map parser does not accept even
+-- though the file is marked VHDL2008. A plain concurrent signal assignment
+-- (below, same shape used everywhere else in this file) sidesteps it.
+signal ql_timing_enable : std_logic;
+
 signal ram_q_a      : std_logic_vector(15 downto 0);  -- main RAM read data
 signal vram_q_b     : std_logic_vector(15 downto 0);  -- VRAM read data (video side)
 
@@ -461,16 +477,20 @@ signal ql_matrix : std_logic_vector(63 downto 0);
 -- matching QL.sv exactly (same physical clock, opposite phase - not a real
 -- CDC hazard).
 --
--- Milestone 1 fixes the CPU to native QL speed (fract_bus = FRACT_BUS_QL);
--- milestone 2 will need to multiplex fract_bus between
--- QL/16MHz/24MHz/Full based on the (not yet existing) speed menu option -
--- the accumulator structure below doesn't change, only fract_bus's source
--- would.
+-- QL4M65 Milestone 3 (2026-08-24): fract_bus is now multiplexed between
+-- QL/16MHz/24MHz/Full, exactly as this comment anticipated back in
+-- Milestone 1 - the accumulator structure itself (below) is completely
+-- unchanged, only fract_bus's source. Selected once at reset from the
+-- Options menu's "Speed" radio group (same boot-time-decision pattern as
+-- ram_size_sel - see cpu_speed_sel's own declaration below).
 ---------------------------------------------------------------------------
 
-constant FRACT_BUS_QL : unsigned(16 downto 0) := to_unsigned(11702, 17); -- 84MHz*11702/65536 = 14.999MHz (QL native)
-constant FRACT_SD     : unsigned(16 downto 0) := to_unsigned(19505, 17); -- ~25MHz effective SD-card SPI clock
-constant FRACT_11M    : unsigned(16 downto 0) := to_unsigned(8582, 17);  -- 10.999MHz IPC clock
+constant FRACT_BUS_QL   : unsigned(16 downto 0) := to_unsigned(11702, 17); -- 84MHz*11702/65536 = 14.999MHz phase toggle -> ~7.5MHz effective 68008 clock (QL native)
+constant FRACT_BUS_16   : unsigned(16 downto 0) := to_unsigned(24966, 17); -- 84MHz*24966/65536 = 31.999MHz phase toggle -> ~16MHz effective
+constant FRACT_BUS_24   : unsigned(16 downto 0) := to_unsigned(37449, 17); -- 84MHz*37449/65536 = 48.000MHz phase toggle -> ~24MHz effective
+constant FRACT_BUS_FULL : unsigned(16 downto 0) := to_unsigned(65536, 17); -- 84MHz*65536/65536 = 84MHz phase toggle (no division) -> ~42MHz effective
+constant FRACT_SD       : unsigned(16 downto 0) := to_unsigned(19505, 17); -- ~25MHz effective SD-card SPI clock
+constant FRACT_11M      : unsigned(16 downto 0) := to_unsigned(8582, 17);  -- 10.999MHz IPC clock
 constant DIV_131K     : natural := 640;                                  -- 84MHz/640 = 131250Hz (SDRAM refresh / RTC tick)
 constant DIV_VID      : natural := 8;                                    -- 84MHz/8 = 10.5MHz pixel clock
 
@@ -493,6 +513,13 @@ signal bus_tick : std_logic := '0';
 signal bus_pol  : std_logic := '0';
 signal ce_bus_p : std_logic := '0';
 signal ce_bus_n : std_logic := '0';
+
+-- QL4M65 Milestone 3: the accumulator's own fractional increment,
+-- combinationally selected by cpu_speed_sel (declared further below,
+-- latched at reset from the "Speed" Options menu group) - the accumulator
+-- process itself (clock_enables) is otherwise completely unchanged from
+-- Milestone 1/2.
+signal fract_bus : unsigned(16 downto 0);
 
 signal cnt_sd   : unsigned(15 downto 0) := (others => '0');
 signal ce_sd    : std_logic := '0';
@@ -541,7 +568,7 @@ begin
          end if;
 
          -- CPU clock: two-phase, non-overlapping (fx68k needs both cep/cen)
-         v_bus_sum := ('0' & cnt_bus) + FRACT_BUS_QL;
+         v_bus_sum := ('0' & cnt_bus) + fract_bus;
          cnt_bus   <= v_bus_sum(15 downto 0);
          bus_tick  <= v_bus_sum(16);
          ce_bus_p  <= bus_tick and not bus_pol;
@@ -598,6 +625,42 @@ begin
          end if;
       end if;
    end process p_ram_size;
+
+   -- QL4M65 Milestone 3 (2026-08-24): same latch pattern as ram_size_sel
+   -- above, for the "Speed" Options menu group. Priority chain (Full
+   -- checked first, native as the fallback) - see cpu_speed_sel's own
+   -- declaration comment.
+   p_cpu_speed : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if reset = '1' then
+            if osm_control_i(C_MENU_SPEED_FULL) = '1' then
+               cpu_speed_sel <= "11";
+            elsif osm_control_i(C_MENU_SPEED_24) = '1' then
+               cpu_speed_sel <= "10";
+            elsif osm_control_i(C_MENU_SPEED_16) = '1' then
+               cpu_speed_sel <= "01";
+            else
+               cpu_speed_sel <= "00";
+            end if;
+         end if;
+      end if;
+   end process p_cpu_speed;
+
+   -- QL4M65 Milestone 3: fract_bus mux - the accumulator process
+   -- (clock_enables, above) consumes this combinationally, unaware of
+   -- where it comes from, exactly as this file's own header comment
+   -- anticipated back in Milestone 1.
+   fract_bus <= FRACT_BUS_FULL when cpu_speed_sel = "11" else
+                FRACT_BUS_24   when cpu_speed_sel = "10" else
+                FRACT_BUS_16   when cpu_speed_sel = "01" else
+                FRACT_BUS_QL;
+
+   -- QL4M65 Milestone 3: contention only applies at native speed, exactly
+   -- like the original core's own ql_mode (QL.sv, cpu_speed == 0) - at
+   -- 16/24/Full the CPU runs the raw fractional clock with no contention
+   -- wait-states, same as QL.sv's own architecture.
+   ql_timing_enable <= '1' when cpu_speed_sel = "00" else '0';
 
    ---------------------------------------------------------------------------
    -- QL4M65: address decode (RAM size selectable 128k/640k/1024k - see
@@ -792,7 +855,7 @@ begin
       port map (
          clk_sys         => clk_main_i,
          reset           => reset,
-         enable          => '1',  -- QL-native speed, fidelity restored (see cpu_rom below)
+         enable          => ql_timing_enable,
          ce_bus_p        => ce_bus_p,
          VBlank          => zx_vblank,
          cpu_uds         => cpu_uds,
