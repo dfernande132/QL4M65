@@ -1,0 +1,62 @@
+﻿Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=0.000000e+00 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.000000e+00 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.000000e+00 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=6.000000e+00 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=8.000000e+00 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=1.000000e+01 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=1.200000e+01 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=1.400000e+01 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=1.600000e+01 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=1.800000e+01 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.000000e+01 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.200000e+01 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.400000e+01 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.600000e+01 2x=false PASS
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.800000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=3.000000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=3.200000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=3.400000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=3.600000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=3.800000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.000000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.200000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.400000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.600000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.800000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=5.000000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=5.200000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=5.400000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=5.600000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=5.800000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=6.000000e+01 2x=false FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=0.000000e+00 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.000000e+00 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.000000e+00 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=6.000000e+00 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=8.000000e+00 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=1.000000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=1.200000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=1.400000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=1.600000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=1.800000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.000000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.200000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.400000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.600000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=2.800000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=3.000000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=3.200000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=3.400000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=3.600000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=3.800000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.000000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.200000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.400000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.600000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=4.800000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=5.000000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=5.200000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=5.400000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=5.600000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=5.800000e+01 2x=true FAIL expected=A5A5
+Note: TB_HYPERBUS_MARGIN_RESULT: delay_ns=6.000000e+01 2x=true FAIL expected=A5A5
