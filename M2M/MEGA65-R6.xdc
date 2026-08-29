@@ -380,3 +380,11 @@ create_pblock pblock_vga
 add_cells_to_pblock pblock_vga [get_cells [list i_framework/i_av_pipeline/i_analog_pipeline/VGA_OUT_PHASE_SHIFTED.*]]
 resize_pblock pblock_vga -add SLICE_X0Y75:SLICE_X5Y99
 
+# Place HyperRAM controller (suggested by a second R3/R6 tester, matching the
+# C64MEGA65 core's own XDC - missing here in QL4M65. May tighten the
+# HyperRAM controller's internal/IO timing in a way relevant to the R3
+# microdrive bug under investigation - see DECISIONES.md.)
+create_pblock pblock_hr
+add_cells_to_pblock pblock_hr [get_cells [list i_framework/i_hyperram]]
+resize_pblock pblock_hr -add {SLICE_X0Y200:SLICE_X7Y224}
+
