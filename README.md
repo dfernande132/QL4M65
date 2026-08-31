@@ -77,10 +77,16 @@ Feature overview
   MEGA65 key is what it types on the QL, not necessarily what the real
   Sinclair QL keyboard has in that position. Full key-by-key rationale in
   `.research/keyboard-mapping-design.md`.
-- PAL video.
+- PAL video, over **HDMI** - see the VGA note below.
 
 Not yet in scope: QL-SD (`QXL.WIN`), mouse, or GoldCard/SMSQ,E support -
 see `.research/PORTING-PLAN.md` section 7 for what's planned next.
+
+### Known issues
+
+- **VGA output doesn't currently work** (including the on-screen menu) -
+  use **HDMI**, which works correctly. Not yet investigated; if you can
+  help narrow this down, please open an issue.
 
 ### Why RAM is in BRAM, not HyperRAM
 

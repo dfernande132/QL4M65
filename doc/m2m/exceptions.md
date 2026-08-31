@@ -386,6 +386,33 @@ label `_HANDLE_IO_0` retargeted to the new `RSUB HANDLE_CORE_IO, 1` line).
 `HANDLE_CORE_IO` itself lives entirely in `m2m-rom.asm` and needs no
 further framework changes.
 
+### `M2M/MEGA65-R3.xdc` / `M2M/MEGA65-R6.xdc`: HyperRAM controller placement `pblock` (2026-08-29)
+
+Added a `pblock` fixing the physical location of the HyperRAM controller
+(`i_framework/i_hyperram`, `SLICE_X0Y200:SLICE_X7Y224`) to both board XDC
+files, in the existing `PLACEMENT CONSTRAINTS` section alongside the
+stock ones for MAX10/keyboard/SD-card/VGA. Neither file had this
+constraint before - without it, Vivado's placer is free to place that
+logic differently between builds, which can affect the timing margins
+around HyperRAM's RWDS sampling (see the microdrive-on-R3 investigation
+in `DECISIONES.md`, not versioned).
+
+Suggested by a second MEGA65/M2M-framework tester (later identified as
+Michael Jørgensen, the original author of `hyperram_ctrl.vhd`/
+`hyperram_rx.vhd`), copied verbatim from
+[C64MEGA65](https://github.com/MJoergen/C64MEGA65)'s own XDC files, which
+already had it in both board variants. Confirmed safe on real hardware
+before committing: `RESULT=BUILD_OK` with healthy timing margin on both R3
+(`WNS=+0.113ns`) and R6 (`WNS=+0.124ns`, and the user's own R6 board
+tested working correctly with it). Kept as a permanent change regardless
+of whether it turns out to help the R3-specific bug - it's good practice
+on its own, matching the framework's own reference core.
+
+When updating from a newer upstream M2M framework: re-add this `pblock`
+to both `MEGA65-R3.xdc` and `MEGA65-R6.xdc` if a newer framework version
+doesn't already include it (check against C64MEGA65's own XDC files,
+which should stay in sync with whatever upstream does here).
+
 QNICE
 -----
 
