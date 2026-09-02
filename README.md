@@ -90,18 +90,16 @@ see `.research/PORTING-PLAN.md` section 7 for what's planned next.
 - **VGA output doesn't currently work** (including the on-screen menu) -
   use **HDMI**, which works correctly. Not yet investigated; if you can
   help narrow this down, please open an issue.
-- **Microdrive reads can be unreliable on some MEGA65 R3 units** - the
-  microdrive buffers live in HyperRAM, and a handful of R3 boards have shown
-  occasional `lrun`/`DIR` failures ("bad or changed medium") that don't
-  happen on R6 or on most other R3 boards tested. Traced to a real,
-  board-to-board timing margin difference in how each unit's physical
-  HyperRAM chip responds during a read, not a logic bug - R3's HyperRAM
-  sampling delay has been tuned specifically to reduce this significantly,
-  but it isn't a guaranteed fix on every single R3 unit. If `lrun`/`DIR`
-  ever hangs or errors on real R3 hardware, retrying usually succeeds; if
-  it's frequent on your board, please open an issue - more real-hardware
-  reports help narrow this down further. Full investigation in
-  `DECISIONES.md` (parent directory).
+- **A microdrive stability issue has been detected on some MEGA65 R3
+  boards with higher-latency HyperRAM chips** - occasional `lrun`/`DIR`
+  failures ("bad or changed medium"), not a logic bug but a real
+  board-to-board timing margin difference in the physical HyperRAM chip.
+  V1.01 tunes R3's HyperRAM sampling delay specifically for this and fixes
+  it on most affected boards tested so far; a small number of R3 units may
+  still be affected. If `lrun`/`DIR` ever hangs or errors on real R3
+  hardware, please open an issue - more real-hardware reports help narrow
+  this down further. Full investigation in `DECISIONES.md` (parent
+  directory).
 
 ### Why RAM is in BRAM, not HyperRAM
 
