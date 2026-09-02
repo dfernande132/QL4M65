@@ -486,7 +486,14 @@ begin
 
    i_framework : entity work.framework
    generic map (
-      G_BOARD => "MEGA65_R3"
+      G_BOARD                 => "MEGA65_R3",
+      -- HyperRAM RWDS input IDELAY tap count: tuned away from the
+      -- framework default (20) for this board revision - some R3 units'
+      -- physical HyperRAM chips need more RWDS-vs-DQ hold margin to
+      -- reliably clear a real microdrive bug. Empirically found (not
+      -- derived) across several R3 testers; see DECISIONES.md (not
+      -- versioned) for the full investigation and why 8 specifically.
+      G_HR_RWDS_IDELAY_VALUE  => 8
    )
    port map (
       -- Connect to I/O ports

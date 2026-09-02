@@ -21,7 +21,8 @@ use xpm.vcomponents.all;
 
 entity framework is
 generic (
-   G_BOARD : string                                         -- Which platform are we running on.
+   G_BOARD              : string;                           -- Which platform are we running on.
+   G_HR_RWDS_IDELAY_VALUE : natural := 20                    -- see hyperram.vhd's G_RWDS_IDELAY_VALUE
 );
 port (
    clk_i                   : in    std_logic;                  -- 100 MHz clock
@@ -967,7 +968,8 @@ begin
 
    i_hyperram : entity work.hyperram
       generic map (
-         G_ERRATA_ISSI_D_FIX => true
+         G_ERRATA_ISSI_D_FIX => true,
+         G_RWDS_IDELAY_VALUE => G_HR_RWDS_IDELAY_VALUE
       )
       port map (
          clk_i               => hr_clk,

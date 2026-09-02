@@ -413,6 +413,37 @@ to both `MEGA65-R3.xdc` and `MEGA65-R6.xdc` if a newer framework version
 doesn't already include it (check against C64MEGA65's own XDC files,
 which should stay in sync with whatever upstream does here).
 
+### `hyperram_rx.vhd`/`hyperram.vhd`/`framework.vhd`: HyperRAM RWDS `IDELAY_VALUE` made a board-specific generic (V1.01, 2026-08-31)
+
+Same investigation as the `pblock` above (R3 microdrive reads intermittently
+failing on some, not all, physical R3 units - see `DECISIONES.md`, not
+versioned, for the full story). Upstream `hyperram_rx.vhd` hardcodes
+`IDELAY_VALUE => 20` as a literal inside the `IDELAYE2` that delays the
+incoming RWDS signal; a wide empirical sweep across several R3 testers
+found `8` to be, by far, the most reliable value for the R3 boards that
+show this bug, with no regression on the R3 boards (and R6) that don't.
+
+Threaded through as a new generic, defaulting to the framework's own value
+(20) at every level so nothing changes unless a board explicitly overrides
+it:
+
+- `hyperram_rx.vhd`: `G_IDELAY_VALUE : natural := 20` (was the literal).
+- `hyperram.vhd`: `G_RWDS_IDELAY_VALUE : natural := 20`.
+- `framework.vhd`: `G_HR_RWDS_IDELAY_VALUE : natural := 20`.
+- `top_mega65-r3.vhd` overrides it to `8`; `top_mega65-r6.vhd` passes `20`
+  explicitly (same as the default, i.e. unchanged behaviour - R6 has never
+  shown this bug). `top_mega65-r4.vhd`/`top_mega65-r5.vhd` (not actively
+  used by this project) are left untouched, inheriting the default.
+
+**This is an empirically-found value, not a derived/calculated one** - see
+`DECISIONES.md` for the full sweep (which values were tried, why some
+were excluded for introducing unrelated real hold/setup violations, and
+why this is documented as a reliability improvement rather than a
+guaranteed fix in the README's "Known issues"). When updating from a
+newer upstream `hyperram_rx.vhd`: re-apply this generic (don't just
+re-hardcode `20`), and re-check whether `8` is still the right value for
+R3 if the upstream RWDS timing logic itself has changed.
+
 QNICE
 -----
 

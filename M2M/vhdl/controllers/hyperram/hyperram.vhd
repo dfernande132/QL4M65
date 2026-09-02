@@ -21,7 +21,8 @@ library ieee;
 
 entity hyperram is
    generic (
-      G_ERRATA_ISSI_D_FIX : boolean := true
+      G_ERRATA_ISSI_D_FIX : boolean := true;
+      G_RWDS_IDELAY_VALUE : natural := 20  -- see hyperram_rx.vhd's G_IDELAY_VALUE
    );
    port (
       clk_i               : in    std_logic;                   -- Main clock
@@ -220,6 +221,9 @@ begin
    hr_csn_o    <= ctrl_csn;
 
    hyperram_rx_inst : entity work.hyperram_rx
+      generic map (
+         G_IDELAY_VALUE => G_RWDS_IDELAY_VALUE
+      )
       port map (
          clk_i            => clk_i,
          delay_refclk_i   => delay_refclk_i,

@@ -6,15 +6,18 @@ A port of the **Sinclair QL** to the **MEGA65**, built on top of the
 based on the [MiSTer-devel/QL_MiSTer](https://github.com/MiSTer-devel/QL_MiSTer)
 core (68008/`fx68k` CPU, `zx8301` video ULA, `zx8302` I/O ULA).
 
-**Current status: Version 1.0.** The QL boots end-to-end on real MEGA65 R6
-hardware: RAM check, boot logo, F1-F4 screen, 10-second timeout (or
+**Current status: Version 1.01.** The QL boots end-to-end on real MEGA65
+R6 hardware: RAM check, boot logo, F1-F4 screen, 10-second timeout (or
 F1/F2/F5 response), and into SuperBASIC with a working keyboard - both
 Minerva and MGE tested. Selectable RAM size (128k/640k/1024k) and CPU
 speed (native/16MHz/24MHz/Full), two independent read/write microdrives
 with automatic background SD save, and manual or automatic system ROM
 loading are all in place and confirmed working on real hardware, including
 real QL software (games, a custom Lisp interpreter) loaded from microdrive,
-tested up to Full CPU speed. See `.research/PORTING-PLAN.md` and `DECISIONES.md`
+tested up to Full CPU speed. **V1.01** tunes R3's HyperRAM RWDS sampling
+delay to substantially improve microdrive read reliability on the R3
+units that were affected - see "Known issues" below for what this does
+and doesn't guarantee. See `.research/PORTING-PLAN.md` and `DECISIONES.md`
 (in the parent directory) for the full, detailed log of the whole
 investigation and every decision made along the way.
 
@@ -87,6 +90,18 @@ see `.research/PORTING-PLAN.md` section 7 for what's planned next.
 - **VGA output doesn't currently work** (including the on-screen menu) -
   use **HDMI**, which works correctly. Not yet investigated; if you can
   help narrow this down, please open an issue.
+- **Microdrive reads can be unreliable on some MEGA65 R3 units** - the
+  microdrive buffers live in HyperRAM, and a handful of R3 boards have shown
+  occasional `lrun`/`DIR` failures ("bad or changed medium") that don't
+  happen on R6 or on most other R3 boards tested. Traced to a real,
+  board-to-board timing margin difference in how each unit's physical
+  HyperRAM chip responds during a read, not a logic bug - R3's HyperRAM
+  sampling delay has been tuned specifically to reduce this significantly,
+  but it isn't a guaranteed fix on every single R3 unit. If `lrun`/`DIR`
+  ever hangs or errors on real R3 hardware, retrying usually succeeds; if
+  it's frequent on your board, please open an issue - more real-hardware
+  reports help narrow this down further. Full investigation in
+  `DECISIONES.md` (parent directory).
 
 ### Why RAM is in BRAM, not HyperRAM
 

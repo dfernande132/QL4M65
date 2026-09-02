@@ -15,6 +15,16 @@ library xpm;
    use xpm.vcomponents.all;
 
 entity hyperram_rx is
+   generic (
+      -- Fixed IDELAYE2 tap count for the incoming RWDS signal (see the
+      -- delay_rwds_inst comment below). Board-specific: some MEGA65 R3
+      -- units' physical HyperRAM chips need a different value than the
+      -- R6 default to reliably clear the RWDS-vs-DQ hold/setup margin -
+      -- see DECISIONES.md (not versioned) for the full R3 microdrive
+      -- investigation this came out of. Threaded down from each
+      -- top_mega65-r*.vhd via hyperram.vhd/framework.vhd.
+      G_IDELAY_VALUE : natural := 20
+   );
    port (
       clk_i            : in    std_logic;
       delay_refclk_i   : in    std_logic; -- 200 MHz
@@ -51,15 +61,17 @@ begin
          rdy    => open
       ); -- delay_ctrl_inst
 
-   -- Delay the input RWDS signal by approx 2.5 ns (90 degrees).
+   -- Delay the input RWDS signal by approx 2.5 ns (90 degrees) by default.
    -- Each tap is on average 1/32 of the period of delay_refclk_i (here 5 ns),
    -- but the taps are not evenly spaced. Therefore a value of 20 (rather than 16)
-   -- is used. The actual amount of delay can be read from the timing report.
+   -- is used as the default (see G_IDELAY_VALUE above for why this is a
+   -- generic, not a literal). The actual amount of delay can be read from
+   -- the timing report.
    delay_rwds_inst : component idelaye2
       generic map (
          IDELAY_TYPE           => "FIXED",
          DELAY_SRC             => "IDATAIN",
-         IDELAY_VALUE          => 20,
+         IDELAY_VALUE          => G_IDELAY_VALUE,
          HIGH_PERFORMANCE_MODE => "TRUE",
          SIGNAL_PATTERN        => "CLOCK",
          REFCLK_FREQUENCY      => 200.0, -- Each tap on average 5/32 ns.

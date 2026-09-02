@@ -573,7 +573,11 @@ begin
 
    i_framework : entity work.framework
    generic map (
-      G_BOARD => "MEGA65_R6"
+      G_BOARD                 => "MEGA65_R6",
+      -- Framework default (20) - R6 has never shown the R3-specific
+      -- microdrive bug this generic exists for; see top_mega65-r3.vhd's
+      -- own comment and DECISIONES.md (not versioned).
+      G_HR_RWDS_IDELAY_VALUE  => 20
    )
    port map (
       -- Connect to I/O ports
