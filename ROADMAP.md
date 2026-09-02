@@ -10,22 +10,26 @@ Nothing here is committed or scheduled yet - this is a list to prioritize
 from once V1.01 (the R3 HyperRAM timing fix) is closed and confirmed on
 multiple boards.
 
-Under investigation right now
-------------------------------
+Recently shipped
+-----------------
 
-* **V1.01 - R3 HyperRAM timing fix.** A real, 100% reproducible bug on at
-  least one MEGA65 R3 board (microdrive reads fail with "bad or changed
-  medium"), not present on R6. Leading hypothesis: the HyperRAM controller's
-  `SAMPLE_RWDS_ST` sampling point has a real margin of ~27-28ns (confirmed
-  in a protocol-accurate HyperBus simulation model against the real,
-  unmodified controller RTL), and a die revision difference between R3 and
-  R6 HyperRAM chips (`IS66WVH8M8BLL` vs `IS66WVH8M8DBLL`, per a tester's own
-  schematic research) may push R3 boards past that margin. Two fixes are
-  currently being tested in parallel by real R3 owners: added sampling
-  margin in the HyperRAM controller FSM, and a `pblock` placement
-  constraint for the HyperRAM controller (matching what C64MEGA65 already
-  does). See `DECISIONES.md`'s R3 investigation sections for the full
-  story. Once confirmed by a couple of testers, this becomes V1.01.
+* **V1.01 - R3 HyperRAM microdrive reliability (2026-09-02).** A real,
+  reproducible bug on some (not all) MEGA65 R3 boards - microdrive reads
+  intermittently failing with "bad or changed medium", not present on R6.
+  Root cause: a real board-to-board timing margin difference in the
+  physical HyperRAM chip's RWDS signal, not a logic bug - confirmed via a
+  protocol-accurate HyperBus simulation model against the real, unmodified
+  controller RTL (`SAMPLE_RWDS_ST`'s margin is ~27-28ns), and independently
+  supported by a die revision difference between R3 and R6 HyperRAM chips
+  (`IS66WVH8M8BLL` vs `IS66WVH8M8DBLL`). Fixed for most affected boards by
+  tuning R3's HyperRAM RWDS `IDELAY_VALUE` (now a board-specific generic,
+  `8` for R3 vs the framework default `20` for R6 - found empirically
+  across an extensive sweep, not derived), plus a HyperRAM controller
+  `pblock` placement constraint added to both R3 and R6 (matching
+  C64MEGA65). **Not a 100% guaranteed fix on every single R3 unit** - see
+  the README's "Known issues" and `DECISIONES.md`'s full R3 investigation
+  for the whole story (many hypotheses tested and ruled out along the
+  way). Released: https://github.com/dfernande132/QL4M65/releases/tag/V1.01
 
 V2.0 candidates
 -----------------
