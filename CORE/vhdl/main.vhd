@@ -539,9 +539,24 @@ signal qlsd_spi_do   : std_logic;
 
 -- sd_card.sv <-> vdrives.vhd: MiSTer's generic "SD" block-storage protocol
 -- (confirmed identical signal names/semantics against vdrives.vhd:155-166)
+--
+-- QL4M65 Milestone 4 (QL-SD, paso 1, M4003): sd_lba/sd_rd/sd_wr below are
+-- sd_card.sv's own OUTPUTS - real CDC source, clk_main_i domain (see the
+-- CDC note on i_sd_card's instantiation for why). vdrives.vhd's own header
+-- documents sd_lba_i/sd_rd_i/sd_wr_i as living in "QNICE's clock domain" -
+-- confirmed by reading vdrives.vhd itself: it consumes them raw (no
+-- internal CDC of its own for these three, unlike img_mounted/img_size/
+-- reset_core_i/drive_mounted_reg, which DO get their own xpm_cdc_array_single
+-- instances inside vdrives.vhd - i_cdc_qnice2main/i_cdc_main2qnice). So the
+-- _q suffixed signals below (post-CDC, qnice_clk_i domain) are what actually
+-- feeds vdrives.vhd - see the xpm_cdc_array_single instance near
+-- i_sd_card/i_vdrives further down.
 signal qlsd_sd_lba       : std_logic_vector(31 downto 0);
 signal qlsd_sd_rd        : std_logic;
 signal qlsd_sd_wr        : std_logic;
+signal qlsd_sd_lba_q     : std_logic_vector(31 downto 0);  -- qnice_clk_i domain, post-CDC
+signal qlsd_sd_rd_q      : std_logic;                      -- qnice_clk_i domain, post-CDC
+signal qlsd_sd_wr_q      : std_logic;                      -- qnice_clk_i domain, post-CDC
 signal qlsd_sd_ack       : std_logic;
 -- vdrives.vhd's sd_buff_addr_o is fixed at 14 bits (its own AW=13 constant,
 -- covers up to 16384-byte blocks); sd_card.sv WIDE(0) only needs 9 bits
@@ -875,11 +890,12 @@ begin
 
    -- QL4M65 Milestone 4 (QL-SD): bridge sd_card.sv's scalar SD-protocol
    -- ports to vdrives.vhd's VDNUM-array ports (see the signal declarations
-   -- above)
-   qlsd_sd_lba_arr(0)     <= qlsd_sd_lba;
+   -- above) - sd_lba/sd_rd/sd_wr go through the _q (post-CDC) signals, NOT
+   -- the raw clk_main_i-domain ones, see the CDC note above.
+   qlsd_sd_lba_arr(0)     <= qlsd_sd_lba_q;
    qlsd_sd_blk_cnt_arr(0) <= (others => '0');  -- one 512-byte block per SD transaction, matches sd_card.sv's own per-LBA behaviour and vdrives' BLKSZ=>2
-   qlsd_sd_rd_arr(0)      <= qlsd_sd_rd;
-   qlsd_sd_wr_arr(0)      <= qlsd_sd_wr;
+   qlsd_sd_rd_arr(0)      <= qlsd_sd_rd_q;
+   qlsd_sd_wr_arr(0)      <= qlsd_sd_wr_q;
    qlsd_sd_ack            <= qlsd_sd_ack_arr(0);
    qlsd_sd_buff_din       <= qlsd_sd_buff_din_arr(0);
 
@@ -1579,16 +1595,40 @@ begin
       ); -- i_qlromext
 
    ---------------------------------------------------------------------------
-   -- QL4M65 Milestone 4 (QL-SD, paso 1, M4001): sd_card.sv (SPI-slave SD
-   -- emulator), unmodified except the ram_a_*/ram_b_* port additions
+   -- QL4M65 Milestone 4 (QL-SD, paso 1, M4001/M4003): sd_card.sv (SPI-slave
+   -- SD emulator), unmodified except the ram_a_*/ram_b_* port additions
    -- (altsyncram removal, see doc/m2m/exceptions.md) and the WIDE(0)
    -- instantiation parameter (not WIDE(1) like the original QL.sv - see
-   -- .research/qlsd-design.md). clk_sys (block-level LBA side) runs in
-   -- QNICE's clock domain to match vdrives.vhd; clk_spi (SPI bit-shift
-   -- side, talking to qlromext.v) runs raw off clk_main_i, same as
-   -- QL.sv's own .clk_spi(clk_sys) wiring (its "clk_sys" is the QL core's
-   -- clock, not QNICE's - naming collision between the two projects, not
-   -- an error).
+   -- .research/qlsd-design.md).
+   --
+   -- clk_sys => clk_main_i (M4003, was qnice_clk_i in M4001/the original
+   -- M2001 attempt): re-reading sd_card.sv's actual RTL (not just its
+   -- ports/comments) shows sd_lba/sd_rd/sd_wr are generated INSIDE the
+   -- `always @(posedge clk_spi)` block, not `always @(posedge clk_sys)`
+   -- (that one only computes csd_size/csd_sdhc) - confirmed against the
+   -- real QL.sv:287-297, which ties BOTH sd_card's clk_sys and clk_spi to
+   -- QL.sv's own single `clk_sys` (the CORE's clock, via Verilog's `.*`
+   -- wildcard port connection + the explicit `.clk_spi(clk_sys)`) - i.e.
+   -- the reference core never actually separates these two clocks despite
+   -- the name "clk_sys" suggesting an HPS/ARM-equivalent clock elsewhere in
+   -- the MiSTer ecosystem (see vdrives.vhd's own comment on sd_lba_i: "oddly
+   -- deep down in MiSTer code 'clk_sys' is not the core, but the 'sd
+   -- write', i.e. QNICE" - accurate general M2M guidance, but not what
+   -- THIS core's own sd_card.sv actually does internally). Tying clk_sys to
+   -- qnice_clk_i (M4001) left sd_lba/sd_rd/sd_wr genuinely generated in
+   -- clk_main_i but consumed raw by vdrives.vhd's qnice_clk_i-domain logic
+   -- (confirmed by reading vdrives.vhd itself: unlike img_mounted/img_size/
+   -- reset_core_i/drive_mounted_reg, which DO get their own
+   -- xpm_cdc_array_single bridges inside vdrives.vhd, sd_lba_i/sd_rd_i/
+   -- sd_wr_i get none - the module's contract expects the CALLER to already
+   -- provide them synchronized) - a real, unbridged CDC hazard, likely why
+   -- M4001/the original M2003 got as far as "Checking FAT" (raw SPI
+   -- communication working, once M4001's ss fix landed) but never past it
+   -- (block-level LBA/rd/wr corrupted by the crossing). Fixed here by
+   -- matching QL.sv's own clk_sys=clk_spi=core-clock wiring exactly, with
+   -- the now-necessary CDC added explicitly below (M2M's own architecture
+   -- doesn't get an implicit "already-bridged" clk_sys the way real
+   -- MiSTer's HPS-facing bridge IP gives every core for free).
    --
    -- ss => qlsd_spi_cs1l direct, NOT inverted: original QL.sv:294 is
    -- .ss(sd_cs1 || ~vsd_sel) - with vsd_sel=1 (always true here, we have
@@ -1597,10 +1637,7 @@ begin
    -- own `assign sd_cs1l = interface_enabled ? ss1 : 1'b1`), matching
    -- sd_card.sv's own `if(ss) begin ... reset ... end` (active-low select,
    -- ss=1 = idle) - so no inversion belongs here. (An earlier, reverted
-   -- M2001-M2003 attempt at this had `ss => not qlsd_spi_cs1l` here, which
-   -- is almost certainly why that attempt's mount always failed at the FAT
-   -- check: sd_card.sv would parse SPI traffic exactly when qlromext.v
-   -- considered itself deselected, and vice-versa. See DECISIONES.md.)
+   -- M2001-M2003 attempt at this had `ss => not qlsd_spi_cs1l` here.)
    ---------------------------------------------------------------------------
 
    i_sd_card : entity work.sd_card
@@ -1609,7 +1646,7 @@ begin
          OCTAL => 0
       )
       port map (
-         clk_sys      => qnice_clk_i,
+         clk_sys      => clk_main_i,
          reset        => reset,
 
          sdhc         => '1',  -- no physical/removable card detection - fixed, matches QL.sv's own .sdhc(1)
@@ -1643,6 +1680,28 @@ begin
          ram_b_wren_o => qlsd_ram_b_wren,
          ram_b_q_i    => qlsd_ram_b_q
       ); -- i_sd_card
+
+   -- QL4M65 Milestone 4 (QL-SD, paso 1, M4003): the CDC bridge sd_lba/sd_rd/
+   -- sd_wr genuinely need (see i_sd_card's own comment above) - clk_main_i
+   -- (real source, sd_card.sv's clk_spi-domain always block) into
+   -- qnice_clk_i (what vdrives.vhd actually requires at its sd_lba_i/
+   -- sd_rd_i/sd_wr_i ports). Same primitive, same plain-WIDTH-generic style
+   -- vdrives.vhd already uses internally for its own CDC (i_cdc_qnice2main/
+   -- i_cdc_main2qnice) - not a hand-rolled synchronizer.
+   i_qlsd_sd_block_cdc : xpm_cdc_array_single
+      generic map (
+         WIDTH => 34
+      )
+      port map (
+         src_clk               => clk_main_i,
+         src_in(31 downto 0)   => qlsd_sd_lba,
+         src_in(32)            => qlsd_sd_rd,
+         src_in(33)            => qlsd_sd_wr,
+         dest_clk               => qnice_clk_i,
+         dest_out(31 downto 0)  => qlsd_sd_lba_q,
+         dest_out(32)           => qlsd_sd_rd_q,
+         dest_out(33)           => qlsd_sd_wr_q
+      ); -- i_qlsd_sd_block_cdc
 
    -- QL4M65 Milestone 4 (QL-SD, paso 1): sd_card.sv's internal "sdbuf" RAM,
    -- externally instantiated (Vivado-clean replacement for its original
