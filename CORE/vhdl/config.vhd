@@ -334,7 +334,15 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 -- pulses a plain core-only reset on this group too (same M2M$CSR
 -- reset/un-reset pulse already used for Main/Back ROM loads) so a changed
 -- RAM size takes effect immediately, exactly like a changed ROM does.
-constant OPTM_SIZE         : natural := 23;  -- amount of items including empty lines:
+-- QL4M65 Milestone 4 (QL-SD, paso 1, M4001): "STORAGE" section added below
+-- Microdrive, one "Mount HD image:%s" line (OPTM_G_MOUNT_DRV, not
+-- OPTM_G_LOAD_ROM - the QL-SD mount buffer goes through vdrives.vhd's own
+-- mount flow, not the manual-CRTROM-load protocol Main/Back ROM/mdv1/mdv2
+-- use). No submenus here, so OPTM_SIZE and OPTM_DY MUST grow together (3
+-- new lines: separator/heading/item) - forgetting one of the two is
+-- exactly the M1046/M1047 historical bug (OPTM_DY not bumped when
+-- OPTM_SIZE grew, cutting "Close Menu" out of the visible window).
+constant OPTM_SIZE         : natural := 26;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -351,8 +359,12 @@ constant OPTM_SIZE         : natural := 23;  -- amount of items including empty 
 -- No submenus here, so OPTM_DY = OPTM_SIZE (all lines always visible).
 -- QL4M65 (Milestone 2 phase A): "mdv1:%s" is short, fits comfortably
 -- inside the existing 20 - no need to widen for this addition.
+-- QL4M65 Milestone 4 (QL-SD, paso 1): "Mount HD image:%s" (18 chars) also
+-- fits inside 20 without widening - re-confirm on real hardware once
+-- built, don't assume (same caveat the original M2001 attempt flagged and
+-- never actually confirmed before the revert).
 constant OPTM_DX           : natural := 20;
-constant OPTM_DY           : natural := 23;
+constant OPTM_DY           : natural := 26;
 
 -- QL4M65 M1006: added a "Sinclair QL" headline (OPTM_G_HEADLINE - shown in a
 -- brighter/yellow color by the framework), same pattern as AExp's "Amiga 500"
@@ -389,7 +401,10 @@ constant OPTM_ITEMS        : string :=
    " mdv1:%s\n"             &    -- 19: load a .MDV microdrive image (SD write-back is automatic, see M2028)
    " mdv2:%s\n"             &    -- 20: second microdrive image (Milestone 2 paso 5, etapa 2)
    "\n"                     &    -- 21: separator
-   " Close Menu\n";               -- 22: close menu
+   " STORAGE\n"             &    -- 22: section heading (plain text, not selectable)
+   " Mount HD image:%s\n"   &    -- 23: mount a QXL.WIN image (Milestone 4, paso 1)
+   "\n"                     &    -- 24: separator
+   " Close Menu\n";               -- 25: close menu
 
 -- define your own constants here and choose meaningful names
 -- make sure that your first group uses the value 1 (0 means "no menu item", such as text and line),
@@ -403,6 +418,7 @@ constant OPTM_G_MDV1            : integer := 4;
 constant OPTM_G_MDV2            : integer := 5;
 constant OPTM_G_RAMSIZE         : integer := 6;
 constant OPTM_G_SPEED           : integer := 7;
+constant OPTM_G_QLSD_MOUNT      : integer := 8;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -432,7 +448,10 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_HEADLINE,                   
                                              OPTM_G_MDV1 + OPTM_G_LOAD_ROM,                   -- 19: mdv1:%s (3rd manual ROM/CRT slot - Main=0, Back=1, MDV1=2)
                                              OPTM_G_MDV2 + OPTM_G_LOAD_ROM,                   -- 20: mdv2:%s (4th manual ROM/CRT slot)
                                              OPTM_G_LINE,                                     -- 21: separator
-                                             OPTM_G_CLOSE                                     -- 22: Close Menu
+                                             OPTM_G_TEXT,                                     -- 22: STORAGE (section heading)
+                                             OPTM_G_QLSD_MOUNT + OPTM_G_MOUNT_DRV,            -- 23: Mount HD image:%s (first/only vdrive, VDNUM=1)
+                                             OPTM_G_LINE,                                     -- 24: separator
+                                             OPTM_G_CLOSE                                     -- 25: Close Menu
                                            );
 
 --------------------------------------------------------------------------------------------------------------------

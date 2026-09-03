@@ -46,14 +46,21 @@ V2.0 candidates
 
 ### Storage
 
-* **QXL.WIN / QL-SD support (Milestone 4, paused since 2026-08-04).** Real
-  QXL.WIN images run ~50MB, too big for a linear HyperRAM/BRAM buffer
-  alongside everything else the core needs. Needs QNICE to stream sectors
-  directly from the SD card on demand, instead of requiring the whole image
-  preloaded into one buffer (the current `shell.asm`/`vdrives.vhd`
-  mechanism's limitation). This would also be the first real "sector
-  streaming from SD" work in this M2M ecosystem - potentially useful to
-  other cores too, not just the QL.
+* **QXL.WIN / QL-SD support (Milestone 4, retaken 2026-09-02/03).** Three
+  steps: (1) a small (1MB) test `.win` image mounted in a HyperRAM buffer,
+  working end-to-end with the driver in the Back ROM - re-implementing the
+  `M2001`-`M2003` wiring (August 2026, reverted) against the current tree,
+  which has changed a lot since (mdv1/mdv2 now really use HyperRAM). A
+  likely root cause for that attempt's never-solved mount failure was
+  found and fixed along the way (an inverted `ss`/chip-select signal into
+  `sd_card.sv`). (2) Modify the M2M framework itself so QNICE streams
+  sectors directly from the SD card on demand, instead of requiring the
+  whole image preloaded into one linear buffer (the current
+  `shell.asm`/`vdrives.vhd` mechanism's limitation) - explicitly intended
+  to be proposed upstream so any M2M core can mount large hard-disk
+  images, not a QL4M65-only hack. (3) A real ~50MB QXL.WIN image straight
+  from the SD card, no HyperRAM/BRAM size ceiling. See `DECISIONES.md`'s
+  "Milestone 4" section for the full architecture and progress.
 
 * **Physical floppy drive support.** Real QL expansions (e.g. Trump Card)
   added floppy controllers based on the WD1772 - the MEGA65 could drive a

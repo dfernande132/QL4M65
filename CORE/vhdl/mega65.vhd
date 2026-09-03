@@ -406,6 +406,71 @@ signal main_mdv_arb_avm_readdata      : std_logic_vector(15 downto 0);
 signal main_mdv_arb_avm_readdatavalid : std_logic;
 signal main_mdv_arb_avm_waitrequest   : std_logic;
 
+-- QL4M65 Milestone 4 (QL-SD, paso 1, M4001): i_avm_fifo_mdv1's master
+-- output, now in hr_clk_i domain - used to feed hr_core_* directly until
+-- this milestone (mdv1/mdv2 were HyperRAM's only master). QL-SD's own
+-- mount-buffer bridge (below) is a second hr_clk_i-domain master, so both
+-- now go through a second avm_arbit (i_avm_arbit_hr, also below) before
+-- reaching hr_core_* - unlike i_avm_arbit_mdv above, this one arbitrates
+-- AFTER each master's own CDC, since the two masters live in genuinely
+-- different source clock domains (main_clk for mdv1/mdv2, qnice_clk for
+-- QL-SD) and can only be combined once both share hr_clk_i.
+signal main_mdv_hr_avm_write         : std_logic;
+signal main_mdv_hr_avm_read          : std_logic;
+signal main_mdv_hr_avm_address       : std_logic_vector(31 downto 0);
+signal main_mdv_hr_avm_writedata     : std_logic_vector(15 downto 0);
+signal main_mdv_hr_avm_byteenable    : std_logic_vector(1 downto 0);
+signal main_mdv_hr_avm_burstcount    : std_logic_vector(7 downto 0);
+signal main_mdv_hr_avm_readdata      : std_logic_vector(15 downto 0);
+signal main_mdv_hr_avm_readdatavalid : std_logic;
+signal main_mdv_hr_avm_waitrequest   : std_logic;
+
+-- QL4M65 Milestone 4 (QL-SD, paso 1): vdrives.vhd's own QNICE MMIO window
+-- (C_VD_DEVICE, routed straight into main.vhd - main.vhd instantiates
+-- vdrives.vhd itself, see .research/qlsd-design.md) and the HyperRAM-
+-- backed mount buffer device (C_VD_BUFFER, C_DEV_QL_QLSD_BUFFER - lives
+-- in mega65.vhd, see the qnice2hyperram/avm_fifo instances below).
+signal qnice_qlsd_ce           : std_logic;
+signal qnice_qlsd_we           : std_logic;
+signal qnice_qlsd_data_o       : std_logic_vector(15 downto 0);
+
+signal qnice_qlsdbuf_ce        : std_logic;
+signal qnice_qlsdbuf_we        : std_logic;
+signal qnice_qlsdbuf_data_o    : std_logic_vector(15 downto 0);
+signal qnice_qlsdbuf_wait      : std_logic;
+
+-- QL4M65 Milestone 4 (QL-SD, paso 1): QL-SD mount buffer <-> qnice2hyperram.vhd
+-- (slave side, QNICE clock domain) - byte-window-to-HyperRAM-word
+-- translation, same technique as AExp's adf_mount_wrapper.vhd.
+signal qlsdbuf_hr_addr         : std_logic_vector(31 downto 0);
+signal qlsdbuf_hr_byteenable   : std_logic_vector( 1 downto 0);
+signal qlsdbuf_hr_writedata    : std_logic_vector(15 downto 0);
+signal qlsdbuf_hr_readdata     : std_logic_vector(15 downto 0);
+
+-- qnice2hyperram.vhd (master side, still QNICE clock domain) <->
+-- avm_fifo.vhd (slave side) - the CDC bridge into hr_clk_i
+signal qlsdbuf_avm_write         : std_logic;
+signal qlsdbuf_avm_read          : std_logic;
+signal qlsdbuf_avm_address       : std_logic_vector(31 downto 0);
+signal qlsdbuf_avm_writedata     : std_logic_vector(15 downto 0);
+signal qlsdbuf_avm_byteenable    : std_logic_vector( 1 downto 0);
+signal qlsdbuf_avm_burstcount    : std_logic_vector( 7 downto 0);
+signal qlsdbuf_avm_readdata      : std_logic_vector(15 downto 0);
+signal qlsdbuf_avm_readdatavalid : std_logic;
+signal qlsdbuf_avm_waitrequest   : std_logic;
+
+-- i_qlsd_buf_cdc's master output, hr_clk_i domain - the QL-SD side of the
+-- new i_avm_arbit_hr below.
+signal qlsdbuf_hr_avm_write         : std_logic;
+signal qlsdbuf_hr_avm_read          : std_logic;
+signal qlsdbuf_hr_avm_address       : std_logic_vector(31 downto 0);
+signal qlsdbuf_hr_avm_writedata     : std_logic_vector(15 downto 0);
+signal qlsdbuf_hr_avm_byteenable    : std_logic_vector(1 downto 0);
+signal qlsdbuf_hr_avm_burstcount    : std_logic_vector(7 downto 0);
+signal qlsdbuf_hr_avm_readdata      : std_logic_vector(15 downto 0);
+signal qlsdbuf_hr_avm_readdatavalid : std_logic;
+signal qlsdbuf_hr_avm_waitrequest   : std_logic;
+
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
 ---------------------------------------------------------------------------------------------
@@ -498,16 +563,147 @@ begin
          s_avm_readdatavalid_o => main_mdv_arb_avm_readdatavalid,
          m_clk_i               => hr_clk_i,
          m_rst_i               => hr_rst_i,
-         m_avm_waitrequest_i   => hr_core_waitrequest_i,
-         m_avm_write_o         => hr_core_write_o,
-         m_avm_read_o          => hr_core_read_o,
-         m_avm_address_o       => hr_core_address_o,
-         m_avm_writedata_o     => hr_core_writedata_o,
-         m_avm_byteenable_o    => hr_core_byteenable_o,
-         m_avm_burstcount_o    => hr_core_burstcount_o,
-         m_avm_readdata_i      => hr_core_readdata_i,
-         m_avm_readdatavalid_i => hr_core_readdatavalid_i
+         m_avm_waitrequest_i   => main_mdv_hr_avm_waitrequest,
+         m_avm_write_o         => main_mdv_hr_avm_write,
+         m_avm_read_o          => main_mdv_hr_avm_read,
+         m_avm_address_o       => main_mdv_hr_avm_address,
+         m_avm_writedata_o     => main_mdv_hr_avm_writedata,
+         m_avm_byteenable_o    => main_mdv_hr_avm_byteenable,
+         m_avm_burstcount_o    => main_mdv_hr_avm_burstcount,
+         m_avm_readdata_i      => main_mdv_hr_avm_readdata,
+         m_avm_readdatavalid_i => main_mdv_hr_avm_readdatavalid
       ); -- i_avm_fifo_mdv1
+
+   ---------------------------------------------------------------------------------------------
+   -- QL4M65 Milestone 4 (QL-SD, paso 1, M4001): QL-SD mount buffer, the
+   -- whole-image RAM the QNICE Shell firmware requires (shell.asm's
+   -- HANDLE_DRV_RD), backed by HyperRAM via the framework's own unmodified
+   -- qnice2hyperram.vhd + avm_fifo.vhd. Byte-window packing: qnice_dev_addr_i
+   -- addresses ONE FILE BYTE per QNICE address (bit 0 selects even/odd byte
+   -- within a 16-bit HyperRAM word), same technique as AExp's
+   -- adf_mount_wrapper.vhd.
+   ---------------------------------------------------------------------------------------------
+
+   qlsdbuf_hr_addr <= std_logic_vector(
+      resize(unsigned(std_logic_vector'(C_HMAP_QLSD(9 downto 0) & x"000")), 32) +
+      resize(unsigned(qnice_dev_addr_i(27 downto 1)), 32));
+
+   qlsdbuf_hr_byteenable <= "01" when qnice_dev_addr_i(0) = '0' else "10";
+   qlsdbuf_hr_writedata  <= qnice_dev_data_i(7 downto 0) & qnice_dev_data_i(7 downto 0);
+
+   qnice_qlsdbuf_data_o  <= x"00" & qlsdbuf_hr_readdata(7 downto 0)
+                                when qnice_dev_addr_i(0) = '0' else
+                             x"00" & qlsdbuf_hr_readdata(15 downto 8);
+
+   i_qlsd_buf_bridge : entity work.qnice2hyperram
+      port map (
+         clk_i                 => qnice_clk_i,
+         rst_i                 => qnice_rst_i,
+
+         s_qnice_wait_o        => qnice_qlsdbuf_wait,
+         s_qnice_address_i     => qlsdbuf_hr_addr,
+         s_qnice_cs_i          => qnice_qlsdbuf_ce,
+         s_qnice_write_i       => qnice_qlsdbuf_we,
+         s_qnice_writedata_i   => qlsdbuf_hr_writedata,
+         s_qnice_byteenable_i  => qlsdbuf_hr_byteenable,
+         s_qnice_readdata_o    => qlsdbuf_hr_readdata,
+
+         m_avm_write_o         => qlsdbuf_avm_write,
+         m_avm_read_o          => qlsdbuf_avm_read,
+         m_avm_address_o       => qlsdbuf_avm_address,
+         m_avm_writedata_o     => qlsdbuf_avm_writedata,
+         m_avm_byteenable_o    => qlsdbuf_avm_byteenable,
+         m_avm_burstcount_o    => qlsdbuf_avm_burstcount,
+         m_avm_readdata_i      => qlsdbuf_avm_readdata,
+         m_avm_readdatavalid_i => qlsdbuf_avm_readdatavalid,
+         m_avm_waitrequest_i   => qlsdbuf_avm_waitrequest
+      ); -- i_qlsd_buf_bridge
+
+   -- Domain resets follow the same rule as i_avm_fifo_mdv1 above.
+   i_qlsd_buf_cdc : entity work.avm_fifo
+      generic map (
+         G_WR_DEPTH     => 16,
+         G_RD_DEPTH     => 16,
+         G_FILL_SIZE    => 1,
+         G_ADDRESS_SIZE => 32,
+         G_DATA_SIZE    => 16
+      )
+      port map (
+         s_clk_i               => qnice_clk_i,
+         s_rst_i               => qnice_rst_i,
+         s_avm_waitrequest_o   => qlsdbuf_avm_waitrequest,
+         s_avm_write_i         => qlsdbuf_avm_write,
+         s_avm_read_i          => qlsdbuf_avm_read,
+         s_avm_address_i       => qlsdbuf_avm_address,
+         s_avm_writedata_i     => qlsdbuf_avm_writedata,
+         s_avm_byteenable_i    => qlsdbuf_avm_byteenable,
+         s_avm_burstcount_i    => qlsdbuf_avm_burstcount,
+         s_avm_readdata_o      => qlsdbuf_avm_readdata,
+         s_avm_readdatavalid_o => qlsdbuf_avm_readdatavalid,
+         m_clk_i               => hr_clk_i,
+         m_rst_i               => hr_rst_i,
+         m_avm_waitrequest_i   => qlsdbuf_hr_avm_waitrequest,
+         m_avm_write_o         => qlsdbuf_hr_avm_write,
+         m_avm_read_o          => qlsdbuf_hr_avm_read,
+         m_avm_address_o       => qlsdbuf_hr_avm_address,
+         m_avm_writedata_o     => qlsdbuf_hr_avm_writedata,
+         m_avm_byteenable_o    => qlsdbuf_hr_avm_byteenable,
+         m_avm_burstcount_o    => qlsdbuf_hr_avm_burstcount,
+         m_avm_readdata_i      => qlsdbuf_hr_avm_readdata,
+         m_avm_readdatavalid_i => qlsdbuf_hr_avm_readdatavalid
+      ); -- i_qlsd_buf_cdc
+
+   -- QL4M65 Milestone 4 (QL-SD, paso 1, M4001): second HyperRAM arbiter,
+   -- this one in hr_clk_i domain, combining mdv1/mdv2's already-CDC'd
+   -- stream (main_mdv_hr_avm_*, from i_avm_fifo_mdv1 above) with QL-SD's
+   -- own already-CDC'd stream (qlsdbuf_hr_avm_*, from i_qlsd_buf_cdc
+   -- above) - unlike i_avm_arbit_mdv (arbitrates BEFORE the CDC, since
+   -- mdv1/mdv2 share one source clock domain), this one has to arbitrate
+   -- AFTER each master's own CDC, since mdv1/mdv2 (main_clk) and QL-SD
+   -- (qnice_clk) start in genuinely different clock domains and can only
+   -- be combined once both already live in hr_clk_i. Its combined output
+   -- is what actually reaches hr_core_* now - framework.vhd/the HyperRAM
+   -- pblock are untouched by this (see doc/m2m/exceptions.md).
+   i_avm_arbit_hr : entity work.avm_arbit
+      generic map (
+         G_PREFER_SWAP  => false,  -- arbitrary, same as i_avm_arbit_mdv
+         G_ADDRESS_SIZE => 32,
+         G_DATA_SIZE    => 16
+      )
+      port map (
+         clk_i                  => hr_clk_i,
+         rst_i                  => hr_rst_i,
+
+         s0_avm_write_i         => main_mdv_hr_avm_write,
+         s0_avm_read_i          => main_mdv_hr_avm_read,
+         s0_avm_address_i       => main_mdv_hr_avm_address,
+         s0_avm_writedata_i     => main_mdv_hr_avm_writedata,
+         s0_avm_byteenable_i    => main_mdv_hr_avm_byteenable,
+         s0_avm_burstcount_i    => main_mdv_hr_avm_burstcount,
+         s0_avm_readdata_o      => main_mdv_hr_avm_readdata,
+         s0_avm_readdatavalid_o => main_mdv_hr_avm_readdatavalid,
+         s0_avm_waitrequest_o   => main_mdv_hr_avm_waitrequest,
+
+         s1_avm_write_i         => qlsdbuf_hr_avm_write,
+         s1_avm_read_i          => qlsdbuf_hr_avm_read,
+         s1_avm_address_i       => qlsdbuf_hr_avm_address,
+         s1_avm_writedata_i     => qlsdbuf_hr_avm_writedata,
+         s1_avm_byteenable_i    => qlsdbuf_hr_avm_byteenable,
+         s1_avm_burstcount_i    => qlsdbuf_hr_avm_burstcount,
+         s1_avm_readdata_o      => qlsdbuf_hr_avm_readdata,
+         s1_avm_readdatavalid_o => qlsdbuf_hr_avm_readdatavalid,
+         s1_avm_waitrequest_o   => qlsdbuf_hr_avm_waitrequest,
+
+         m_avm_write_o          => hr_core_write_o,
+         m_avm_read_o           => hr_core_read_o,
+         m_avm_address_o        => hr_core_address_o,
+         m_avm_writedata_o      => hr_core_writedata_o,
+         m_avm_byteenable_o     => hr_core_byteenable_o,
+         m_avm_burstcount_o     => hr_core_burstcount_o,
+         m_avm_readdata_i       => hr_core_readdata_i,
+         m_avm_readdatavalid_i  => hr_core_readdatavalid_i,
+         m_avm_waitrequest_i    => hr_core_waitrequest_i
+      ); -- i_avm_arbit_hr
 
    -- Tristate all expansion port drivers that we can directly control
    -- @TODO: As soon as we support modules that can act as busmaster, we need to become more flexible here
@@ -695,7 +891,20 @@ begin
          mdv2_avm_readdatavalid_i => main_mdv2_avm_readdatavalid,
          mdv2_avm_waitrequest_i   => main_mdv2_avm_waitrequest,
 
-         osm_control_i            => main_osm_control_i
+         osm_control_i            => main_osm_control_i,
+
+         -- QL4M65 Milestone 4 (QL-SD, paso 1): vdrives.vhd's QNICE-clock-
+         -- domain side, passed straight through - main.vhd runs in the
+         -- core's clock domain and can't reach qnice_clk_i on its own (see
+         -- main.vhd's own header). C_VD_DEVICE's ce/we are gated by the
+         -- dispatch in core_specific_devices below; addr/data_i are
+         -- unconditional, same pattern as mdv1/mdv2's own qnice_mdv*_addr_i
+         -- above.
+         qnice_qlsd_addr_i        => qnice_dev_addr_i,
+         qnice_qlsd_data_i        => qnice_dev_data_i,
+         qnice_qlsd_data_o        => qnice_qlsd_data_o,
+         qnice_qlsd_ce_i          => qnice_qlsd_ce,
+         qnice_qlsd_we_i          => qnice_qlsd_we
       ); -- i_main
 
    ---------------------------------------------------------------------------------------------
@@ -761,6 +970,12 @@ begin
       mdv2_ce              <= '0';
       qnice_mdv2_ce        <= '0';
       qnice_mdv2_we        <= '0';
+
+      qnice_qlsd_ce        <= '0';
+      qnice_qlsd_we        <= '0';
+
+      qnice_qlsdbuf_ce     <= '0';
+      qnice_qlsdbuf_we     <= '0';
 
       case qnice_dev_id_i is
 
@@ -843,6 +1058,26 @@ begin
                qnice_dev_data_o <= qnice_mdv2_data;
                qnice_dev_wait_o <= qnice_mdv2_wait;
             end if;
+
+         -- QL4M65 Milestone 4 (QL-SD, paso 1): vdrives.vhd's own QNICE MMIO
+         -- window - vdrives.vhd itself lives inside main.vhd (see
+         -- qlsd-design.md), ce/we are gated here, addr/data_i reach it
+         -- unconditionally (i_main's port map above). No CSR here (unlike
+         -- Main/Back ROM and mdv1/mdv2) - the vdrives mount flow doesn't go
+         -- through the manual-CRTROM-load protocol.
+         when C_VD_DEVICE =>
+            qnice_qlsd_ce     <= qnice_dev_ce_i;
+            qnice_qlsd_we     <= qnice_dev_we_i;
+            qnice_dev_data_o  <= qnice_qlsd_data_o;
+
+         -- QL4M65 Milestone 4 (QL-SD, paso 1): the QL-SD mount buffer
+         -- (whole-image HyperRAM buffer behind C_VD_BUFFER) - qnice2hyperram/
+         -- avm_fifo instances further below.
+         when C_DEV_QL_QLSD_BUFFER =>
+            qnice_qlsdbuf_ce  <= qnice_dev_ce_i;
+            qnice_qlsdbuf_we  <= qnice_dev_we_i;
+            qnice_dev_data_o  <= qnice_qlsdbuf_data_o;
+            qnice_dev_wait_o  <= qnice_qlsdbuf_wait;
 
          when others => null;
       end case;
@@ -1161,8 +1396,12 @@ begin
    -- QL4M65 (Milestone 2 phase A, M2008): microdrive activity - main_mdv1_led
    -- comes straight from zx8302.v's own "led" output (lit whenever any
    -- drive is selected, mdv_sel[0], same as real QL hardware) via main.vhd's
-   -- drive_led_o. QL-SD's own vdrives activity (Milestone 4, parked) would
-   -- OR into this same signal if/when that's revisited.
+   -- drive_led_o. QL-SD's own vdrives activity (Milestone 4, paso 1) doesn't
+   -- feed this LED yet - i_vdrives' drive_mounted_o/cache_dirty_o/
+   -- cache_flushing_o are left open in main.vhd (see its own i_vdrives
+   -- instantiation) - same minimal-wiring choice the old M2001 attempt made,
+   -- not revisited here since this milestone's goal is getting the RTL/
+   -- driver working at all, not LED polish.
    --
    -- QL4M65 (Milestone 2 phase B, etapa 4, M2029): while any mdv1 sector is
    -- dirty (MDV1_FLUSH_STEP hasn't finished writing it back to the SD card

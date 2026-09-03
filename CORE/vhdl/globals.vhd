@@ -117,12 +117,33 @@ constant C_HMAP_QL            : std_logic_vector(15 downto 0) := x"0200";     --
 --   mdv3: C_HMAP_QL + 2*22   mdv7: C_HMAP_QL + 6*22
 --   mdv4: C_HMAP_QL + 3*22   mdv8: C_HMAP_QL + 7*22
 -- (176 blocks total = 1408KB of the chip's 8MB - comfortably inside the
--- QL's own 4MB/512-block reservation, with 336 blocks = 2.625MB still
--- free within it for Milestone 3 and beyond.)
+-- QL's own 4MB/512-block reservation. mdv3-8 are still not built as of
+-- this writing - the "336 blocks free for Milestone 3 and beyond" this
+-- comment used to promise is now C_HMAP_QLSD's, see below. If mdv3-8 are
+-- ever built for real, THEY need re-placing (recommended: right after
+-- mdv2's real footprint, before QL-SD's buffer) and C_HMAP_QLSD moved or
+-- shrunk to make room.)
 constant C_HMAP_MDV_BLOCKS     : natural := 22;
 constant C_HMAP_MDV1           : std_logic_vector(15 downto 0) := C_HMAP_QL;
 constant C_HMAP_MDV2           : std_logic_vector(15 downto 0) :=
    std_logic_vector(unsigned(C_HMAP_QL) + C_HMAP_MDV_BLOCKS);
+
+-- QL4M65 Milestone 4 (QL-SD, paso 1, 2026-09-02): mount buffer for a
+-- QXL.WIN image, placed right after mdv2's real footprint (block 556),
+-- breaking the mdv3-8 placeholder above instead of respecting it (mdv3-8
+-- aren't built yet - see the note above). Sized for a small 1MB test
+-- image only, paso 1 of the milestone (.research/qlsd-design.md and
+-- DECISIONES.md, "Retomar Milestone 4"): the goal here is to get the
+-- driver/RTL working at all with the least suspicious address arithmetic
+-- possible, not to maximize buffer size - M2003's real, confirmed bug was
+-- exactly an address landing outside the physical 8MB chip with zero
+-- margin, so this leaves a lot of it (340 blocks = 2.65MB, up to the
+-- C_HMAP_QL+511 chip-reservation edge) deliberately unused for now. Paso 2
+-- (real per-sector SD streaming, no whole-image buffer) removes the need
+-- for this fixed buffer entirely and frees the space again.
+constant C_HMAP_QLSD            : std_logic_vector(15 downto 0) :=
+   std_logic_vector(unsigned(C_HMAP_QL) + 2*C_HMAP_MDV_BLOCKS);  -- x"022C", block 556
+constant C_HMAP_QLSD_SIZE_4KW   : natural := 128;                -- 1MB exact, blocks 556-683
 
 -- QL4M65 Milestone 3, Fase 1 (2026-08-23): main QL RAM was briefly given
 -- its own HyperRAM window here (C_HMAP_QRAM, qram_avm.vhd) - reverted
@@ -160,12 +181,19 @@ constant C_MENU_SPEED_FULL    : natural := 16;
 -- Virtual Drive Management System
 ----------------------------------------------------------------------------------------------------------
 
--- QL4M65: no virtual drives in milestone 1 (microdrive .MDV / QL-SD QXL.WIN are
--- milestone 3). Per the framework's own convention for not using virtual drives:
+-- QL4M65 Milestone 4 (QL-SD, paso 1): one virtual drive, backed by the
+-- QXL.WIN mount buffer in HyperRAM (C_HMAP_QLSD above). C_VD_DEVICE is
+-- vdrives.vhd's own QNICE MMIO window (framework convention); the buffer
+-- itself is a separate QNICE device (C_DEV_QL_QLSD_BUFFER) that shell.asm's
+-- HANDLE_DRV_RD reads sectors from - declared here rather than alongside
+-- the other C_DEV_QL_* IDs further down, since C_VD_BUFFER needs it in
+-- scope already. Device IDs 0x0101-0x0104 are already taken by
+-- C_DEV_QL_MAINROM/BACKROM/MDV1/MDV2 (below), so this starts at 0x0105.
 type vd_buf_array is array(natural range <>) of std_logic_vector;
-constant C_VDNUM              : natural := 0;
-constant C_VD_DEVICE          : std_logic_vector(15 downto 0) := x"EEEE";
-constant C_VD_BUFFER          : vd_buf_array := (x"EEEE", x"EEEE");
+constant C_VDNUM               : natural := 1;
+constant C_VD_DEVICE           : std_logic_vector(15 downto 0) := x"0105";
+constant C_DEV_QL_QLSD_BUFFER  : std_logic_vector(15 downto 0) := x"0106";
+constant C_VD_BUFFER           : vd_buf_array := (C_DEV_QL_QLSD_BUFFER, x"EEEE");
 
 ----------------------------------------------------------------------------------------------------------
 -- System for handling simulated cartridges and ROM loaders

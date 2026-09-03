@@ -350,6 +350,40 @@ sections - the real blocker was the microdrive boot-file search above),
 but it is a genuine, previously-missing piece of real hardware behaviour,
 kept as a correctness improvement.
 
+### Milestone 4 (QL-SD, paso 1, M4001): `sys/sd_card.sv` - `altsyncram` removal, same surgical pattern as `ipc`/`mdv`
+
+`sd_card.sv` (the generic MiSTer SPI-slave SD-card emulator, unmodified
+until this point) instantiates `altsyncram sdbuf` directly for its internal
+byte buffer - a Quartus/Intel-only primitive, same class of problem as
+`rtl/dpram.v` (see the `A.2` section above) and `mdv.v`'s own internal
+`dpram` before it. Removed the `altsyncram` instance and its `defparam`
+block; exposed 8 new top-level ports instead (`ram_a_addr_o`/`ram_a_data_o`/
+`ram_a_wren_o`/`ram_a_q_i` for the `clk_sys`-domain port, `ram_b_addr_o`/
+`ram_b_data_o`/`ram_b_wren_o`/`ram_b_q_i` for the `clk_spi`-domain port) -
+the address/data/write-enable composition itself (`{sd_buf,sd_buff_addr}`
+etc.) is unchanged from the original, just re-expressed as `assign`
+statements instead of primitive port connections. The Vivado-clean
+replacement (`M2M/vhdl/2port2clk_ram.vhd`'s `dualport_2clk_ram`,
+`ADDR_WIDTH=>11, DATA_WIDTH=>8`) is instantiated externally, in
+`CORE/vhdl/main.vhd` (`i_qlsd_ram`) - same "primitive stripped, replacement
+instantiated by the caller" pattern as `mdv.v`'s `mdv_dpram.vhd`, except
+`sd_card.sv` needed no wrapper file (it doesn't reference the RAM by a
+fixed Verilog module name the way `mdv.v` references `dpram`, so a direct
+`dualport_2clk_ram` instantiation in `main.vhd` is enough).
+
+**Requires instantiating this module with `WIDE=>0`, not `WIDE=>1`** like
+the original `QL.sv:287` does - `vdrives.vhd` (`M2M/vhdl/vdrives.vhd`) is
+hard-wired to 8 bits on its `sd_buff_*` side (`constant DW: natural := 7;`),
+and `WIDE=>0` is what makes both of `sdbuf`'s ports genuinely 8 bits wide
+(`width_a=DW+1=8`, `width_b=8`), matching that convention. See
+`.research/qlsd-design.md` for the full comparison against the original
+`QL.sv` instantiation.
+
+Files: `rtl/qlromext.v` (unmodified) and `sys/sd_card.sv` (surgery above)
+are both added to the Vivado compile list (were excluded since the M2003
+revert, see `DECISIONES.md`'s "Milestone 2 - QL-SD pausado" and "Retomar
+Milestone 4" sections).
+
 MiSTer2MEGA65
 -------------
 

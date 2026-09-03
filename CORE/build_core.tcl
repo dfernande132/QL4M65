@@ -124,6 +124,19 @@ add_files -norecurse -fileset sources_1 [list \
 # Verilog-2001 parser) - same fix, build-setting only, no code change.
 set_property file_type SystemVerilog [get_files "$core_ql_dir/rtl/mdv.v"]
 
+# QL4M65 (Milestone 4, QL-SD): qlromext.v (unmodified) and sd_card.sv
+# (surgically stripped of its Quartus-only altsyncram, ram_a_*/ram_b_*
+# exposed instead - see doc/m2m/exceptions.md) are back. Their Vivado-clean
+# sdbuf replacement (dualport_2clk_ram) is instantiated directly in
+# main.vhd, no wrapper file needed here (sd_card.sv no longer instantiates
+# any RAM internally, unlike mdv.v's mixed-language dpram/mdv_dpram.vhd
+# pattern above). qlromext.v is plain Verilog-2001, no file_type override
+# needed.
+add_files -norecurse -fileset sources_1 [list \
+    "$core_ql_dir/rtl/qlromext.v" \
+    "$core_ql_dir/sys/sd_card.sv" \
+]
+
 update_compile_order -fileset sources_1
 
 reset_run synth_1

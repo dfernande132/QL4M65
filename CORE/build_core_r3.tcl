@@ -94,6 +94,13 @@ add_files -norecurse -fileset sources_1 [list \
 ]
 set_property file_type SystemVerilog [get_files "$core_ql_dir/rtl/mdv.v"]
 
+# QL4M65 (Milestone 4, QL-SD) - see build_core.tcl's own comment for the
+# full rationale, identical here.
+add_files -norecurse -fileset sources_1 [list \
+    "$core_ql_dir/rtl/qlromext.v" \
+    "$core_ql_dir/sys/sd_card.sv" \
+]
+
 update_compile_order -fileset sources_1
 
 reset_run synth_1
