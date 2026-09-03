@@ -162,6 +162,18 @@ PREP_START      INCRB
 ; bytes in BRAM - only a *physical* hard reset re-runs CRTROM_AUTOLOAD
 ; and would revert to whatever's on the SD card, which is expected.
 ;
+; QL4M65 Milestone 4 (QL-SD, paso 1, M4002): "Mount HD image:%s"
+; (OPTM_G_QLSD_MOUNT) reuses the exact same reset-after-load reasoning as
+; Main/Back ROM above, for a different real bug: vdrives.vhd's own
+; drive_mounted_reg is cleared by ANY reset_core_i (framework design, not
+; a QL4M65 bug), and nothing else in this framework re-announces an
+; already-mounted image afterwards - confirmed on real hardware during
+; the original M2002 attempt (a mount survived until the next physical
+; reset, then silently vanished). The QL-SD driver's own CMD0/CMD8/ACMD41
+; SD-detection sequence needs a clean start right after HANDLE_MOUNTING
+; latches csd_size/csd_sdhc into sd_card.sv, which this same reset gives
+; it for free.
+;
 ; "Extract Back ROM" (OPTM_G_BACKROM_EXTRACT) is a momentary action, no
 ; file browser involved: zero the 16K Back ROM device directly
 ; (CLEAR_BACK_ROM below), then reset the same way, so the cleared ROM
@@ -198,6 +210,8 @@ OSM_SEL_POST    INCRB
                 CMP     OPTM_G_RAMSIZE, R8
                 RBRA    _OSM_SP_RESET, Z
                 CMP     OPTM_G_SPEED, R8
+                RBRA    _OSM_SP_RESET, Z
+                CMP     OPTM_G_QLSD_MOUNT, R8
                 RBRA    _OSM_SP_RESET, Z
                 CMP     OPTM_G_BACKROM_EXTRACT, R8
                 RBRA    _OSM_SP_BEXTR, Z
@@ -1028,6 +1042,14 @@ OPTM_G_MDV1            .EQU 4
 OPTM_G_MDV2            .EQU 5
 OPTM_G_RAMSIZE         .EQU 6
 OPTM_G_SPEED           .EQU 7
+
+; QL4M65 Milestone 4 (QL-SD, paso 1, M4002): mirrors config.vhd's
+; OPTM_G_QLSD_MOUNT - used by OSM_SEL_POST above so a real mount also
+; triggers the automatic core reset (same real fix M2002's own hardware
+; test already found necessary: vdrives.vhd clears drive_mounted_reg on
+; any reset_core_i, and nothing else re-announces an already-mounted
+; image after one).
+OPTM_G_QLSD_MOUNT      .EQU 8
 
 ; Mirrors globals.vhd's C_DEV_QL_BACKROM - used by CLEAR_BACK_ROM above.
 C_DEV_QL_BACKROM       .EQU 0x0102

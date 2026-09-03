@@ -108,11 +108,19 @@ type WHS_RECORD_ARRAY_TYPE is array (0 to WHS_RECORDS - 1) of WHS_RECORD_TYPE;
 -- commits/builds as before (DECISIONES.md) - this is just the user-facing
 -- label, same split CORENAME already has (debug-console-only internal
 -- name vs. this welcome screen).
+--
+-- QL4M65 Milestone 4 (QL-SD, paso 1, M4002, 2026-09-03): status line moves
+-- from "Version 1.0" to "Milestone 4 - QL-SD (WIP)" - V1.01 (the R3
+-- HyperRAM fix) never got its own welcome-screen line since it changed no
+-- user-visible feature, only a board-specific timing tweak (README/
+-- ROADMAP.md cover that). Reintroduces the "In development" section this
+-- screen dropped at V1.0 (this milestone's own comment above), same
+-- pattern used throughout Milestone 3's own progress before it closed.
 constant SCR_WELCOME : string :=
 
    "Sinclair QL for MEGA65 (QL4M65)\n" &
    "Developed by dfsantos (2026)\n\n\n" &
-   "Status: Version 1.0\n\n" &
+   "Status: Milestone 4 - QL-SD (WIP)\n\n" &
 
    "Based on MiSTer-devel/QL_MiSTer\n" &
    "Powered by MiSTer2MEGA65,\n" &
@@ -123,7 +131,10 @@ constant SCR_WELCOME : string :=
    " - CPU speed: 7.5/16/24/42 MHz\n" &
    " - RAM: 128k / 640k / 1024k\n" &
    " - Keyboard\n" &
-   " - 2 microdrives (full operation)\n\n\n" &
+   " - 2 microdrives (full operation)\n\n" &
+
+   "In development:\n" &
+   " - QL-SD (QXL.WIN hard disk)\n\n\n" &
 
    "    Press Space to continue.\n\n\n";
 
@@ -245,7 +256,9 @@ constant SEL_CORENAME      : std_logic_vector(15 downto 0) := x"0200";
 
 -- Currently this is only used in the debug console. Use the welcome screen and the
 -- help system to display the name and version of your core to the end user
-constant CORENAME          : string := "QL4M65 V1.0";
+-- QL4M65 Milestone 4 (M4002): kept in sync with SCR_WELCOME's own status
+-- line above.
+constant CORENAME          : string := "QL4M65 M4-WIP";
 
 --------------------------------------------------------------------------------------------------------------------
 -- "Help" menu / Options menu  (Selectors 0x0300 .. 0x0312): DO NOT TOUCH
