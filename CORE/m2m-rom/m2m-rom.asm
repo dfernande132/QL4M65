@@ -242,6 +242,48 @@ _OSM_SP_QLSD_DBG
                 RSUB    SCR$GOTOXY, 1
                 RSUB    SCR$OSM_M_ON, 1
 
+                ; QL4M65 Milestone 4 (QL-SD, M4005 diagnostic, TEMPORARY):
+                ; show what HANDLE_CORE_IO's polling loop captured about
+                ; the PREVIOUS driver boot (if any - both latches start at
+                ; 0 the very first time), then reset the latches for this
+                ; new attempt.
+                MOVE    QLSD_DBG_PREV, R8
+                RSUB    SCR$PRINTSTR, 1
+
+                MOVE    QLSD_DBG_RD_SEEN, R8
+                MOVE    @R8, R8
+                MOVE    SCRATCH_HEX, R9
+                RSUB    WORD2HEXSTR, 1
+                MOVE    R9, R8
+                RSUB    SCR$PRINTSTR, 1
+                MOVE    QLSD_DBG_SEP, R8
+                RSUB    SCR$PRINTSTR, 1
+
+                MOVE    QLSD_DBG_ACK_SEEN, R8
+                MOVE    @R8, R8
+                MOVE    SCRATCH_HEX, R9
+                RSUB    WORD2HEXSTR, 1
+                MOVE    R9, R8
+                RSUB    SCR$PRINTSTR, 1
+                MOVE    QLSD_DBG_SEP, R8
+                RSUB    SCR$PRINTSTR, 1
+
+                MOVE    QLSD_DBG_LBA_L, R8
+                MOVE    @R8, R8
+                MOVE    SCRATCH_HEX, R9
+                RSUB    WORD2HEXSTR, 1
+                MOVE    R9, R8
+                RSUB    SCR$PRINTSTR, 1
+                MOVE    NEWLINE, R8
+                RSUB    SCR$PRINTSTR, 1
+
+                MOVE    QLSD_DBG_RD_SEEN, R8
+                MOVE    0, @R8
+                MOVE    QLSD_DBG_ACK_SEEN, R8
+                MOVE    0, @R8
+                MOVE    QLSD_DBG_LBA_L, R8
+                MOVE    0, @R8
+
                 MOVE    M2M$RAMROM_DEV, R0
                 MOVE    C_DEV_QL_QLSD_BUFFER, @R0
                 MOVE    M2M$RAMROM_4KWIN, R0
@@ -1054,6 +1096,42 @@ HANDLE_CORE_IO  SYSCALL(enter, 1)
                 XOR     R8, R8                  ; 0 = respect the gate
                 RSUB    MDV2_FLUSH_STEP, 1
 
+                ; QL4M65 Milestone 4 (QL-SD, M4005 diagnostic build,
+                ; TEMPORARY - remove once the mount either works or the
+                ; real bug is found elsewhere): poll vdrives.vhd's own live
+                ; CAD registers (VD_RD/VD_ACK/VD_LBA_L - see sysdef.asm) on
+                ; every Shell loop iteration, latching whether the QL-SD
+                ; driver's real-time SD block-level protocol (sd_rd_i/
+                ; sd_ack_o, via sd_card.sv -> vdrives.vhd, the M4003 CDC
+                ; path) was EVER exercised, and which LBA it first
+                ; requested. _OSM_SP_QLSD_DBG's own earlier check
+                ; (buffer content via the generic QNICE RAMROM window) only
+                ; proves HANDLE_MOUNTING wrote correct bytes - it never
+                ; touches sd_card.sv/vdrives.vhd's own live protocol at
+                ; all, so it can't tell us whether the driver's requests
+                ; even reach our bridge. Latches persist across the
+                ; core-only reset (QNICE itself is never reset by it), so
+                ; they capture activity from a driver boot that already
+                ; happened - read back and reset by _OSM_SP_QLSD_DBG the
+                ; NEXT time "Mount HD image" is selected.
+                MOVE    VD_RD, R8
+                RSUB    VD_CAD_READ, 1
+                CMP     0, R8
+                RBRA    _HCIO_QLSD_NORD, Z
+                MOVE    QLSD_DBG_RD_SEEN, R9
+                MOVE    1, @R9
+                MOVE    VD_LBA_L, R8
+                RSUB    VD_CAD_READ, 1
+                MOVE    QLSD_DBG_LBA_L, R9
+                MOVE    R8, @R9
+_HCIO_QLSD_NORD MOVE    VD_ACK, R8
+                RSUB    VD_CAD_READ, 1
+                CMP     0, R8
+                RBRA    _HCIO_QLSD_NOACK, Z
+                MOVE    QLSD_DBG_ACK_SEEN, R9
+                MOVE    1, @R9
+_HCIO_QLSD_NOACK
+
                 SYSCALL(leave, 1)
                 RET
 
@@ -1154,6 +1232,18 @@ QLSD_DBG_HDR    .ASCII_W "QLSD buf[0..3]: "
 QLSD_DBG_SEP    .ASCII_W " "
 QLSD_DBG_OK     .ASCII_W "OK (QLWA) - Space to reset\n"
 QLSD_DBG_BAD    .ASCII_W "BAD (expected 0051 004C 0057 0041) - Space to reset\n"
+
+; QL4M65 Milestone 4 (QL-SD, M4005 diagnostic build, TEMPORARY - remove
+; once the mount either works or the real bug is found elsewhere): latches
+; set by HANDLE_CORE_IO's polling loop (see that routine's own comment)
+; while the QL-SD driver ROM runs after a core-only reset, read back and
+; reset by _OSM_SP_QLSD_DBG the NEXT time "Mount HD image" is selected.
+; QLSD_DBG_RD_SEEN/QLSD_DBG_ACK_SEEN: 0=never seen high, 1=seen at least
+; once. QLSD_DBG_LBA_L: the sd_lba_i value at the first sd_rd_i sighting.
+QLSD_DBG_PREV      .ASCII_W "Prev driver boot - rd_seen ack_seen lba: "
+QLSD_DBG_RD_SEEN   .BLOCK 1
+QLSD_DBG_ACK_SEEN  .BLOCK 1
+QLSD_DBG_LBA_L     .BLOCK 1
 
 ; Mirrors globals.vhd's C_DEV_QL_BACKROM - used by CLEAR_BACK_ROM above.
 C_DEV_QL_BACKROM       .EQU 0x0102
