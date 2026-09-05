@@ -228,20 +228,25 @@ OSM_SEL_POST    INCRB
 ; qnice2hyperram/avm_fifo bridge -> HyperRAM) delivered correct bytes,
 ; independent of anything the opaque QL-SD driver ROM does afterwards -
 ; that ROM's own SPI/FAT logic is not something we can instrument.
+;
+; M4004b: the first attempt drew this on the OSD menu's own inner area,
+; only OPTM_DX (20) characters wide - the output wrapped/got cut and was
+; unreadable. Use the same full-screen frame the mount-error screen itself
+; uses (FRAME_FULLSCR/SCR$OSM_M_ON, see _HM_RETRY_MOUNT above) instead,
+; same pattern, real screen width.
 _OSM_SP_QLSD_DBG
+                RSUB    SCR$OSM_OFF, 1
+                RSUB    FRAME_FULLSCR, 1
+                MOVE    1, R8
+                MOVE    1, R9
+                RSUB    SCR$GOTOXY, 1
+                RSUB    SCR$OSM_M_ON, 1
+
                 MOVE    M2M$RAMROM_DEV, R0
                 MOVE    C_DEV_QL_QLSD_BUFFER, @R0
                 MOVE    M2M$RAMROM_4KWIN, R0
                 MOVE    0, @R0
                 MOVE    M2M$RAMROM_DATA, R0
-
-                MOVE    1, R8
-                MOVE    1, R9
-                RSUB    SCR$GOTOXY, 1
-                RSUB    SCR$CLRINNER, 1
-                MOVE    1, R8
-                MOVE    1, R9
-                RSUB    SCR$GOTOXY, 1
 
                 MOVE    QLSD_DBG_HDR, R8
                 RSUB    SCR$PRINTSTR, 1
@@ -303,6 +308,7 @@ _OSM_SP_QLSD_WK RSUB    HANDLE_IO, 1            ; wait for Space to be pressed
                 CMP     M2M$KEY_SPACE, R8
                 RBRA    _OSM_SP_QLSD_WK, !Z
 
+                RSUB    SCR$OSM_OFF, 1
                 RBRA    _OSM_SP_RESET, 1
 
 _OSM_SP_BEXTR   RSUB    CLEAR_BACK_ROM, 1
