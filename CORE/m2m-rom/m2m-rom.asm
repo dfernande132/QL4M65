@@ -1240,7 +1240,7 @@ QLSD_DBG_BAD    .ASCII_W "BAD (expected 0051 004C 0057 0041) - Space to reset\n"
 ; reset by _OSM_SP_QLSD_DBG the NEXT time "Mount HD image" is selected.
 ; QLSD_DBG_RD_SEEN/QLSD_DBG_ACK_SEEN: 0=never seen high, 1=seen at least
 ; once. QLSD_DBG_LBA_L: the sd_lba_i value at the first sd_rd_i sighting.
-QLSD_DBG_PREV      .ASCII_W "Prev driver boot - rd_seen ack_seen lba: "
+QLSD_DBG_PREV      .ASCII_W "Prev rd/ack/lba: "
 QLSD_DBG_RD_SEEN   .BLOCK 1
 QLSD_DBG_ACK_SEEN  .BLOCK 1
 QLSD_DBG_LBA_L     .BLOCK 1
