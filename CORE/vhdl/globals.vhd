@@ -152,11 +152,11 @@ constant C_HMAP_QLSD_SIZE_4KW   : natural := 128;                -- 1MB exact, b
 -- wiki's own explicit guidance) all agreed a CPU's directly-addressed main
 -- RAM belongs in BRAM, not HyperRAM, in this framework - see
 -- DECISIONES.md's "Milestone 3 - pivote de HyperRAM a BRAM" for the full
--- story. Main RAM (128k/640k/1024k, selectable from the Options menu) is
+-- story. Main RAM (128k/640k since M4010, selectable from the Options menu) is
 -- BRAM again, main.vhd/mega65.vhd - no HyperRAM window needed for it.
 
 -- QL4M65 Milestone 3, Fase 1 (2026-08-24): RAM-size Options menu radio
--- group (config.vhd's OPTM_G_RAMSIZE, lines 8-10 of OPTM_ITEMS) - flat
+-- group (config.vhd's OPTM_G_RAMSIZE, lines 8-9 of OPTM_ITEMS) - flat
 -- line indices read from osm_control_i by main.vhd's own ram_size_sel
 -- latch. See the On-Screen-Menu (OSM) wiki page section 11 for why these
 -- must be literal 0-based line counts, not derived. First genuine radio
@@ -165,17 +165,20 @@ constant C_HMAP_QLSD_SIZE_4KW   : natural := 128;                -- 1MB exact, b
 -- defined here (not mega65.vhd, the wiki's usual convention) because the
 -- RAM decode logic that consumes them lives in main.vhd, not mega65.vhd,
 -- and both already share this package.
+-- M4010 (2026-09-09): C_MENU_RAM_1024 removed and every index below it
+-- shifted down by one - the 1024k tier cost 96 RAMB36 tiles it could not
+-- afford once sd_card.sv was really in the design (see main.vhd's
+-- i_main_ram_lo/i_main_ram_hi comment and DECISIONES.md M4010).
 constant C_MENU_RAM_128       : natural := 8;
 constant C_MENU_RAM_640       : natural := 9;
-constant C_MENU_RAM_1024      : natural := 10;
 
 -- QL4M65 Milestone 3 (2026-08-24): CPU speed Options menu radio group
--- (config.vhd's OPTM_G_SPEED, lines 13-16 of OPTM_ITEMS) - same convention
+-- (config.vhd's OPTM_G_SPEED, lines 12-15 of OPTM_ITEMS) - same convention
 -- as C_MENU_RAM_* above, consumed by main.vhd's cpu_speed_sel latch.
-constant C_MENU_SPEED_NATIVE  : natural := 13;
-constant C_MENU_SPEED_16      : natural := 14;
-constant C_MENU_SPEED_24      : natural := 15;
-constant C_MENU_SPEED_FULL    : natural := 16;
+constant C_MENU_SPEED_NATIVE  : natural := 12;
+constant C_MENU_SPEED_16      : natural := 13;
+constant C_MENU_SPEED_24      : natural := 14;
+constant C_MENU_SPEED_FULL    : natural := 15;
 
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System

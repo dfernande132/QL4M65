@@ -212,110 +212,30 @@ OSM_SEL_POST    INCRB
                 CMP     OPTM_G_SPEED, R8
                 RBRA    _OSM_SP_RESET, Z
                 CMP     OPTM_G_QLSD_MOUNT, R8
-                RBRA    _OSM_SP_QLSD_DBG, Z
+                RBRA    _OSM_SP_RESET, Z
                 CMP     OPTM_G_BACKROM_EXTRACT, R8
                 RBRA    _OSM_SP_BEXTR, Z
                 RBRA    _OSM_SP_RET, 1
 
-; QL4M65 Milestone 4 (QL-SD, M4004 diagnostic build, TEMPORARY - remove
-; once the mount either works or the real bug is found elsewhere): right
-; after a real mount, BEFORE the auto-reset below, read back the mount
-; buffer's own first 4 bytes (window 0, offset 0-3 of
-; C_DEV_QL_QLSD_BUFFER) and compare against "QLWA" (0x51,0x4C,0x57,0x41 -
-; the real QXL.WIN magic signature, confirmed present in qlx.win's own
-; header by direct inspection). This isolates whether the write path
-; (HANDLE_MOUNTING/PREP_LOAD_IMAGE -> C_DEV_QL_QLSD_BUFFER ->
-; qnice2hyperram/avm_fifo bridge -> HyperRAM) delivered correct bytes,
-; independent of anything the opaque QL-SD driver ROM does afterwards -
-; that ROM's own SPI/FAT logic is not something we can instrument.
+; QL4M65 Milestone 4 (QL-SD, M4008): the temporary _OSM_SP_QLSD_DBG
+; diagnostic screen (M4004-M4007: read the mount buffer's first 4 bytes
+; back and show them against the "QLWA" magic) is REMOVED. It did its job -
+; it proved the write path delivers correct bytes, which is what finally
+; narrowed the hunt down to the SD-card emulator itself - and it turned out
+; to be the cause of a real, reproducible bug of its own: the QL's keyboard
+; died on every mount.
 ;
-; M4004b: the first attempt drew this on the OSD menu's own inner area,
-; only OPTM_DX (20) characters wide - the output wrapped/got cut and was
-; unreadable. Use the same full-screen frame the mount-error screen itself
-; uses (FRAME_FULLSCR/SCR$OSM_M_ON, see _HM_RETRY_MOUNT above) instead,
-; same pattern, real screen width.
-_OSM_SP_QLSD_DBG
-                RSUB    SCR$OSM_OFF, 1
-                RSUB    FRAME_FULLSCR, 1
-                MOVE    1, R8
-                MOVE    1, R9
-                RSUB    SCR$GOTOXY, 1
-                RSUB    SCR$OSM_M_ON, 1
-
-                ; QL4M65 Milestone 4 (QL-SD, M4007): the "previous driver
-                ; boot" display (M4005/M4006, relied on HANDLE_CORE_IO's
-                ; now-removed polling loop) is gone - see that routine's own
-                ; comment for why. Only the mount-buffer content check
-                ; below remains.
-
-                MOVE    M2M$RAMROM_DEV, R0
-                MOVE    C_DEV_QL_QLSD_BUFFER, @R0
-                MOVE    M2M$RAMROM_4KWIN, R0
-                MOVE    0, @R0
-                MOVE    M2M$RAMROM_DATA, R0
-
-                MOVE    QLSD_DBG_HDR, R8
-                RSUB    SCR$PRINTSTR, 1
-
-                MOVE    @R0++, R1               ; byte 0 (expect 0x0051 'Q')
-                MOVE    R1, R8
-                MOVE    SCRATCH_HEX, R9
-                RSUB    WORD2HEXSTR, 1
-                MOVE    R9, R8
-                RSUB    SCR$PRINTSTR, 1
-                MOVE    QLSD_DBG_SEP, R8
-                RSUB    SCR$PRINTSTR, 1
-
-                MOVE    @R0++, R2               ; byte 1 (expect 0x004C 'L')
-                MOVE    R2, R8
-                MOVE    SCRATCH_HEX, R9
-                RSUB    WORD2HEXSTR, 1
-                MOVE    R9, R8
-                RSUB    SCR$PRINTSTR, 1
-                MOVE    QLSD_DBG_SEP, R8
-                RSUB    SCR$PRINTSTR, 1
-
-                MOVE    @R0++, R3               ; byte 2 (expect 0x0057 'W')
-                MOVE    R3, R8
-                MOVE    SCRATCH_HEX, R9
-                RSUB    WORD2HEXSTR, 1
-                MOVE    R9, R8
-                RSUB    SCR$PRINTSTR, 1
-                MOVE    QLSD_DBG_SEP, R8
-                RSUB    SCR$PRINTSTR, 1
-
-                MOVE    @R0++, R4               ; byte 3 (expect 0x0041 'A')
-                MOVE    R4, R8
-                MOVE    SCRATCH_HEX, R9
-                RSUB    WORD2HEXSTR, 1
-                MOVE    R9, R8
-                RSUB    SCR$PRINTSTR, 1
-
-                MOVE    NEWLINE, R8
-                RSUB    SCR$PRINTSTR, 1
-
-                CMP     0x0051, R1
-                RBRA    _OSM_SP_QLSD_BAD, !Z
-                CMP     0x004C, R2
-                RBRA    _OSM_SP_QLSD_BAD, !Z
-                CMP     0x0057, R3
-                RBRA    _OSM_SP_QLSD_BAD, !Z
-                CMP     0x0041, R4
-                RBRA    _OSM_SP_QLSD_BAD, !Z
-                MOVE    QLSD_DBG_OK, R8
-                RBRA    _OSM_SP_QLSD_PR, 1
-_OSM_SP_QLSD_BAD
-                MOVE    QLSD_DBG_BAD, R8
-_OSM_SP_QLSD_PR RSUB    SCR$PRINTSTR, 1
-
-_OSM_SP_QLSD_WK RSUB    HANDLE_IO, 1            ; wait for Space to be pressed
-                RSUB    KEYB$SCAN, 1
-                RSUB    KEYB$GETKEY, 1
-                CMP     M2M$KEY_SPACE, R8
-                RBRA    _OSM_SP_QLSD_WK, !Z
-
-                RSUB    SCR$OSM_OFF, 1
-                RBRA    _OSM_SP_RESET, 1
+; Why it broke the keyboard: OSM_SEL_POST is called from INSIDE the Options
+; menu loop (options.asm's OPTM_RUN). Keyboard delivery to the core is
+; gated by M2M$CSR_KBD, which RP_OPTM_START clears when the menu opens
+; because config.vhd's KEYBOARD_AT_OSD is false, and which is only restored
+; after OPTM_RUN returns. HANDLE_MOUNTING is careful to leave the overlay
+; back on (OPTM_SHOW + SCR$OSM_O_ON) before returning; our diagnostic
+; turned the overlay off and returned without restoring it, so the menu
+; kept running invisibly with the keyboard still gated off. Pressing Help
+; exited OPTM_RUN and re-enabled it - exactly the reported "enter and exit
+; the OSD and the keyboard comes back". OPTM_G_QLSD_MOUNT now branches
+; straight to _OSM_SP_RESET like every other group. See DECISIONES.md.
 
 _OSM_SP_BEXTR   RSUB    CLEAR_BACK_ROM, 1
 
@@ -1166,16 +1086,6 @@ OPTM_G_SPEED           .EQU 7
 ; any reset_core_i, and nothing else re-announces an already-mounted
 ; image after one).
 OPTM_G_QLSD_MOUNT      .EQU 8
-
-; QL4M65 Milestone 4 (QL-SD, paso 1, M4004): mirrors globals.vhd's
-; C_DEV_QL_QLSD_BUFFER - used by the temporary _OSM_SP_QLSD_DBG diagnostic
-; above.
-C_DEV_QL_QLSD_BUFFER   .EQU 0x0106
-
-QLSD_DBG_HDR    .ASCII_W "QLSD buf[0..3]: "
-QLSD_DBG_SEP    .ASCII_W " "
-QLSD_DBG_OK     .ASCII_W "OK (QLWA) - Space to reset\n"
-QLSD_DBG_BAD    .ASCII_W "BAD (expected 0051 004C 0057 0041) - Space to reset\n"
 
 ; Mirrors globals.vhd's C_DEV_QL_BACKROM - used by CLEAR_BACK_ROM above.
 C_DEV_QL_BACKROM       .EQU 0x0102

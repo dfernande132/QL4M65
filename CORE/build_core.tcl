@@ -135,6 +135,7 @@ set_property file_type SystemVerilog [get_files "$core_ql_dir/rtl/mdv.v"]
 add_files -norecurse -fileset sources_1 [list \
     "$core_ql_dir/rtl/qlromext.v" \
     "$core_ql_dir/sys/sd_card.sv" \
+    "$core_vhdl_dir/sd_card_wrap.v" \
 ]
 
 update_compile_order -fileset sources_1

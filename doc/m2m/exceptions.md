@@ -384,6 +384,72 @@ are both added to the Vivado compile list (were excluded since the M2003
 revert, see `DECISIONES.md`'s "Milestone 2 - QL-SD pausado" and "Retomar
 Milestone 4" sections).
 
+### Milestone 4 (QL-SD, M4008): `sys/sd_card.sv` must be instantiated through a Verilog wrapper, never directly from VHDL
+
+`sd_card.sv` declares several of its port widths with `localparam`s that
+are themselves declared **after** the port list:
+
+```verilog
+input      [AW:0] sd_buff_addr,     // sd_card.sv:42
+input      [DW:0] sd_buff_dout,     // :43
+output     [DW:0] sd_buff_din,      // :44
+input      [SW:0] mosi,             // :52
+output reg [SW:0] miso,             // :53
+...
+localparam AW = WIDE  ?  7 : 8;     // :70-73
+localparam DW = WIDE  ? 15 : 7;
+localparam SZ = OCTAL ?  8 : 1;
+localparam SW = SZ-1;
+```
+
+That is tolerated when the module is instantiated **from Verilog** (which
+is what the original core does, `QL.sv:287`), but it silently breaks
+Vivado's mixed-language **VHDL → SystemVerilog** binding: Vivado builds the
+VHDL-facing port view from the port list alone, cannot resolve `AW`/`DW`/
+`SW` there, and connects **nothing**. The instance elaborates with no error
+and every output of the module comes back as an undriven net:
+
+```
+[Synth 8-6901] identifier 'AW' is used before its declaration [sd_card.sv:42]
+[Synth 8-3848] Net qlsd_spi_do ... does not have driver.
+[Synth 8-3848] Net qlsd_sd_lba / qlsd_sd_rd / qlsd_sd_wr ... does not have driver.
+[Synth 8-3848] Net qlsd_ram_a_* / qlsd_ram_b_* ... does not have driver.
+```
+
+In other words the entire SD-card emulator was **absent from the built
+design** while builds `M4001`-`M4007` debugged it: MISO was a constant, so
+the QL-SD driver's own CMD0/CMD8/ACMD41 never got a valid reply and it
+printed "Card 1 not found" on every boot, and the block-level side
+(`sd_rd`/`sd_ack`) never moved, so `vdrives.vhd` was never asked for a
+sector. See `DECISIONES.md`'s "Milestone 4" section for the full story.
+
+`rtl/mdv.v` is also Verilog-instantiated-from-VHDL and binds correctly -
+its own `[Synth 8-6901]` warnings are all for signals in the module
+**body**, never for port widths. That is exactly the difference that
+matters, and it is the reason this class of bug had never appeared in this
+project before.
+
+**Fix, without touching `sd_card.sv`'s genericity**: `CORE/vhdl/sd_card_wrap.v`,
+a plain-Verilog wrapper whose own port list uses only literal widths (the
+`WIDE(0)`/`OCTAL(0)` configuration this project always uses), which
+instantiates the real `sd_card` from Verilog the way the original core
+does. `main.vhd` instantiates `sd_card_wrap`, never `sd_card`. Same
+"Vivado-clean shim around an upstream module" pattern already used by
+`ipc_rom_t49.vhd` and `mdv_dpram.vhd`. Note the wrapper also declares
+`mosi`/`miso` as plain scalars: with `OCTAL=0`, `SW=0`, so `sd_card.sv`
+declares them as 1-bit **vectors** (`[0:0]`), while `main.vhd`'s signals
+are `std_logic`.
+
+**The `[Synth 8-3848]` warnings are the acceptance test**: if any
+`qlsd_*` net is reported without a driver, the emulator is not connected
+and nothing else about QL-SD is worth debugging. Check them on every build
+that touches this area.
+
+When updating from a newer upstream `sd_card.sv`: re-apply the
+`altsyncram` surgery above, keep the wrapper, and re-check that the
+wrapper's literal widths still match whatever `AW`/`DW`/`SW` evaluate to
+for `WIDE=0`/`OCTAL=0`.
+
 MiSTer2MEGA65
 -------------
 

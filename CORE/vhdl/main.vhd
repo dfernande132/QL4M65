@@ -188,7 +188,7 @@ entity main is
       -- QL4M65 Milestone 3, Fase 1 (2026-08-24, revised after M3001/M3002:
       -- see DECISIONES.md's "Milestone 3 - pivote de HyperRAM a BRAM"): the
       -- RAM-size Options menu selection (config.vhd's OPTM_G_RAMSIZE radio
-      -- group, mega65.vhd's C_MENU_RAM_128/640/1024) - read at reset only
+      -- group, globals.vhd's C_MENU_RAM_128/640) - read at reset only
       -- (RAM size is a boot-time decision, same as the original MiSTer
       -- core's own CONF_STR item; m2m-rom.asm's OSM_SEL_POST pulses a
       -- plain core reset on this group so a changed selection takes effect
@@ -249,7 +249,7 @@ signal cpu_io       : std_logic;
 -- signal declarations, Milestone 4)
 signal ql_io        : std_logic;  -- $018000-$01BFFF: ZX8301/ZX8302 internal I/O
 signal cpu_rom      : std_logic;  -- $000000-$00FFFF: system ROM (Minerva)
-signal cpu_ram      : std_logic;  -- $020000-(ram_top_c): main RAM, size selected at reset (128k/640k/1024k)
+signal cpu_ram      : std_logic;  -- $020000-(ram_top_c): main RAM, size selected at reset (128k/640k)
 signal cpu_vram_wr  : std_logic;  -- $020000-$02FFFF: lower half also mirrors into VRAM
 
 signal ram_delay_dtack : std_logic;
@@ -258,13 +258,15 @@ signal cpu_dtack       : std_logic;
 -- QL4M65 Milestone 3, Fase 1 (2026-08-24, revised after M3001/M3002's
 -- real-hardware hang - see DECISIONES.md's "Milestone 3 - pivote de
 -- HyperRAM a BRAM"): RAM size is an Options-menu radio choice
--- (config.vhd's OPTM_G_RAMSIZE, osm_control_i bits C_MENU_RAM_128/640/1024
+-- (config.vhd's OPTM_G_RAMSIZE, osm_control_i bits C_MENU_RAM_128/640
 -- from mega65.vhd), latched into this 2-bit register ONLY at reset - RAM
 -- size is a boot-time decision (same as the original MiSTer core's own
 -- CONF_STR item), never changed mid-operation; m2m-rom.asm's OSM_SEL_POST
 -- pulses a reset on this group so a new selection is picked up right away.
--- "10"=1024k, "01"=640k, "00"=128k (also the safe fallback if, somehow,
--- no radio member reads back set - matches Milestone 1/2's fixed size).
+-- "01"=640k, "00"=128k (also the safe fallback if, somehow, no radio
+-- member reads back set - matches Milestone 1/2's fixed size).
+-- M4010 (2026-09-09): the 1024k tier ("10") was dropped - see the
+-- i_main_ram_lo/i_main_ram_hi comment for the BRAM-budget reason.
 signal ram_size_sel : std_logic_vector(1 downto 0) := "00";
 
 -- QL4M65 Milestone 3 (2026-08-24): CPU speed Options menu radio group
@@ -283,7 +285,18 @@ signal cpu_speed_sel : std_logic_vector(1 downto 0) := "00";
 -- (below, same shape used everywhere else in this file) sidesteps it.
 signal ql_timing_enable : std_logic;
 
-signal ram_q_a      : std_logic_vector(15 downto 0);  -- main RAM read data
+signal ram_q_a      : std_logic_vector(15 downto 0);  -- main RAM read data (bank mux output)
+
+-- QL4M65 M4010 (2026-09-09): main RAM is split into two exactly-sized
+-- banks - see the i_main_ram_lo/i_main_ram_hi comment further down.
+-- ram_woff is the CPU word address rebased to $020000 (so offset 0 is the
+-- first word of RAM), 19 bits wide; only offsets 0..$4FFFF are reachable
+-- because cpu_ram's own decode stops at $0BFFFF.
+signal ram_woff       : std_logic_vector(18 downto 0);
+signal ram_bank_hi    : std_logic;                       -- '1' => top 128k bank
+signal ram_bank_hi_r  : std_logic := '0';                -- delayed 1 cycle to match BRAM read latency
+signal ram_q_lo       : std_logic_vector(15 downto 0);
+signal ram_q_hi       : std_logic_vector(15 downto 0);
 signal vram_q_b     : std_logic_vector(15 downto 0);  -- VRAM read data (video side)
 
 signal io_dout      : std_logic_vector(15 downto 0);
@@ -599,6 +612,123 @@ signal qlsd_ram_b_q    : std_logic_vector(7 downto 0);
 signal qlsd_img_mounted   : std_logic_vector(G_VDNUM - 1 downto 0);
 signal qlsd_img_size      : std_logic_vector(31 downto 0);
 
+-- QL4M65 Milestone 4 (QL-SD, M4009): plain signals for everything that
+-- reaches i_sd_card's port map. Vivado was silently dropping ALL of that
+-- instance's port connections (every output reported by
+-- "[Synth 8-3848] ... does not have driver", instance optimised away
+-- entirely, confirmed absent from the synthesised netlist), and an
+-- expression as the actual of a Verilog module's input port is one of the
+-- two structural differences against i_qlromext, which binds correctly.
+-- Precompute them instead of writing "x\"00000000\" & qlsd_img_size" and
+-- "qlsd_img_mounted(0)" inline in the port map.
+signal qlsd_img_size64    : std_logic_vector(63 downto 0);
+signal qlsd_img_mounted0  : std_logic;
+signal qlsd_sd_buff_addr9 : std_logic_vector(8 downto 0);
+-- M4011: was "signal ... := '1'" with no driver at all, which only works
+-- because Vivado keeps the initial value - a constant says what is meant.
+constant C_QLSD_SDHC_ONE  : std_logic := '1';  -- fixed, matches QL.sv's own .sdhc(1)
+signal qlsd_sdhc_one      : std_logic;
+
+---------------------------------------------------------------------------
+-- QL4M65 Milestone 4 (QL-SD, M4011): the remaining clock-domain crossings
+-- between vdrives.vhd (qnice_clk_i) and sd_card.sv (clk_main_i).
+--
+-- M4009 was the first build where sd_card.sv actually EXISTED in the
+-- netlist, and M4010's timing report is therefore the first real look at
+-- this boundary. Three paths were being timed with a 0.476ns requirement
+-- (qnice_clk fall -> main_clk rise) and failing badly:
+--
+--   vdrives/sd_ack_reg[0]  -> sd_card/ack_reg[0]                  -4.845ns
+--   sd_card/sd_buf_reg[0]  -> i_qlsd_ram/ram_reg/ADDRARDADDR[12]  -2.480ns
+--   sd_card/sd_buf_reg[1]  -> i_qlsd_ram/ram_reg/ADDRARDADDR[13]  -2.477ns
+--
+-- sd_card.sv DOES have a hand-rolled 2-FF synchroniser for sd_ack
+-- ("ack[1:0] <= {ack[0],sd_ack}" plus a stability filter), but a
+-- hand-rolled synchroniser carries no timing exception, so Vivado times it
+-- as a real path and it fails WNS for real - the exact lesson this project
+-- already recorded in M2011. The fix is the project's standing rule:
+-- cross with xpm_cdc_* primitives, which bring their own constraints.
+--
+-- Direction 1 (qnice -> main): sd_ack ONLY. img_mounted/img_size look like
+-- they belong here too, but they do not: vdrives.vhd splits its own
+-- outputs into "Core clock domain: Output registers" (img_mounted_o,
+-- img_size_o, img_readonly_o, img_type_o, drive_mounted_o, cache_*_o - all
+-- already bridged inside it by i_cdc_q2m_img_mounted/i_cdc_qnice2main) and
+-- "QNICE clock domain: Output registers" (sd_ack_o, sd_buff_addr_o,
+-- sd_buff_dout_o, sd_buff_wr_o - raw). Bridging the first group again is
+-- not merely redundant, it INTRODUCES a main->qnice crossing that did not
+-- exist; M4011's first build did exactly that and traded one 4.845ns
+-- failure for fifteen. Only the second group crosses. sd_card.sv
+-- uses sd_ack in exactly two places - "ram_a_wren_o = sd_ack & sd_buff_wr"
+-- (pure qnice-domain, feeds the buffer RAM's port A) and the clk_spi
+-- synchroniser above. Only the second one crosses, so i_sd_card is fed the
+-- SYNCHRONISED ack and the buffer RAM's port A is driven directly from
+-- vdrives' own qnice-domain signals instead of through sd_card's
+-- ram_a_data_o/ram_a_wren_o passthroughs.
+--
+-- Direction 2 (main -> qnice): sd_buf, sd_card.sv's internal 2-bit buffer
+-- index, which only appears outside as the top 2 bits of ram_a_addr_o
+-- ("assign ram_a_addr_o = {sd_buf,sd_buff_addr}") - i.e. that one port
+-- genuinely mixes a main-domain field with a qnice-domain one, which is
+-- fine in the original MiSTer core where clk_sys IS clk_spi, and is a real
+-- CDC here where they are not. sd_buf only changes on the falling edge of
+-- ack, between transfers, so it is quasi-static from the qnice side and a
+-- plain array_single is the right primitive (bit skew cannot matter when
+-- the value is stable for the whole window in which it is used).
+---------------------------------------------------------------------------
+signal qlsd_sd_ack_main   : std_logic;                      -- sd_ack, qnice -> main
+signal qlsd_sd_buf_main   : std_logic_vector(1 downto 0);   -- sd_card's buffer index (main)
+signal qlsd_sd_buf_q      : std_logic_vector(1 downto 0);   -- ... -> qnice
+signal qlsd_ram_a_addr_q  : std_logic_vector(10 downto 0);  -- port A address, built in qnice
+
+-- QL4M65 Milestone 4 (QL-SD, M4009): sd_card_wrap is declared as a
+-- COMPONENT and instantiated as one, not via "entity work.sd_card_wrap".
+-- Direct entity instantiation of this particular Verilog module was
+-- silently producing an instance with NO port connections at all (see
+-- qlsd_img_size64's own comment above); a component declaration is the
+-- pattern the M2M framework itself uses for every Verilog/SystemVerilog
+-- module it binds from VHDL (audio_out.v, video_mixer.sv, the xpm_cdc_*
+-- primitives - all of which Vivado reports as "module 'X' ... bound to
+-- instance 'Y' of component 'X'"), and it is the only such binding style
+-- in this project that is known to be reported as bound in the log.
+component sd_card_wrap is
+   port (
+      clk_sys      : in  std_logic;
+      reset        : in  std_logic;
+
+      sdhc         : in  std_logic;
+      img_mounted  : in  std_logic;
+      img_size     : in  std_logic_vector(63 downto 0);
+
+      sd_lba       : out std_logic_vector(31 downto 0);
+      sd_rd        : out std_logic;
+      sd_wr        : out std_logic;
+      sd_ack       : in  std_logic;
+
+      sd_buff_addr : in  std_logic_vector(8 downto 0);
+      sd_buff_dout : in  std_logic_vector(7 downto 0);
+      sd_buff_din  : out std_logic_vector(7 downto 0);
+      sd_buff_wr   : in  std_logic;
+
+      clk_spi      : in  std_logic;
+
+      ss           : in  std_logic;
+      sck          : in  std_logic;
+      mosi         : in  std_logic;
+      miso         : out std_logic;
+
+      ram_a_addr_o : out std_logic_vector(10 downto 0);
+      ram_a_data_o : out std_logic_vector(7 downto 0);
+      ram_a_wren_o : out std_logic;
+      ram_a_q_i    : in  std_logic_vector(7 downto 0);
+
+      ram_b_addr_o : out std_logic_vector(10 downto 0);
+      ram_b_data_o : out std_logic_vector(7 downto 0);
+      ram_b_wren_o : out std_logic;
+      ram_b_q_i    : in  std_logic_vector(7 downto 0)
+   );
+end component sd_card_wrap;
+
 ---------------------------------------------------------------------------
 -- QL4M65: internal clock enables, derived from clk_main_i (84.000000 MHz)
 --
@@ -739,18 +869,18 @@ begin
    -- QL4M65 Milestone 3, Fase 1 (2026-08-24): latch the RAM-size Options
    -- menu selection at reset only - see ram_size_sel's own declaration
    -- comment above for why (boot-time decision, not runtime). Priority
-   -- chain (1024k checked first) matches the wiki's own suggested pattern
-   -- for reading a radio group's bits; falls back to "00" (128k) if,
-   -- somehow, no member reads back set (e.g. before the Shell has ever
+   -- chain (largest tier checked first) matches the wiki's own suggested
+   -- pattern for reading a radio group's bits; falls back to "00" (128k)
+   -- if, somehow, no member reads back set (e.g. before the Shell has ever
    -- initialised osm_control_i) - same safe default as Milestone 1/2's
    -- fixed size.
+   -- M4010 (2026-09-09): the 1024k tier ("10") is gone; 640k is now the
+   -- top. See i_main_ram_lo/i_main_ram_hi below for why (BRAM budget).
    p_ram_size : process (clk_main_i)
    begin
       if rising_edge(clk_main_i) then
          if reset = '1' then
-            if osm_control_i(C_MENU_RAM_1024) = '1' then
-               ram_size_sel <= "10";
-            elsif osm_control_i(C_MENU_RAM_640) = '1' then
+            if osm_control_i(C_MENU_RAM_640) = '1' then
                ram_size_sel <= "01";
             else
                ram_size_sel <= "00";
@@ -804,14 +934,15 @@ begin
    ql_timing_enable <= '1' when cpu_speed_sel = "00" else '0';
 
    ---------------------------------------------------------------------------
-   -- QL4M65: address decode (RAM size selectable 128k/640k/1024k - see
+   -- QL4M65: address decode (RAM size selectable 128k/640k - see
    -- ram_size_sel above; no GoldCard/microdrive-mapped memory. QL-SD's own
    -- decode is further below, near its i_qlromext/i_sd_card instantiation)
    ---------------------------------------------------------------------------
 
    -- QL4M65 Milestone 3, Fase 1: widened from x"03FFFF" (18 bits, 256k -
    -- Milestone 1's fixed 128k RAM scope) to x"1FFFFF" (21 bits, 2MB) to
-   -- cover the 1024k tier's own top address ($11FFFF). Safe for the
+   -- cover the largest tier's own top address (M4010: $0BFFFF, 640k -
+   -- was $11FFFF while the 1024k tier existed). Safe for the
    -- smaller regions (ROM $000000-$00FFFF, I/O $018000-$01BFFF): widening
    -- this mask only changes behaviour for addresses that have bits set
    -- ABOVE the old 18-bit boundary, which ROM/IO addresses never do -
@@ -837,8 +968,7 @@ begin
    -- memory - contiguous or gapped, it can't tell the difference).
    cpu_ram <= '1' when unsigned(cpu_addr) >= x"020000" and
                         ((ram_size_sel = "00" and unsigned(cpu_addr) <= x"03FFFF") or  -- 128k: $020000-$03FFFF
-                         (ram_size_sel = "01" and unsigned(cpu_addr) <= x"0BFFFF") or  -- 640k: $020000-$0BFFFF
-                         (ram_size_sel = "10" and unsigned(cpu_addr) <= x"11FFFF"))    -- 1024k: $020000-$11FFFF
+                         (ram_size_sel = "01" and unsigned(cpu_addr) <= x"0BFFFF"))    -- 640k: $020000-$0BFFFF
               else '0';
    cpu_vram_wr <= '1' when unsigned(cpu_addr) >= x"020000" and unsigned(cpu_addr) <= x"02FFFF" else '0';
 
@@ -897,7 +1027,51 @@ begin
    qlsd_sd_rd_arr(0)      <= qlsd_sd_rd_q;
    qlsd_sd_wr_arr(0)      <= qlsd_sd_wr_q;
    qlsd_sd_ack            <= qlsd_sd_ack_arr(0);
-   qlsd_sd_buff_din       <= qlsd_sd_buff_din_arr(0);
+   -- QL4M65 Milestone 4 (QL-SD, M4008): this used to be assigned the wrong
+   -- way round (qlsd_sd_buff_din <= qlsd_sd_buff_din_arr(0)), inherited
+   -- from the reverted M2001 attempt. qlsd_sd_buff_din is sd_card.sv's
+   -- OUTPUT (a byte read out of its sector buffer); sd_buff_din_i is
+   -- vdrives.vhd's INPUT. Data flows sd_card -> vdrives, so it is the array
+   -- element that has to be driven. Vivado had been reporting the real
+   -- symptom all along: "[Synth 8-3848] Net qlsd_sd_buff_din_arr[0] ... does
+   -- not have driver". Only affects the write-back path (HANDLE_DRV_WR), so
+   -- it was never the mount blocker - but it would have silently corrupted
+   -- every sector written back to the .win file.
+   -- M4011: taken straight off the buffer RAM's port A instead of through
+   -- sd_card.sv's sd_buff_din output, which is only a passthrough of the
+   -- same signal ("assign sd_buff_din = ram_a_q_i;"). With port A now
+   -- driven entirely from vdrives (see i_qlsd_ram below), the whole
+   -- qnice-domain side of the buffer no longer touches sd_card.sv at all.
+   qlsd_sd_buff_din_arr(0) <= qlsd_ram_a_q;
+
+   -- QL4M65 Milestone 4 (QL-SD, M4009): see these signals' own declarations -
+   -- nothing but plain signals may reach i_sd_card's port map.
+   -- M4011b: img_size/img_mounted are taken RAW from vdrives, with no CDC of
+   -- our own. vdrives.vhd already brings them into the core clock domain
+   -- itself (i_cdc_q2m_img_mounted / i_cdc_qnice2main, both dest_clk =>
+   -- clk_core_i, and its own source comment says so: "Core clock domain:
+   -- Output registers"), which is exactly the domain sd_card.sv's clk_sys
+   -- block wants here. M4011's first attempt added a second qnice->main
+   -- bridge on top, which meant clocking an already-core-domain signal into
+   -- a qnice-domain register - a brand new main->qnice crossing that became
+   -- the entire remaining timing failure (15 violated paths, WNS -4.234,
+   -- every one of them vdrives' own CDC output feeding ours). Only the
+   -- QNICE-domain outputs of vdrives (sd_ack, sd_buff_*) need a bridge, and
+   -- they get one below.
+   qlsd_img_size64    <= x"00000000" & qlsd_img_size;
+   qlsd_img_mounted0  <= qlsd_img_mounted(0);
+   qlsd_sd_buff_addr9 <= qlsd_sd_buff_addr(8 downto 0);
+   qlsd_sdhc_one      <= C_QLSD_SDHC_ONE;
+
+   -- M4011: sd_card.sv's buffer index, main domain (see the CDC note at the
+   -- signal declarations). It is the top 2 bits of ram_a_addr_o, which is
+   -- the one port of sd_card.sv that genuinely mixes two clock domains.
+   qlsd_sd_buf_main <= qlsd_ram_a_addr(10 downto 9);
+
+   -- M4011: the buffer RAM's port A address, assembled entirely in the
+   -- qnice domain - CDC'd buffer index + vdrives' own sd_buff_addr, rather
+   -- than sd_card.sv's mixed-domain ram_a_addr_o.
+   qlsd_ram_a_addr_q <= qlsd_sd_buf_q & qlsd_sd_buff_addr(8 downto 0);
 
    ---------------------------------------------------------------------------
    -- QL4M65: CPU (fx68k) - Verilog/SystemVerilog original, instantiated
@@ -965,29 +1139,63 @@ begin
    cpu_int_ack <= '1' when cpu_fc = "111" else '0';
 
    ---------------------------------------------------------------------------
-   -- QL4M65 Milestone 3, Fase 1 (2026-08-24): main RAM - BRAM, sized for the
-   -- largest selectable tier (1024k = 2^19 words) always, regardless of
-   -- which size is actually selected - cpu_ram's own decode (above) is what
-   -- limits how much of it the CPU can actually see, matching how the
-   -- original MiSTer core's own SDRAM was always physically present at full
-   -- size and only the address decode changed per menu option. Reverted
+   -- QL4M65 Milestone 3, Fase 1 (2026-08-24): main RAM - BRAM. Reverted
    -- from qram_avm.vhd/HyperRAM (M3001/M3002) - see DECISIONES.md's
-   -- "Milestone 3 - pivote de HyperRAM a BRAM" for why. Both ports tied the
-   -- same way as before (only the CPU touches main RAM; port B unused).
+   -- "Milestone 3 - pivote de HyperRAM a BRAM" for why. Only the CPU
+   -- touches main RAM; port B is unused on both banks.
+   --
+   -- QL4M65 M4010 (2026-09-09): split into two exactly-sized banks and
+   -- rebased to $020000. Until M4009 this was ONE dualport_2clk_ram_byte-
+   -- enable with G_ADDR_WIDTH=>19 addressed by cpu_addr(19 downto 1) raw,
+   -- i.e. 2**19 words = 1MB of BRAM permanently allocated even when the
+   -- 128k tier was selected, because tdp_ram.vhd declares its array as
+   -- "array(0 to 2**ADDR_WIDTH - 1)" - there is no word-count generic to
+   -- size it exactly, and without the $020000 rebase the top address
+   -- ($0BFFFF) needs bit 19 anyway. That cost 256 RAMB36 tiles and, once
+   -- M4009 finally got sd_card.sv into the design for real, pushed BRAM
+   -- to 350/365 (95.9%) and broke timing hard (WNS=-4.844ns) on pure
+   -- routing from the CPU's address register to this RAM's ADDRARDADDR.
+   --
+   -- The 1024k tier is gone (user decision) so 640k is the top: 655360
+   -- bytes = 327680 words, which is NOT a power of two. Two banks cover
+   -- it exactly - 2**18 words (512k bytes) + 2**16 words (128k bytes) -
+   -- for 160 RAMB36 instead of 256, freeing ~96 tiles.
+   --
+   -- The rebase is cheap: subtracting $020000 from a word address only
+   -- touches bits 18..16, so it is a 3-bit decrement, not a 19-bit
+   -- subtractor. Offsets 0..$3FFFF land in the low bank, $40000..$4FFFF
+   -- in the high one; cpu_ram's own decode guarantees nothing above that
+   -- ever reaches here.
    ---------------------------------------------------------------------------
 
-   i_main_ram : entity work.dualport_2clk_ram_byteenable
+   ram_woff    <= std_logic_vector(unsigned(cpu_addr(19 downto 17)) - 1) & cpu_addr(16 downto 1);
+   ram_bank_hi <= ram_woff(18);
+
+   -- Both banks read with one cycle of latency (tdp_ram registers the
+   -- address, not the data), so the bank select feeding the output mux has
+   -- to be delayed by exactly the same one cycle - unconditionally, since
+   -- dualport_2clk_ram_byteenable exposes no clock enable.
+   p_ram_bank : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         ram_bank_hi_r <= ram_bank_hi;
+      end if;
+   end process p_ram_bank;
+
+   ram_q_a <= ram_q_hi when ram_bank_hi_r = '1' else ram_q_lo;
+
+   i_main_ram_lo : entity work.dualport_2clk_ram_byteenable
       generic map (
-         G_ADDR_WIDTH => 19,  -- 1024k bytes = 512K words (largest selectable tier)
+         G_ADDR_WIDTH => 18,  -- 512k bytes = 256K words ($020000-$09FFFF)
          G_DATA_WIDTH => 16
       )
       port map (
          a_clk_i        => clk_main_i,
-         a_address_i    => cpu_addr(19 downto 1),
+         a_address_i    => ram_woff(17 downto 0),
          a_data_i       => cpu_dout,
          a_byteenable_i => cpu_uds & cpu_lds,
-         a_wren_i       => cpu_wr and cpu_ram,
-         a_q_o          => ram_q_a,
+         a_wren_i       => cpu_wr and cpu_ram and (not ram_bank_hi),
+         a_q_o          => ram_q_lo,
 
          b_clk_i        => clk_main_i,
          b_address_i    => (others => '0'),
@@ -995,7 +1203,28 @@ begin
          b_byteenable_i => (others => '0'),
          b_wren_i       => '0',
          b_q_o          => open
-      ); -- i_main_ram
+      ); -- i_main_ram_lo
+
+   i_main_ram_hi : entity work.dualport_2clk_ram_byteenable
+      generic map (
+         G_ADDR_WIDTH => 16,  -- 128k bytes = 64K words ($0A0000-$0BFFFF)
+         G_DATA_WIDTH => 16
+      )
+      port map (
+         a_clk_i        => clk_main_i,
+         a_address_i    => ram_woff(15 downto 0),
+         a_data_i       => cpu_dout,
+         a_byteenable_i => cpu_uds & cpu_lds,
+         a_wren_i       => cpu_wr and cpu_ram and ram_bank_hi,
+         a_q_o          => ram_q_hi,
+
+         b_clk_i        => clk_main_i,
+         b_address_i    => (others => '0'),
+         b_data_i       => (others => '0'),
+         b_byteenable_i => (others => '0'),
+         b_wren_i       => '0',
+         b_q_o          => open
+      ); -- i_main_ram_hi
 
    i_vram : entity work.dualport_2clk_ram_byteenable
       generic map (
@@ -1640,25 +1869,35 @@ begin
    -- M2001-M2003 attempt at this had `ss => not qlsd_spi_cs1l` here.)
    ---------------------------------------------------------------------------
 
-   i_sd_card : entity work.sd_card
-      generic map (
-         WIDE  => 0,
-         OCTAL => 0
-      )
+   -- QL4M65 Milestone 4 (QL-SD, M4008): instantiated through
+   -- CORE/vhdl/sd_card_wrap.v, NOT directly. sd_card.sv's own port list
+   -- declares several widths with localparams declared after the port list
+   -- ([AW:0]/[DW:0]/[SW:0]), which Vivado cannot resolve when binding a
+   -- SystemVerilog module from VHDL - it connected NOTHING and every output
+   -- of this instance came back undriven ("[Synth 8-3848] Net qlsd_spi_do /
+   -- qlsd_sd_lba / qlsd_sd_rd / qlsd_sd_wr / qlsd_ram_* does not have
+   -- driver"), i.e. the SD-card emulator was absent from builds M4001-M4007
+   -- while we debugged it. The wrapper has literal port widths and does the
+   -- WIDE(0)/OCTAL(0) instantiation from Verilog instead - see that file's
+   -- own header, doc/m2m/exceptions.md and DECISIONES.md.
+   i_sd_card : sd_card_wrap
       port map (
          clk_sys      => clk_main_i,
          reset        => reset,
 
-         sdhc         => '1',  -- no physical/removable card detection - fixed, matches QL.sv's own .sdhc(1)
-         img_mounted  => qlsd_img_mounted(0),
-         img_size     => x"00000000" & qlsd_img_size,
+         sdhc         => qlsd_sdhc_one,
+         img_mounted  => qlsd_img_mounted0,
+         img_size     => qlsd_img_size64,
 
          sd_lba       => qlsd_sd_lba,
          sd_rd        => qlsd_sd_rd,
          sd_wr        => qlsd_sd_wr,
-         sd_ack       => qlsd_sd_ack,
+         -- M4011: the SYNCHRONISED ack (qnice -> main). sd_card.sv's other
+         -- use of sd_ack (ram_a_wren_o) is bypassed entirely - the buffer
+         -- RAM's port A is driven straight from vdrives below.
+         sd_ack       => qlsd_sd_ack_main,
 
-         sd_buff_addr => qlsd_sd_buff_addr(8 downto 0),
+         sd_buff_addr => qlsd_sd_buff_addr9,
          sd_buff_dout => qlsd_sd_buff_dout,
          sd_buff_din  => qlsd_sd_buff_din,
          sd_buff_wr   => qlsd_sd_buff_wr,
@@ -1703,11 +1942,57 @@ begin
          dest_out(33)           => qlsd_sd_wr_q
       ); -- i_qlsd_sd_block_cdc
 
+   -- QL4M65 Milestone 4 (QL-SD, M4011): sd_buf, main -> qnice. Quasi-static
+   -- (only changes on the falling edge of ack, between transfers), so a
+   -- plain array_single is correct here - see the CDC note at the signal
+   -- declarations for the full reasoning.
+   i_qlsd_sd_buf_cdc : xpm_cdc_array_single
+      generic map (
+         WIDTH => 2
+      )
+      port map (
+         src_clk   => clk_main_i,
+         src_in    => qlsd_sd_buf_main,
+         dest_clk  => qnice_clk_i,
+         dest_out  => qlsd_sd_buf_q
+      ); -- i_qlsd_sd_buf_cdc
+
+   -- QL4M65 Milestone 4 (QL-SD, M4011): sd_ack, qnice -> main. This is the
+   -- crossing that cost -4.845ns in M4010: sd_card.sv's own hand-rolled
+   -- 2-FF synchroniser on this signal carries no timing exception, so
+   -- Vivado timed it against a 0.476ns requirement. Feeding it an already
+   -- synchronised ack turns that into an ordinary main_clk -> main_clk
+   -- path; sd_card.sv's internal 2-FF then just re-registers a signal
+   -- already in its own domain, which is harmless.
+   i_qlsd_sd_ack_cdc : xpm_cdc_single
+      generic map (
+         DEST_SYNC_FF   => 4,
+         INIT_SYNC_FF   => 0,
+         SIM_ASSERT_CHK => 0,
+         SRC_INPUT_REG  => 1
+      )
+      port map (
+         src_clk   => qnice_clk_i,
+         src_in    => qlsd_sd_ack,
+         dest_clk  => clk_main_i,
+         dest_out  => qlsd_sd_ack_main
+      ); -- i_qlsd_sd_ack_cdc
+
    -- QL4M65 Milestone 4 (QL-SD, paso 1): sd_card.sv's internal "sdbuf" RAM,
    -- externally instantiated (Vivado-clean replacement for its original
    -- altsyncram - see doc/m2m/exceptions.md). Both ports are genuinely 8
    -- bits wide with WIDE(0) above, so a plain dualport_2clk_ram fits with
    -- no asymmetric width handling needed.
+   --
+   -- M4011: port A is now driven straight from vdrives.vhd's own
+   -- qnice-domain signals (address assembled above, data = sd_buff_dout,
+   -- write enable = ack AND sd_buff_wr) instead of from sd_card.sv's
+   -- ram_a_addr_o/ram_a_data_o/ram_a_wren_o. Those three are only
+   -- passthroughs of exactly these signals ("assign ram_a_data_o =
+   -- sd_buff_dout; assign ram_a_wren_o = sd_ack & sd_buff_wr;"), but
+   -- routing them through the Verilog module dragged sd_card's own
+   -- main-domain sd_buf into a qnice-clocked BRAM address port. Taking
+   -- them from vdrives directly keeps this whole port in one domain.
    i_qlsd_ram : entity work.dualport_2clk_ram
       generic map (
          ADDR_WIDTH => 11,
@@ -1715,9 +2000,9 @@ begin
       )
       port map (
          clock_a   => qnice_clk_i,
-         address_a => qlsd_ram_a_addr,
-         data_a    => qlsd_ram_a_data,
-         wren_a    => qlsd_ram_a_wren,
+         address_a => qlsd_ram_a_addr_q,
+         data_a    => qlsd_sd_buff_dout,
+         wren_a    => qlsd_sd_ack and qlsd_sd_buff_wr,
          q_a       => qlsd_ram_a_q,
 
          clock_b   => clk_main_i,
