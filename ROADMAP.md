@@ -46,21 +46,29 @@ V2.0 candidates
 
 ### Storage
 
-* **QXL.WIN / QL-SD support (Milestone 4, retaken 2026-09-02/03).** Three
-  steps: (1) a small (1MB) test `.win` image mounted in a HyperRAM buffer,
-  working end-to-end with the driver in the Back ROM - re-implementing the
-  `M2001`-`M2003` wiring (August 2026, reverted) against the current tree,
-  which has changed a lot since (mdv1/mdv2 now really use HyperRAM). A
-  likely root cause for that attempt's never-solved mount failure was
-  found and fixed along the way (an inverted `ss`/chip-select signal into
-  `sd_card.sv`). (2) Modify the M2M framework itself so QNICE streams
-  sectors directly from the SD card on demand, instead of requiring the
-  whole image preloaded into one linear buffer (the current
+* **QXL.WIN / QL-SD support (Milestone 4, retaken 2026-09-02/03). Step 1
+  DONE, confirmed on real hardware 2026-09-10.** Three steps: (1) **done** -
+  a small (1MB) test `.win` image mounted in a HyperRAM buffer, working
+  end-to-end with the QL-SD driver 1.09 in the Back ROM: the card is
+  detected, the image mounts, and a game stored inside it loads and runs on
+  real hardware (`M4011b`). This re-implements the `M2001`-`M2003` wiring
+  (August 2026, reverted) against the current tree, which has changed a lot
+  since (mdv1/mdv2 now really use HyperRAM). Getting here took eleven
+  builds, eight of which were spent debugging a module that Vivado had
+  silently dropped from the netlist - see `DECISIONES.md` and
+  `doc/m2m/exceptions.md`. (2) Modify the M2M framework itself so QNICE
+  streams sectors directly from the SD card on demand, instead of requiring
+  the whole image preloaded into one linear buffer (the current
   `shell.asm`/`vdrives.vhd` mechanism's limitation) - explicitly intended
   to be proposed upstream so any M2M core can mount large hard-disk
   images, not a QL4M65-only hack. (3) A real ~50MB QXL.WIN image straight
   from the SD card, no HyperRAM/BRAM size ceiling. See `DECISIONES.md`'s
   "Milestone 4" section for the full architecture and progress.
+
+  Note: the RAM-size menu lost its 1024k tier in `M4010` - once the SD card
+  emulator was really in the design, BRAM hit 95.9% and the design stopped
+  meeting timing. 640k is the ceiling now, and it is allocated exactly
+  (two banks, 2^18 + 2^16 words) rather than rounded up to a power of two.
 
 * **Physical floppy drive support.** Real QL expansions (e.g. Trump Card)
   added floppy controllers based on the WD1772 - the MEGA65 could drive a
