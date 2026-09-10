@@ -50,7 +50,8 @@ V2.0 candidates
   DONE, confirmed on real hardware 2026-09-10.** Three steps: (1) **done** -
   a small (1MB) test `.win` image mounted in a HyperRAM buffer, working
   end-to-end with the QL-SD driver 1.09 in the Back ROM: the card is
-  detected, the image mounts, and a game stored inside it loads and runs on
+  detected, the image mounts, a game stored inside it loads and runs, and
+  writing back to the image works too - reads and writes both confirmed on
   real hardware (`M4011b`). This re-implements the `M2001`-`M2003` wiring
   (August 2026, reverted) against the current tree, which has changed a lot
   since (mdv1/mdv2 now really use HyperRAM). Getting here took eleven
