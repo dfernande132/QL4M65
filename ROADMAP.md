@@ -71,6 +71,18 @@ V2.0 candidates
   meeting timing. 640k is the ceiling now, and it is allocated exactly
   (two banks, 2^18 + 2^16 words) rather than rounded up to a power of two.
 
+* **Main RAM in SDRAM (Milestone 5, started 2026-09-11).** The MEGA65 R6 has
+  64 MB of SDRAM (`IS42S16320F-6BL`) that this core does not use at all -
+  every pin is tied off. Moving main RAM there restores the original
+  MiSTer QL architecture, which keeps all of the QL's RAM in SDRAM with an
+  `sdram_dtack` stalling the 68008 (`QL.sv:363-391, 687`); this port dropped
+  that only because no SDRAM controller was available. It would bring back
+  the 1024k tier deleted in `M4010` and reach the original 4096k tier, while
+  freeing ~160 BRAM tiles. Uses MJoergen's controller (M2M V2.1.0), run at
+  84 MHz in the CPU's own clock domain so no CDC is needed. Expected cost:
+  Full speed will slow down, since a 12-cycle read is 143 ns against a
+  ~95 ns bus cycle. Design in `.research/milestone5-sdram-design.md`.
+
 * **Physical floppy drive support.** Real QL expansions (e.g. Trump Card)
   added floppy controllers based on the WD1772 - the MEGA65 could drive a
   real floppy drive the same way. Would need a WD1772-compatible controller
