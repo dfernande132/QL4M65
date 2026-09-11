@@ -37,6 +37,17 @@ add_files -norecurse -fileset sources_1 [list \
 ]
 set_property file_type {VHDL 2008} [get_files "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/qnice_csr.vhd"]
 
+# QL4M65 Milestone 5 (M5001): framework.vhd instantiates the SDRAM controller
+# unconditionally, so R3 needs these files to elaborate even though the R3
+# board has no SDRAM device and top_mega65-r3.vhd connects none of its pins.
+# M5004 will make the instantiation conditional on the board.
+add_files -norecurse -fileset sources_1 [list \
+    "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/controllers/SDRAM/sdram.vhd" \
+    "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/axi_fifo_small.vhd" \
+]
+set_property file_type {VHDL 2008} [get_files "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/controllers/SDRAM/sdram.vhd"]
+set_property file_type {VHDL 2008} [get_files "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/axi_fifo_small.vhd"]
+
 add_files -norecurse -fileset sources_1 [list \
     "$core_ql_dir/rtl/fx68k/fx68k.sv" \
     "$core_ql_dir/rtl/fx68k/fx68kAlu.sv" \

@@ -406,6 +406,20 @@ architecture synthesis of mega65_r6 is
    signal hr_low                 : std_logic;
    signal hr_high                : std_logic;
 
+   -- QL4M65 Milestone 5 (M5001): SDRAM's core-facing Avalon port, same shape
+   -- as hr_core_* above but living in main_clk rather than hr_clk - the
+   -- controller is clocked from the core's own 84 MHz, see framework.vhd's
+   -- i_sdram and .research/milestone5-sdram-design.md.
+   signal sdram_core_write         : std_logic;
+   signal sdram_core_read          : std_logic;
+   signal sdram_core_address       : std_logic_vector(31 downto 0);
+   signal sdram_core_writedata     : std_logic_vector(15 downto 0);
+   signal sdram_core_byteenable    : std_logic_vector(1 downto 0);
+   signal sdram_core_burstcount    : std_logic_vector(7 downto 0);
+   signal sdram_core_readdata      : std_logic_vector(15 downto 0);
+   signal sdram_core_readdatavalid : std_logic;
+   signal sdram_core_waitrequest   : std_logic;
+
    ---------------------------------------------------------------------------------------------
    -- qnice_clk
    ---------------------------------------------------------------------------------------------
@@ -554,17 +568,9 @@ begin
    pmod2_en_o            <= '0';
    qspidb_io             <= (others => 'Z');
    qspicsn_o             <= '1';
-   sdram_clk_o           <= '0';
-   sdram_cke_o           <= '0';
-   sdram_ras_n_o         <= '1';
-   sdram_cas_n_o         <= '1';
-   sdram_we_n_o          <= '1';
-   sdram_cs_n_o          <= '1';
-   sdram_ba_o            <= (others => '0');
-   sdram_a_o             <= (others => '0');
-   sdram_dqml_o          <= '0';
-   sdram_dqmh_o          <= '0';
-   sdram_dq_io           <= (others => 'Z');
+   -- QL4M65 Milestone 5 (M5001): the SDRAM pins used to be tied off here.
+   -- They are now driven by i_framework's own SDRAM controller - see that
+   -- instantiation below and .research/milestone5-sdram-design.md.
 
 
    -----------------------------------------------------------------------------------------
@@ -708,6 +714,30 @@ begin
       hr_core_waitrequest_o   => hr_core_waitrequest,
       hr_high_o               => hr_high,
       hr_low_o                => hr_low,
+
+      -- QL4M65 Milestone 5 (M5001): SDRAM - physical pins plus the
+      -- core-facing Avalon port, which lives in main_clk, not hr_clk.
+      sdram_clk_o                => sdram_clk_o,
+      sdram_cke_o                => sdram_cke_o,
+      sdram_ras_n_o              => sdram_ras_n_o,
+      sdram_cas_n_o              => sdram_cas_n_o,
+      sdram_we_n_o               => sdram_we_n_o,
+      sdram_cs_n_o               => sdram_cs_n_o,
+      sdram_ba_o                 => sdram_ba_o,
+      sdram_a_o                  => sdram_a_o,
+      sdram_dqml_o               => sdram_dqml_o,
+      sdram_dqmh_o               => sdram_dqmh_o,
+      sdram_dq_io                => sdram_dq_io,
+
+      sdram_core_write_i         => sdram_core_write,
+      sdram_core_read_i          => sdram_core_read,
+      sdram_core_address_i       => sdram_core_address,
+      sdram_core_writedata_i     => sdram_core_writedata,
+      sdram_core_byteenable_i    => sdram_core_byteenable,
+      sdram_core_burstcount_i    => sdram_core_burstcount,
+      sdram_core_readdata_o      => sdram_core_readdata,
+      sdram_core_readdatavalid_o => sdram_core_readdatavalid,
+      sdram_core_waitrequest_o   => sdram_core_waitrequest,
 
       -- Audio
       audio_clk_o             => audio_clk,
@@ -897,6 +927,18 @@ begin
          hr_core_waitrequest_i   => hr_core_waitrequest,
          hr_high_i               => hr_high,
          hr_low_i                => hr_low,
+
+         -- QL4M65 Milestone 5 (M5001): SDRAM, in the core's own main_clk
+         -- domain - so unlike hr_core_* this needs no CDC inside the core.
+         sdram_core_write_o         => sdram_core_write,
+         sdram_core_read_o          => sdram_core_read,
+         sdram_core_address_o       => sdram_core_address,
+         sdram_core_writedata_o     => sdram_core_writedata,
+         sdram_core_byteenable_o    => sdram_core_byteenable,
+         sdram_core_burstcount_o    => sdram_core_burstcount,
+         sdram_core_readdata_i      => sdram_core_readdata,
+         sdram_core_readdatavalid_i => sdram_core_readdatavalid,
+         sdram_core_waitrequest_i   => sdram_core_waitrequest,
 
          --------------------------------------------------------------------
          -- C64 specific ports that are not supported by the M2M framework

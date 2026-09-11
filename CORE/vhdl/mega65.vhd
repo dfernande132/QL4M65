@@ -86,6 +86,21 @@ port (
    hr_core_readdata_i      : in  std_logic_vector(15 downto 0);
    hr_core_readdatavalid_i : in  std_logic;
    hr_core_waitrequest_i   : in  std_logic;
+
+   -- QL4M65 Milestone 5 (M5001): SDRAM (R4/R5/R6 only, 64 MB). Unlike
+   -- hr_core_* above, this port lives in the core's OWN clock domain
+   -- (main_clk, 84 MHz) because framework.vhd clocks the controller from
+   -- main_clk_i - so nothing on this path needs a CDC. See
+   -- .research/milestone5-sdram-design.md.
+   sdram_core_write_o         : out std_logic;
+   sdram_core_read_o          : out std_logic;
+   sdram_core_address_o       : out std_logic_vector(31 downto 0);
+   sdram_core_writedata_o     : out std_logic_vector(15 downto 0);
+   sdram_core_byteenable_o    : out std_logic_vector( 1 downto 0);
+   sdram_core_burstcount_o    : out std_logic_vector( 7 downto 0);
+   sdram_core_readdata_i      : in  std_logic_vector(15 downto 0);
+   sdram_core_readdatavalid_i : in  std_logic;
+   sdram_core_waitrequest_i   : in  std_logic;
    hr_high_i               : in  std_logic;  -- Core is too fast
    hr_low_i                : in  std_logic;  -- Core is too slow
 
@@ -459,17 +474,9 @@ signal qlsdbuf_avm_readdata      : std_logic_vector(15 downto 0);
 signal qlsdbuf_avm_readdatavalid : std_logic;
 signal qlsdbuf_avm_waitrequest   : std_logic;
 
--- i_qlsd_buf_cdc's master output, hr_clk_i domain - the QL-SD side of the
--- new i_avm_arbit_hr below.
-signal qlsdbuf_hr_avm_write         : std_logic;
-signal qlsdbuf_hr_avm_read          : std_logic;
-signal qlsdbuf_hr_avm_address       : std_logic_vector(31 downto 0);
-signal qlsdbuf_hr_avm_writedata     : std_logic_vector(15 downto 0);
-signal qlsdbuf_hr_avm_byteenable    : std_logic_vector(1 downto 0);
-signal qlsdbuf_hr_avm_burstcount    : std_logic_vector(7 downto 0);
-signal qlsdbuf_hr_avm_readdata      : std_logic_vector(15 downto 0);
-signal qlsdbuf_hr_avm_readdatavalid : std_logic;
-signal qlsdbuf_hr_avm_waitrequest   : std_logic;
+-- QL4M65 Milestone 5 (M5001): the qlsdbuf_hr_avm_* signals that used to sit
+-- between i_qlsd_buf_cdc and i_avm_arbit_hr are gone along with that
+-- arbiter - i_qlsd_buf_cdc's master side now drives sdram_core_* directly.
 
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
@@ -577,16 +584,19 @@ begin
    ---------------------------------------------------------------------------------------------
    -- QL4M65 Milestone 4 (QL-SD, paso 1, M4001): QL-SD mount buffer, the
    -- whole-image RAM the QNICE Shell firmware requires (shell.asm's
-   -- HANDLE_DRV_RD), backed by HyperRAM via the framework's own unmodified
-   -- qnice2hyperram.vhd + avm_fifo.vhd. Byte-window packing: qnice_dev_addr_i
-   -- addresses ONE FILE BYTE per QNICE address (bit 0 selects even/odd byte
-   -- within a 16-bit HyperRAM word), same technique as AExp's
-   -- adf_mount_wrapper.vhd.
+   -- HANDLE_DRV_RD). Byte-window packing: qnice_dev_addr_i addresses ONE
+   -- FILE BYTE per QNICE address (bit 0 selects even/odd byte within a
+   -- 16-bit word), same technique as AExp's adf_mount_wrapper.vhd.
+   --
+   -- QL4M65 Milestone 5 (M5001): moved from HyperRAM to SDRAM. The bridge
+   -- itself (qnice2hyperram.vhd) is unchanged and despite its name is just
+   -- a QNICE-to-Avalon adapter, so it does not care which controller sits
+   -- at the far end. What changes is the base address: in HyperRAM this
+   -- buffer had to be placed after mdv1/mdv2 (C_HMAP_QLSD), whereas SDRAM
+   -- is completely empty and 64 MB large, so it simply starts at 0.
    ---------------------------------------------------------------------------------------------
 
-   qlsdbuf_hr_addr <= std_logic_vector(
-      resize(unsigned(std_logic_vector'(C_HMAP_QLSD(9 downto 0) & x"000")), 32) +
-      resize(unsigned(qnice_dev_addr_i(27 downto 1)), 32));
+   qlsdbuf_hr_addr <= std_logic_vector(resize(unsigned(qnice_dev_addr_i(27 downto 1)), 32));
 
    qlsdbuf_hr_byteenable <= "01" when qnice_dev_addr_i(0) = '0' else "10";
    qlsdbuf_hr_writedata  <= qnice_dev_data_i(7 downto 0) & qnice_dev_data_i(7 downto 0);
@@ -640,70 +650,39 @@ begin
          s_avm_burstcount_i    => qlsdbuf_avm_burstcount,
          s_avm_readdata_o      => qlsdbuf_avm_readdata,
          s_avm_readdatavalid_o => qlsdbuf_avm_readdatavalid,
-         m_clk_i               => hr_clk_i,
-         m_rst_i               => hr_rst_i,
-         m_avm_waitrequest_i   => qlsdbuf_hr_avm_waitrequest,
-         m_avm_write_o         => qlsdbuf_hr_avm_write,
-         m_avm_read_o          => qlsdbuf_hr_avm_read,
-         m_avm_address_o       => qlsdbuf_hr_avm_address,
-         m_avm_writedata_o     => qlsdbuf_hr_avm_writedata,
-         m_avm_byteenable_o    => qlsdbuf_hr_avm_byteenable,
-         m_avm_burstcount_o    => qlsdbuf_hr_avm_burstcount,
-         m_avm_readdata_i      => qlsdbuf_hr_avm_readdata,
-         m_avm_readdatavalid_i => qlsdbuf_hr_avm_readdatavalid
+         -- QL4M65 Milestone 5 (M5001): the master side of this CDC used to
+         -- land in hr_clk_i and feed i_avm_arbit_hr. It now lands in
+         -- main_clk and goes STRAIGHT to the SDRAM controller - the QL-SD
+         -- mount buffer is SDRAM's only client in this milestone, so no
+         -- arbiter is needed, and moving it off HyperRAM also gives mdv1/mdv2
+         -- the whole HyperRAM back.
+         m_clk_i               => main_clk,
+         m_rst_i               => main_rst,
+         m_avm_waitrequest_i   => sdram_core_waitrequest_i,
+         m_avm_write_o         => sdram_core_write_o,
+         m_avm_read_o          => sdram_core_read_o,
+         m_avm_address_o       => sdram_core_address_o,
+         m_avm_writedata_o     => sdram_core_writedata_o,
+         m_avm_byteenable_o    => sdram_core_byteenable_o,
+         m_avm_burstcount_o    => sdram_core_burstcount_o,
+         m_avm_readdata_i      => sdram_core_readdata_i,
+         m_avm_readdatavalid_i => sdram_core_readdatavalid_i
       ); -- i_qlsd_buf_cdc
 
-   -- QL4M65 Milestone 4 (QL-SD, paso 1, M4001): second HyperRAM arbiter,
-   -- this one in hr_clk_i domain, combining mdv1/mdv2's already-CDC'd
-   -- stream (main_mdv_hr_avm_*, from i_avm_fifo_mdv1 above) with QL-SD's
-   -- own already-CDC'd stream (qlsdbuf_hr_avm_*, from i_qlsd_buf_cdc
-   -- above) - unlike i_avm_arbit_mdv (arbitrates BEFORE the CDC, since
-   -- mdv1/mdv2 share one source clock domain), this one has to arbitrate
-   -- AFTER each master's own CDC, since mdv1/mdv2 (main_clk) and QL-SD
-   -- (qnice_clk) start in genuinely different clock domains and can only
-   -- be combined once both already live in hr_clk_i. Its combined output
-   -- is what actually reaches hr_core_* now - framework.vhd/the HyperRAM
-   -- pblock are untouched by this (see doc/m2m/exceptions.md).
-   i_avm_arbit_hr : entity work.avm_arbit
-      generic map (
-         G_PREFER_SWAP  => false,  -- arbitrary, same as i_avm_arbit_mdv
-         G_ADDRESS_SIZE => 32,
-         G_DATA_SIZE    => 16
-      )
-      port map (
-         clk_i                  => hr_clk_i,
-         rst_i                  => hr_rst_i,
-
-         s0_avm_write_i         => main_mdv_hr_avm_write,
-         s0_avm_read_i          => main_mdv_hr_avm_read,
-         s0_avm_address_i       => main_mdv_hr_avm_address,
-         s0_avm_writedata_i     => main_mdv_hr_avm_writedata,
-         s0_avm_byteenable_i    => main_mdv_hr_avm_byteenable,
-         s0_avm_burstcount_i    => main_mdv_hr_avm_burstcount,
-         s0_avm_readdata_o      => main_mdv_hr_avm_readdata,
-         s0_avm_readdatavalid_o => main_mdv_hr_avm_readdatavalid,
-         s0_avm_waitrequest_o   => main_mdv_hr_avm_waitrequest,
-
-         s1_avm_write_i         => qlsdbuf_hr_avm_write,
-         s1_avm_read_i          => qlsdbuf_hr_avm_read,
-         s1_avm_address_i       => qlsdbuf_hr_avm_address,
-         s1_avm_writedata_i     => qlsdbuf_hr_avm_writedata,
-         s1_avm_byteenable_i    => qlsdbuf_hr_avm_byteenable,
-         s1_avm_burstcount_i    => qlsdbuf_hr_avm_burstcount,
-         s1_avm_readdata_o      => qlsdbuf_hr_avm_readdata,
-         s1_avm_readdatavalid_o => qlsdbuf_hr_avm_readdatavalid,
-         s1_avm_waitrequest_o   => qlsdbuf_hr_avm_waitrequest,
-
-         m_avm_write_o          => hr_core_write_o,
-         m_avm_read_o           => hr_core_read_o,
-         m_avm_address_o        => hr_core_address_o,
-         m_avm_writedata_o      => hr_core_writedata_o,
-         m_avm_byteenable_o     => hr_core_byteenable_o,
-         m_avm_burstcount_o     => hr_core_burstcount_o,
-         m_avm_readdata_i       => hr_core_readdata_i,
-         m_avm_readdatavalid_i  => hr_core_readdatavalid_i,
-         m_avm_waitrequest_i    => hr_core_waitrequest_i
-      ); -- i_avm_arbit_hr
+   -- QL4M65 Milestone 5 (M5001): i_avm_arbit_hr is GONE. It existed only to
+   -- share HyperRAM between mdv1/mdv2 and the QL-SD mount buffer (added in
+   -- M4001); now that the mount buffer lives in SDRAM, mdv1/mdv2 are once
+   -- again HyperRAM's only client from this core and i_avm_fifo_mdv1's
+   -- output goes straight to hr_core_*, exactly as it did before M4001.
+   hr_core_write_o                 <= main_mdv_hr_avm_write;
+   hr_core_read_o                  <= main_mdv_hr_avm_read;
+   hr_core_address_o               <= main_mdv_hr_avm_address;
+   hr_core_writedata_o             <= main_mdv_hr_avm_writedata;
+   hr_core_byteenable_o            <= main_mdv_hr_avm_byteenable;
+   hr_core_burstcount_o            <= main_mdv_hr_avm_burstcount;
+   main_mdv_hr_avm_readdata        <= hr_core_readdata_i;
+   main_mdv_hr_avm_readdatavalid   <= hr_core_readdatavalid_i;
+   main_mdv_hr_avm_waitrequest     <= hr_core_waitrequest_i;
 
    -- Tristate all expansion port drivers that we can directly control
    -- @TODO: As soon as we support modules that can act as busmaster, we need to become more flexible here

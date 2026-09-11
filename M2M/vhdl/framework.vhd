@@ -103,6 +103,43 @@ port (
    hr_clk_p_o              : out   std_logic;
    hr_cs0_o                : out   std_logic;
 
+   -- QL4M65 Milestone 5 (M5001): built-in SDRAM - 32M x 16 bit, R4/R5/R6 only
+   -- (U44 = IS42S16320F-6BL, 64 MB). Absent on R3, so every port here has a
+   -- default and top_mega65-r3.vhd can simply not connect them - that top
+   -- level is untouched by this milestone until M5004.
+   --
+   -- The controller is MJoergen's (github.com/MJoergen/SDRAM, going into M2M
+   -- V2.1.0, copy taken from C64MEGA65's develop branch) but is clocked here
+   -- from main_clk_i, NOT from a controller clock of its own. Its timing
+   -- constants derive from G_CLOCK_SPEED_MHZ, so 84 MHz is as valid as the
+   -- 100 MHz the C64 uses, and running it in the CPU's own clock domain
+   -- removes the clock-domain crossing entirely - which is the property the
+   -- original MiSTer QL core relies on (QL.sv ties its own sdram.sv to
+   -- clk_sys). See .research/milestone5-sdram-design.md.
+   sdram_clk_o             : out   std_logic;
+   sdram_cke_o             : out   std_logic;
+   sdram_ras_n_o           : out   std_logic;
+   sdram_cas_n_o           : out   std_logic;
+   sdram_we_n_o            : out   std_logic;
+   sdram_cs_n_o            : out   std_logic;
+   sdram_ba_o              : out   std_logic_vector(1 downto 0);
+   sdram_a_o               : out   std_logic_vector(12 downto 0);
+   sdram_dqml_o            : out   std_logic;
+   sdram_dqmh_o            : out   std_logic;
+   sdram_dq_io             : inout std_logic_vector(15 downto 0);
+
+   -- SDRAM, core-facing Avalon-MM port - main_clk_i domain (see above),
+   -- exactly mirroring hr_core_* below except for the clock it lives in.
+   sdram_core_write_i         : in    std_logic := '0';
+   sdram_core_read_i          : in    std_logic := '0';
+   sdram_core_address_i       : in    std_logic_vector(31 downto 0) := (others => '0');
+   sdram_core_writedata_i     : in    std_logic_vector(15 downto 0) := (others => '0');
+   sdram_core_byteenable_i    : in    std_logic_vector(1 downto 0) := (others => '0');
+   sdram_core_burstcount_i    : in    std_logic_vector(7 downto 0) := X"01";
+   sdram_core_readdata_o      : out   std_logic_vector(15 downto 0);
+   sdram_core_readdatavalid_o : out   std_logic;
+   sdram_core_waitrequest_o   : out   std_logic;
+
    -- Connect to CORE
    qnice_clk_o             : out   std_logic;
    qnice_rst_o             : out   std_logic;
@@ -259,6 +296,12 @@ signal video_mode : video_modes_t;
 ---------------------------------------------------------------------------------------------
 
 signal qnice_clk              : std_logic;               -- QNICE main clock @ 50 MHz
+-- QL4M65 Milestone 5 (M5001): tristate plumbing for the SDRAM data bus -
+-- the controller exposes separate in/out/output-enable, see i_sdram below.
+signal sdram_dq_in            : std_logic_vector(15 downto 0);
+signal sdram_dq_out           : std_logic_vector(15 downto 0);
+signal sdram_dq_oe_n          : std_logic_vector(15 downto 0);
+
 signal hr_clk                 : std_logic;               -- HyperRAM @ 100 MHz
 signal hr_clk_del             : std_logic;               -- HyperRAM @ 100 MHz phase delayed
 signal hr_delay_refclk        : std_logic;               -- HyperRAM @ 200 MHz
@@ -717,6 +760,76 @@ begin
          m_avm_readdatavalid_i => hr_readdatavalid,
          m_avm_waitrequest_i   => hr_waitrequest
       ); -- i_avm_arbit_general
+
+
+   ---------------------------------------------------------------------------------------------------------------
+   -- QL4M65 Milestone 5 (M5001): SDRAM controller
+   --
+   -- MJoergen's controller (github.com/MJoergen/SDRAM), copied from
+   -- C64MEGA65's develop branch where it is being silently tested ahead of
+   -- M2M V2.1.0. Two deliberate differences from how the C64 wires it:
+   --
+   --  * It runs from main_clk_i (84 MHz here), not from a controller clock of
+   --    its own. G_CLOCK_SPEED_MHZ is a required generic and every timing
+   --    constant derives from it (C_TIME_INIT_POWER_ON := 102 *
+   --    G_CLOCK_SPEED_MHZ, C_TIME_REFRESH := G_CLOCK_SPEED_MHZ * 1000 * 64 /
+   --    8192 - 12), so 84 is as legal as the C64's 100. Running it in the
+   --    CPU's own domain means no clock-domain crossing on the path that will
+   --    eventually carry main RAM - which is exactly what the original MiSTer
+   --    QL core relies on, since QL.sv ties its own sdram.sv to clk_sys.
+   --
+   --  * It has a single master here (the core), not a shared arbiter. The
+   --    ascaler stays on HyperRAM in this milestone; only the QL-SD mount
+   --    buffer moves to SDRAM, as the acceptance test for the controller.
+   --
+   -- On R3 there is no SDRAM device at all. This instance is still built
+   -- there (framework.vhd is shared), but its pins go nowhere because
+   -- top_mega65-r3.vhd does not connect them - see the port declarations.
+   -- M5004 will make that conditional properly.
+   ---------------------------------------------------------------------------------------------------------------
+
+   i_sdram : entity work.sdram
+      generic map (
+         G_CLOCK_SPEED_MHZ => 84      -- main_clk_i, the QL core's master clock
+      )
+      port map (
+         clk_i               => main_clk_i,
+         rst_i               => main_rst_i,
+
+         avm_waitrequest_o   => sdram_core_waitrequest_o,
+         avm_write_i         => sdram_core_write_i,
+         avm_read_i          => sdram_core_read_i,
+         avm_address_i       => sdram_core_address_i,
+         avm_writedata_i     => sdram_core_writedata_i,
+         avm_byteenable_i    => sdram_core_byteenable_i,
+         avm_burstcount_i    => sdram_core_burstcount_i,
+         avm_readdata_o      => sdram_core_readdata_o,
+         avm_readdatavalid_o => sdram_core_readdatavalid_o,
+
+         sdram_a_o           => sdram_a_o,
+         sdram_ba_o          => sdram_ba_o,
+         sdram_cas_n_o       => sdram_cas_n_o,
+         sdram_cke_o         => sdram_cke_o,
+         sdram_clk_o         => sdram_clk_o,
+         sdram_cs_n_o        => sdram_cs_n_o,
+         sdram_dq_in_i       => sdram_dq_in,
+         sdram_dqmh_o        => sdram_dqmh_o,
+         sdram_dqml_o        => sdram_dqml_o,
+         sdram_dq_oe_n_o     => sdram_dq_oe_n,
+         sdram_dq_out_o      => sdram_dq_out,
+         sdram_ras_n_o       => sdram_ras_n_o,
+         sdram_we_n_o        => sdram_we_n_o
+      ); -- i_sdram
+
+   -- Tristate driver for the bidirectional data bus, same shape C64MEGA65's
+   -- develop branch uses - the controller exposes separate in/out/oe rather
+   -- than an inout, so the buffer is built here.
+   sdram_dq_gen : for i in sdram_dq_io'range generate
+      sdram_dq_io(i) <= sdram_dq_out(i) when sdram_dq_oe_n(i) = '0' else
+                        'Z';
+   end generate sdram_dq_gen;
+
+   sdram_dq_in <= sdram_dq_io;
 
 
    ---------------------------------------------------------------------------------------------------------------

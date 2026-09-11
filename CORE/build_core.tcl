@@ -48,6 +48,22 @@ add_files -norecurse -fileset sources_1 [list \
 ]
 set_property file_type {VHDL 2008} [get_files "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/qnice_csr.vhd"]
 
+# QL4M65 Milestone 5 (M5001): MJoergen's SDRAM controller, copied from
+# C64MEGA65's develop branch (where it is being silently tested ahead of M2M
+# V2.1.0). Self-contained - one file, only ieee + unisim (for the ODDR).
+# Needs VHDL2008 for ieee.numeric_std_unsigned. Clocked from main_clk_i at
+# 84 MHz, see framework.vhd's i_sdram and
+# .research/milestone5-sdram-design.md.
+# axi_fifo_small.vhd was already sitting in M2M/vhdl unused - sdram.vhd is the
+# first thing in this project to instantiate it, so it has to join the file
+# list too. Byte-identical to C64MEGA65 develop's copy, no changes needed.
+add_files -norecurse -fileset sources_1 [list \
+    "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/controllers/SDRAM/sdram.vhd" \
+    "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/axi_fifo_small.vhd" \
+]
+set_property file_type {VHDL 2008} [get_files "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/controllers/SDRAM/sdram.vhd"]
+set_property file_type {VHDL 2008} [get_files "E:/QL_MEGA65/Fase0/CoreQL/M2M/vhdl/axi_fifo_small.vhd"]
+
 add_files -norecurse -fileset sources_1 [list \
     "$core_ql_dir/rtl/fx68k/fx68k.sv" \
     "$core_ql_dir/rtl/fx68k/fx68kAlu.sv" \
