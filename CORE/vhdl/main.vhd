@@ -207,7 +207,22 @@ entity main is
       qnice_qlsd_data_i       : in  std_logic_vector(15 downto 0);
       qnice_qlsd_data_o       : out std_logic_vector(15 downto 0);
       qnice_qlsd_ce_i         : in  std_logic;
-      qnice_qlsd_we_i         : in  std_logic
+      qnice_qlsd_we_i         : in  std_logic;
+
+      -- QL4M65 Milestone 5 (M5002): main RAM's Avalon-MM master towards the
+      -- SDRAM controller. Same clock domain as everything else here
+      -- (framework.vhd clocks i_sdram from main_clk_i), so no CDC - which is
+      -- the whole point of running the controller at 84 MHz. mega65.vhd
+      -- arbitrates this against the QL-SD mount buffer before the controller.
+      sdram_avm_write_o         : out std_logic;
+      sdram_avm_read_o          : out std_logic;
+      sdram_avm_address_o       : out std_logic_vector(31 downto 0);
+      sdram_avm_writedata_o     : out std_logic_vector(15 downto 0);
+      sdram_avm_byteenable_o    : out std_logic_vector( 1 downto 0);
+      sdram_avm_burstcount_o    : out std_logic_vector( 7 downto 0);
+      sdram_avm_readdata_i      : in  std_logic_vector(15 downto 0);
+      sdram_avm_readdatavalid_i : in  std_logic;
+      sdram_avm_waitrequest_i   : in  std_logic
    );
 end entity main;
 
@@ -285,18 +300,16 @@ signal cpu_speed_sel : std_logic_vector(1 downto 0) := "00";
 -- (below, same shape used everywhere else in this file) sidesteps it.
 signal ql_timing_enable : std_logic;
 
-signal ram_q_a      : std_logic_vector(15 downto 0);  -- main RAM read data (bank mux output)
+signal ram_q_a      : std_logic_vector(15 downto 0);  -- main RAM read data
 
--- QL4M65 M4010 (2026-09-09): main RAM is split into two exactly-sized
--- banks - see the i_main_ram_lo/i_main_ram_hi comment further down.
--- ram_woff is the CPU word address rebased to $020000 (so offset 0 is the
--- first word of RAM), 19 bits wide; only offsets 0..$4FFFF are reachable
--- because cpu_ram's own decode stops at $0BFFFF.
-signal ram_woff       : std_logic_vector(18 downto 0);
-signal ram_bank_hi    : std_logic;                       -- '1' => top 128k bank
-signal ram_bank_hi_r  : std_logic := '0';                -- delayed 1 cycle to match BRAM read latency
-signal ram_q_lo       : std_logic_vector(15 downto 0);
-signal ram_q_hi       : std_logic_vector(15 downto 0);
+-- QL4M65 Milestone 5 (M5002): main RAM moved from BRAM to SDRAM. The two
+-- exactly-sized BRAM banks of M4010 (i_main_ram_lo/i_main_ram_hi, 2**18 +
+-- 2**16 words) are gone, and with them ~160 RAMB36 tiles; i_main_ram is now
+-- ql_sdram_ram.vhd, an Avalon master. sdram_dtack is the wait-state
+-- handshake that BRAM never needed - see that file's header and
+-- .research/milestone5-sdram-design.md.
+signal ram_addr24   : std_logic_vector(23 downto 0);  -- cpu_addr, zero-extended for ql_sdram_ram
+signal sdram_dtack  : std_logic;                      -- '1' = SDRAM has answered this access
 signal vram_q_b     : std_logic_vector(15 downto 0);  -- VRAM read data (video side)
 
 signal io_dout      : std_logic_vector(15 downto 0);
@@ -1005,7 +1018,22 @@ begin
    -- QL.sv:684-688) - same active-high "ready" convention as cpu_dtack, no
    -- polarity fix needed (confirmed by reading qlromext.v's own dtack
    -- process, unlike the IPL case in M1016/M1017).
-   cpu_dtack <= qlsd_dtack when qlsd_sel = '1' else not ram_delay_dtack;
+   -- QL4M65 Milestone 5 (M5002): main RAM now lives in SDRAM and can make the
+   -- CPU wait, so its own acknowledge has to be ANDed in. This is exactly
+   -- QL.sv:686-687's shape, which this port had simplified away when main RAM
+   -- was BRAM and therefore always ready:
+   --
+   --    rom_shadow_read || rom_shadow_write? sdram_dtack:
+   --    cpu_ram?                             sdram_dtack && !ram_delay_dtack:
+   --
+   -- (no rom_shadow here - this port never implemented it, see
+   -- .research/milestone5-sdram-design.md). Everything that is NOT main RAM
+   -- keeps the old unconditional behaviour: ROM and I/O answer in one cycle
+   -- from BRAM or from registers, and ram_delay_dtack is ZX8301 contention
+   -- emulation, not memory latency.
+   cpu_dtack <= qlsd_dtack                        when qlsd_sel = '1' else
+                sdram_dtack and not ram_delay_dtack when cpu_ram = '1'  else
+                not ram_delay_dtack;
 
    ql_rom_addr_o <= cpu_addr(15 downto 1);
 
@@ -1168,63 +1196,39 @@ begin
    -- ever reaches here.
    ---------------------------------------------------------------------------
 
-   ram_woff    <= std_logic_vector(unsigned(cpu_addr(19 downto 17)) - 1) & cpu_addr(16 downto 1);
-   ram_bank_hi <= ram_woff(18);
+   -- cpu_addr is already a 24-bit byte address (masked to x"1FFFFF" further
+   -- up), which is exactly what ql_sdram_ram takes.
+   ram_addr24 <= cpu_addr;
 
-   -- Both banks read with one cycle of latency (tdp_ram registers the
-   -- address, not the data), so the bank select feeding the output mux has
-   -- to be delayed by exactly the same one cycle - unconditionally, since
-   -- dualport_2clk_ram_byteenable exposes no clock enable.
-   p_ram_bank : process (clk_main_i)
-   begin
-      if rising_edge(clk_main_i) then
-         ram_bank_hi_r <= ram_bank_hi;
-      end if;
-   end process p_ram_bank;
-
-   ram_q_a <= ram_q_hi when ram_bank_hi_r = '1' else ram_q_lo;
-
-   i_main_ram_lo : entity work.dualport_2clk_ram_byteenable
+   i_main_ram : entity work.ql_sdram_ram
       generic map (
-         G_ADDR_WIDTH => 18,  -- 512k bytes = 256K words ($020000-$09FFFF)
-         G_DATA_WIDTH => 16
+         G_BASE_WORD => C_SDRAM_QLRAM_BASE_WORD
       )
       port map (
-         a_clk_i        => clk_main_i,
-         a_address_i    => ram_woff(17 downto 0),
-         a_data_i       => cpu_dout,
-         a_byteenable_i => cpu_uds & cpu_lds,
-         a_wren_i       => cpu_wr and cpu_ram and (not ram_bank_hi),
-         a_q_o          => ram_q_lo,
+         clk_i               => clk_main_i,
+         rst_i               => reset,
 
-         b_clk_i        => clk_main_i,
-         b_address_i    => (others => '0'),
-         b_data_i       => (others => '0'),
-         b_byteenable_i => (others => '0'),
-         b_wren_i       => '0',
-         b_q_o          => open
-      ); -- i_main_ram_lo
+         cpu_addr_i          => ram_addr24,
+         cpu_sel_i           => cpu_ram,
+         cpu_rd_i            => cpu_rd,
+         cpu_wr_i            => cpu_wr,
+         cpu_uds_i           => cpu_uds,
+         cpu_lds_i           => cpu_lds,
+         cpu_writedata_i     => cpu_dout,
+         cpu_readdata_o      => ram_q_a,
+         cpu_dtack_o         => sdram_dtack,
 
-   i_main_ram_hi : entity work.dualport_2clk_ram_byteenable
-      generic map (
-         G_ADDR_WIDTH => 16,  -- 128k bytes = 64K words ($0A0000-$0BFFFF)
-         G_DATA_WIDTH => 16
-      )
-      port map (
-         a_clk_i        => clk_main_i,
-         a_address_i    => ram_woff(15 downto 0),
-         a_data_i       => cpu_dout,
-         a_byteenable_i => cpu_uds & cpu_lds,
-         a_wren_i       => cpu_wr and cpu_ram and ram_bank_hi,
-         a_q_o          => ram_q_hi,
+         avm_write_o         => sdram_avm_write_o,
+         avm_read_o          => sdram_avm_read_o,
+         avm_address_o       => sdram_avm_address_o,
+         avm_writedata_o     => sdram_avm_writedata_o,
+         avm_byteenable_o    => sdram_avm_byteenable_o,
+         avm_burstcount_o    => sdram_avm_burstcount_o,
+         avm_readdata_i      => sdram_avm_readdata_i,
+         avm_readdatavalid_i => sdram_avm_readdatavalid_i,
+         avm_waitrequest_i   => sdram_avm_waitrequest_i
+      ); -- i_main_ram
 
-         b_clk_i        => clk_main_i,
-         b_address_i    => (others => '0'),
-         b_data_i       => (others => '0'),
-         b_byteenable_i => (others => '0'),
-         b_wren_i       => '0',
-         b_q_o          => open
-      ); -- i_main_ram_hi
 
    i_vram : entity work.dualport_2clk_ram_byteenable
       generic map (

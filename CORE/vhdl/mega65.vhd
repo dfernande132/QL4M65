@@ -474,9 +474,31 @@ signal qlsdbuf_avm_readdata      : std_logic_vector(15 downto 0);
 signal qlsdbuf_avm_readdatavalid : std_logic;
 signal qlsdbuf_avm_waitrequest   : std_logic;
 
--- QL4M65 Milestone 5 (M5001): the qlsdbuf_hr_avm_* signals that used to sit
--- between i_qlsd_buf_cdc and i_avm_arbit_hr are gone along with that
--- arbiter - i_qlsd_buf_cdc's master side now drives sdram_core_* directly.
+-- QL4M65 Milestone 5: the qlsdbuf_hr_avm_* signals that used to sit between
+-- i_qlsd_buf_cdc and the old HyperRAM arbiter are gone. These are their SDRAM
+-- equivalents (M5002) - i_qlsd_buf_cdc's master side into i_avm_arbit_sdram,
+-- all in main_clk.
+signal qlsdbuf_sd_avm_write         : std_logic;
+signal qlsdbuf_sd_avm_read          : std_logic;
+signal qlsdbuf_sd_avm_address       : std_logic_vector(31 downto 0);
+signal qlsdbuf_sd_avm_writedata     : std_logic_vector(15 downto 0);
+signal qlsdbuf_sd_avm_byteenable    : std_logic_vector(1 downto 0);
+signal qlsdbuf_sd_avm_burstcount    : std_logic_vector(7 downto 0);
+signal qlsdbuf_sd_avm_readdata      : std_logic_vector(15 downto 0);
+signal qlsdbuf_sd_avm_readdatavalid : std_logic;
+signal qlsdbuf_sd_avm_waitrequest   : std_logic;
+
+-- QL4M65 Milestone 5 (M5002): main.vhd's own SDRAM master - the QL's main
+-- RAM. The latency-critical side of i_avm_arbit_sdram.
+signal main_sdram_avm_write         : std_logic;
+signal main_sdram_avm_read          : std_logic;
+signal main_sdram_avm_address       : std_logic_vector(31 downto 0);
+signal main_sdram_avm_writedata     : std_logic_vector(15 downto 0);
+signal main_sdram_avm_byteenable    : std_logic_vector(1 downto 0);
+signal main_sdram_avm_burstcount    : std_logic_vector(7 downto 0);
+signal main_sdram_avm_readdata      : std_logic_vector(15 downto 0);
+signal main_sdram_avm_readdatavalid : std_logic;
+signal main_sdram_avm_waitrequest   : std_logic;
 
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
@@ -652,22 +674,73 @@ begin
          s_avm_readdatavalid_o => qlsdbuf_avm_readdatavalid,
          -- QL4M65 Milestone 5 (M5001): the master side of this CDC used to
          -- land in hr_clk_i and feed i_avm_arbit_hr. It now lands in
-         -- main_clk and goes STRAIGHT to the SDRAM controller - the QL-SD
-         -- mount buffer is SDRAM's only client in this milestone, so no
-         -- arbiter is needed, and moving it off HyperRAM also gives mdv1/mdv2
-         -- the whole HyperRAM back.
+         -- main_clk, on the way to the SDRAM controller. Moving it off
+         -- HyperRAM also gave mdv1/mdv2 the whole HyperRAM back.
+         -- M5002: it is no longer SDRAM's only client - main RAM joined it -
+         -- so it goes through i_avm_arbit_sdram below rather than straight
+         -- to sdram_core_*.
          m_clk_i               => main_clk,
          m_rst_i               => main_rst,
-         m_avm_waitrequest_i   => sdram_core_waitrequest_i,
-         m_avm_write_o         => sdram_core_write_o,
-         m_avm_read_o          => sdram_core_read_o,
-         m_avm_address_o       => sdram_core_address_o,
-         m_avm_writedata_o     => sdram_core_writedata_o,
-         m_avm_byteenable_o    => sdram_core_byteenable_o,
-         m_avm_burstcount_o    => sdram_core_burstcount_o,
-         m_avm_readdata_i      => sdram_core_readdata_i,
-         m_avm_readdatavalid_i => sdram_core_readdatavalid_i
+         m_avm_waitrequest_i   => qlsdbuf_sd_avm_waitrequest,
+         m_avm_write_o         => qlsdbuf_sd_avm_write,
+         m_avm_read_o          => qlsdbuf_sd_avm_read,
+         m_avm_address_o       => qlsdbuf_sd_avm_address,
+         m_avm_writedata_o     => qlsdbuf_sd_avm_writedata,
+         m_avm_byteenable_o    => qlsdbuf_sd_avm_byteenable,
+         m_avm_burstcount_o    => qlsdbuf_sd_avm_burstcount,
+         m_avm_readdata_i      => qlsdbuf_sd_avm_readdata,
+         m_avm_readdatavalid_i => qlsdbuf_sd_avm_readdatavalid
       ); -- i_qlsd_buf_cdc
+
+   -- QL4M65 Milestone 5 (M5002): SDRAM arbiter. Two masters, both already in
+   -- main_clk, so this arbitrates BEFORE any crossing - the same shape as
+   -- i_avm_arbit_mdv above and, unlike the M4001-M5001 HyperRAM arbiter that
+   -- this replaces, with no CDC involved at all on either side.
+   --
+   -- s0 is the CPU's main RAM: it is the latency-critical master, since every
+   -- cycle it waits is a 68008 wait state. s1 is the QL-SD mount buffer,
+   -- which is bulk QNICE traffic and entirely latency-tolerant - it only ever
+   -- runs while an image is being mounted, which already takes seconds.
+   i_avm_arbit_sdram : entity work.avm_arbit
+      generic map (
+         G_PREFER_SWAP  => false,
+         G_ADDRESS_SIZE => 32,
+         G_DATA_SIZE    => 16
+      )
+      port map (
+         clk_i                  => main_clk,
+         rst_i                  => main_rst,
+
+         s0_avm_write_i         => main_sdram_avm_write,
+         s0_avm_read_i          => main_sdram_avm_read,
+         s0_avm_address_i       => main_sdram_avm_address,
+         s0_avm_writedata_i     => main_sdram_avm_writedata,
+         s0_avm_byteenable_i    => main_sdram_avm_byteenable,
+         s0_avm_burstcount_i    => main_sdram_avm_burstcount,
+         s0_avm_readdata_o      => main_sdram_avm_readdata,
+         s0_avm_readdatavalid_o => main_sdram_avm_readdatavalid,
+         s0_avm_waitrequest_o   => main_sdram_avm_waitrequest,
+
+         s1_avm_write_i         => qlsdbuf_sd_avm_write,
+         s1_avm_read_i          => qlsdbuf_sd_avm_read,
+         s1_avm_address_i       => qlsdbuf_sd_avm_address,
+         s1_avm_writedata_i     => qlsdbuf_sd_avm_writedata,
+         s1_avm_byteenable_i    => qlsdbuf_sd_avm_byteenable,
+         s1_avm_burstcount_i    => qlsdbuf_sd_avm_burstcount,
+         s1_avm_readdata_o      => qlsdbuf_sd_avm_readdata,
+         s1_avm_readdatavalid_o => qlsdbuf_sd_avm_readdatavalid,
+         s1_avm_waitrequest_o   => qlsdbuf_sd_avm_waitrequest,
+
+         m_avm_write_o          => sdram_core_write_o,
+         m_avm_read_o           => sdram_core_read_o,
+         m_avm_address_o        => sdram_core_address_o,
+         m_avm_writedata_o      => sdram_core_writedata_o,
+         m_avm_byteenable_o     => sdram_core_byteenable_o,
+         m_avm_burstcount_o     => sdram_core_burstcount_o,
+         m_avm_readdata_i       => sdram_core_readdata_i,
+         m_avm_readdatavalid_i  => sdram_core_readdatavalid_i,
+         m_avm_waitrequest_i    => sdram_core_waitrequest_i
+      ); -- i_avm_arbit_sdram
 
    -- QL4M65 Milestone 5 (M5001): i_avm_arbit_hr is GONE. It existed only to
    -- share HyperRAM between mdv1/mdv2 and the QL-SD mount buffer (added in
@@ -883,7 +956,19 @@ begin
          qnice_qlsd_data_i        => qnice_dev_data_i,
          qnice_qlsd_data_o        => qnice_qlsd_data_o,
          qnice_qlsd_ce_i          => qnice_qlsd_ce,
-         qnice_qlsd_we_i          => qnice_qlsd_we
+         qnice_qlsd_we_i          => qnice_qlsd_we,
+
+         -- QL4M65 Milestone 5 (M5002): main RAM's own SDRAM master, into
+         -- i_avm_arbit_sdram. main_clk on both sides, no CDC.
+         sdram_avm_write_o         => main_sdram_avm_write,
+         sdram_avm_read_o          => main_sdram_avm_read,
+         sdram_avm_address_o       => main_sdram_avm_address,
+         sdram_avm_writedata_o     => main_sdram_avm_writedata,
+         sdram_avm_byteenable_o    => main_sdram_avm_byteenable,
+         sdram_avm_burstcount_o    => main_sdram_avm_burstcount,
+         sdram_avm_readdata_i      => main_sdram_avm_readdata,
+         sdram_avm_readdatavalid_i => main_sdram_avm_readdatavalid,
+         sdram_avm_waitrequest_i   => main_sdram_avm_waitrequest
       ); -- i_main
 
    ---------------------------------------------------------------------------------------------

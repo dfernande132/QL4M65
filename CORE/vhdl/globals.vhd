@@ -155,6 +155,24 @@ constant C_HMAP_QLSD_SIZE_4KW   : natural := 128;                -- 1MB exact, b
 -- story. Main RAM (128k/640k since M4010, selectable from the Options menu) is
 -- BRAM again, main.vhd/mega65.vhd - no HyperRAM window needed for it.
 
+----------------------------------------------------------------------------------------------------------
+-- SDRAM map (Milestone 5) - MEGA65 R4/R5/R6 only, 64 MB = 2**25 words
+----------------------------------------------------------------------------------------------------------
+
+-- QL4M65 Milestone 5: unlike HyperRAM, which is shared with mdv1/mdv2 and had
+-- to be carved up in 8 KB blocks (C_HMAP_* above), SDRAM is a whole empty
+-- 64 MB device with only two clients, so the map is deliberately coarse and
+-- generous - there is no reason to pack anything tightly here.
+--
+--   word 0x0000000 .. 0x03FFFFF   (8 MB)  QL-SD mount buffer (M5001)
+--   word 0x0400000 .. 0x05FFFFF   (4 MB)  QL main RAM (M5002)
+--
+-- Main RAM is mapped WITHOUT subtracting the QL's own $020000 base, so the
+-- first 128 KB of its window is simply never addressed - see
+-- ql_sdram_ram.vhd's header for why that trade is worth it here and was not
+-- in BRAM. 4 MB covers the original core's largest tier (QL.sv's cpu_ram4k).
+constant C_SDRAM_QLRAM_BASE_WORD : natural := 16#400000#;
+
 -- QL4M65 Milestone 3, Fase 1 (2026-08-24): RAM-size Options menu radio
 -- group (config.vhd's OPTM_G_RAMSIZE, lines 8-9 of OPTM_ITEMS) - flat
 -- line indices read from osm_control_i by main.vhd's own ram_size_sel

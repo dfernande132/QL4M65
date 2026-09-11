@@ -152,6 +152,7 @@ add_files -norecurse -fileset sources_1 [list \
     "$core_ql_dir/rtl/qlromext.v" \
     "$core_ql_dir/sys/sd_card.sv" \
     "$core_vhdl_dir/sd_card_wrap.v" \
+    "$core_vhdl_dir/ql_sdram_ram.vhd" \
 ]
 
 update_compile_order -fileset sources_1
