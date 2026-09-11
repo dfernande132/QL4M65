@@ -185,18 +185,24 @@ constant C_SDRAM_QLRAM_BASE_WORD : natural := 16#400000#;
 -- and both already share this package.
 -- M4010 (2026-09-09): C_MENU_RAM_1024 removed and every index below it
 -- shifted down by one - the 1024k tier cost 96 RAMB36 tiles it could not
--- afford once sd_card.sv was really in the design (see main.vhd's
--- i_main_ram_lo/i_main_ram_hi comment and DECISIONES.md M4010).
+-- afford once sd_card.sv was really in the design.
+-- M5003 (2026-09-11): 1024k is BACK and 4096k joins it, because main RAM no
+-- longer lives in BRAM at all - it is in SDRAM (main.vhd's i_main_ram, now
+-- ql_sdram_ram.vhd), where 4 MB costs nothing scarce. 4096k is the original
+-- MiSTer core's own largest tier (QL.sv's cpu_ram4k). Every index from 10
+-- onwards moves up by two again.
 constant C_MENU_RAM_128       : natural := 8;
 constant C_MENU_RAM_640       : natural := 9;
+constant C_MENU_RAM_1024      : natural := 10;
+constant C_MENU_RAM_4096      : natural := 11;
 
 -- QL4M65 Milestone 3 (2026-08-24): CPU speed Options menu radio group
--- (config.vhd's OPTM_G_SPEED, lines 12-15 of OPTM_ITEMS) - same convention
+-- (config.vhd's OPTM_G_SPEED, lines 14-17 of OPTM_ITEMS) - same convention
 -- as C_MENU_RAM_* above, consumed by main.vhd's cpu_speed_sel latch.
-constant C_MENU_SPEED_NATIVE  : natural := 12;
-constant C_MENU_SPEED_16      : natural := 13;
-constant C_MENU_SPEED_24      : natural := 14;
-constant C_MENU_SPEED_FULL    : natural := 15;
+constant C_MENU_SPEED_NATIVE  : natural := 14;
+constant C_MENU_SPEED_16      : natural := 15;
+constant C_MENU_SPEED_24      : natural := 16;
+constant C_MENU_SPEED_FULL    : natural := 17;
 
 ----------------------------------------------------------------------------------------------------------
 -- Virtual Drive Management System

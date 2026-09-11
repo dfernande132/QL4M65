@@ -893,7 +893,11 @@ begin
    begin
       if rising_edge(clk_main_i) then
          if reset = '1' then
-            if osm_control_i(C_MENU_RAM_640) = '1' then
+            if osm_control_i(C_MENU_RAM_4096) = '1' then
+               ram_size_sel <= "11";
+            elsif osm_control_i(C_MENU_RAM_1024) = '1' then
+               ram_size_sel <= "10";
+            elsif osm_control_i(C_MENU_RAM_640) = '1' then
                ram_size_sel <= "01";
             else
                ram_size_sel <= "00";
@@ -954,13 +958,15 @@ begin
 
    -- QL4M65 Milestone 3, Fase 1: widened from x"03FFFF" (18 bits, 256k -
    -- Milestone 1's fixed 128k RAM scope) to x"1FFFFF" (21 bits, 2MB) to
-   -- cover the largest tier's own top address (M4010: $0BFFFF, 640k -
-   -- was $11FFFF while the 1024k tier existed). Safe for the
+   -- cover the largest tier's own top address. M4010 narrowed this to
+   -- x"1FFFFF" when 640k ($0BFFFF) became the ceiling; M5003 widens it to
+   -- x"7FFFFF" (23 bits, 8MB) because the 4096k tier reaches $41FFFF now
+   -- that main RAM lives in SDRAM. Safe for the
    -- smaller regions (ROM $000000-$00FFFF, I/O $018000-$01BFFF): widening
    -- this mask only changes behaviour for addresses that have bits set
    -- ABOVE the old 18-bit boundary, which ROM/IO addresses never do -
    -- their own decode below is completely unaffected by the mask's width.
-   cpu_addr <= (cpu_addr16 & ((not cpu_uds) and cpu_lds)) and x"1FFFFF";
+   cpu_addr <= (cpu_addr16 & ((not cpu_uds) and cpu_lds)) and x"7FFFFF";
 
    cpu_rd <= cpu_as and cpu_rw and (cpu_uds or cpu_lds);
    cpu_wr <= cpu_as and (not cpu_rw) and (cpu_uds or cpu_lds);
@@ -979,9 +985,15 @@ begin
    -- reason about while still satisfying Minerva's own RAM-size probe
    -- (which just walks upward from $020000 until it stops seeing real
    -- memory - contiguous or gapped, it can't tell the difference).
+   -- M5003: 1024k is back and 4096k is new, now that main RAM is in SDRAM
+   -- (64 MB) rather than BRAM. Still one contiguous region from $020000, so
+   -- 4096k tops out at $41FFFF - which is why cpu_addr's mask had to widen
+   -- to 23 bits, see its own comment above.
    cpu_ram <= '1' when unsigned(cpu_addr) >= x"020000" and
-                        ((ram_size_sel = "00" and unsigned(cpu_addr) <= x"03FFFF") or  -- 128k: $020000-$03FFFF
-                         (ram_size_sel = "01" and unsigned(cpu_addr) <= x"0BFFFF"))    -- 640k: $020000-$0BFFFF
+                        ((ram_size_sel = "00" and unsigned(cpu_addr) <= x"03FFFF") or  -- 128k:  $020000-$03FFFF
+                         (ram_size_sel = "01" and unsigned(cpu_addr) <= x"0BFFFF") or  -- 640k:  $020000-$0BFFFF
+                         (ram_size_sel = "10" and unsigned(cpu_addr) <= x"11FFFF") or  -- 1024k: $020000-$11FFFF
+                         (ram_size_sel = "11" and unsigned(cpu_addr) <= x"41FFFF"))    -- 4096k: $020000-$41FFFF
               else '0';
    cpu_vram_wr <= '1' when unsigned(cpu_addr) >= x"020000" and unsigned(cpu_addr) <= x"02FFFF" else '0';
 
@@ -1217,6 +1229,11 @@ begin
          cpu_writedata_i     => cpu_dout,
          cpu_readdata_o      => ram_q_a,
          cpu_dtack_o         => sdram_dtack,
+         -- M5003: sticky watchdog marker. Left open for now - nothing in this
+         -- core can display it since the M4009 diagnostic screen was removed.
+         -- If the intermittent hang seen once on M5002 ever reproduces, this
+         -- is the signal to surface (a spare osm/gp register would do).
+         timeout_seen_o      => open,
 
          avm_write_o         => sdram_avm_write_o,
          avm_read_o          => sdram_avm_read_o,

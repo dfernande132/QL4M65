@@ -70,6 +70,12 @@ entity ql_sdram_ram is
       cpu_readdata_o      : out std_logic_vector(15 downto 0);
       cpu_dtack_o         : out std_logic;   -- active HIGH, like main.vhd's cpu_dtack
 
+      -- Sticky, set if the deadlock watchdog has ever fired. Never expected
+      -- to be '1'; if it is, there is a real bug in the SDRAM path and this
+      -- module has papered over it to keep the machine alive. See the
+      -- watchdog comment in the architecture.
+      timeout_seen_o      : out std_logic;
+
       -- Avalon-MM master, same clock domain (the SDRAM controller is clocked
       -- from main_clk too - see framework.vhd's i_sdram), so there is no CDC
       -- anywhere on this path.
@@ -105,6 +111,34 @@ architecture synthesis of ql_sdram_ram is
    -- One CPU bus cycle, framed by AS (already folded into cpu_rd_i/cpu_wr_i).
    signal access_active : std_logic;
 
+   -- Deadlock watchdog.
+   --
+   -- Without this, a transaction that never completes hangs the QL forever
+   -- with no way out but a power cycle: ST_CMD waits for waitrequest and
+   -- ST_DATA waits for readdatavalid, and neither has an escape. That is too
+   -- fragile a failure mode to leave in, especially now that SDRAM has TWO
+   -- masters (main RAM and the QL-SD mount buffer, arbitrated by
+   -- i_avm_arbit_sdram in mega65.vhd) - avm_arbit routes read responses by
+   -- last_grant, so a lost or misrouted response is a real, if unproven,
+   -- possibility that simply could not happen while SDRAM had one client.
+   --
+   -- Deliberately generous: 4096 cycles at 84 MHz is ~49 us, which is orders
+   -- of magnitude beyond any legitimate access even with the other master
+   -- hogging the bus (a read is ~12 cycles, and arbitration is round-robin).
+   -- So this can only ever fire on a genuine deadlock, never on slow-but-
+   -- working traffic - it must not be allowed to paper over ordinary
+   -- contention.
+   --
+   -- On expiry it releases DTACK with whatever data is in rdata and rearms.
+   -- That trades an unrecoverable hang for one corrupted memory access, which
+   -- is the better of two bad outcomes: the machine stays usable and the
+   -- symptom is visible rather than terminal. It is NOT a fix - if this ever
+   -- fires in practice there is a real bug underneath and timeout_seen_o says
+   -- so.
+   constant C_TIMEOUT      : natural := 4096;
+   signal   timeout_cnt    : natural range 0 to C_TIMEOUT := 0;
+   signal   timeout_hit    : std_logic := '0';
+
 begin
 
    access_active <= cpu_sel_i and (cpu_rd_i or cpu_wr_i);
@@ -113,10 +147,29 @@ begin
    begin
       if rising_edge(clk_i) then
          if rst_i = '1' then
-            state     <= ST_IDLE;
-            avm_write <= '0';
-            avm_read  <= '0';
+            state       <= ST_IDLE;
+            avm_write   <= '0';
+            avm_read    <= '0';
+            timeout_cnt <= 0;
+            timeout_hit <= '0';
          else
+
+            -- Watchdog: runs only while a transaction is outstanding, i.e.
+            -- in the two states that can wait on the controller.
+            if state = ST_CMD or state = ST_DATA then
+               if timeout_cnt = C_TIMEOUT then
+                  -- Give up: drop the request, acknowledge the CPU with
+                  -- whatever rdata holds, and leave a sticky marker behind.
+                  avm_write   <= '0';
+                  avm_read    <= '0';
+                  timeout_hit <= '1';
+                  state       <= ST_ACK;
+               else
+                  timeout_cnt <= timeout_cnt + 1;
+               end if;
+            else
+               timeout_cnt <= 0;
+            end if;
 
             case state is
 
@@ -182,5 +235,6 @@ begin
 
    cpu_readdata_o   <= rdata;
    cpu_dtack_o      <= '1' when state = ST_ACK else '0';
+   timeout_seen_o   <= timeout_hit;
 
 end architecture synthesis;
