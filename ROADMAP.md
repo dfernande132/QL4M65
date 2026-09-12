@@ -81,13 +81,15 @@ V2.0 candidates
   from 254/365 to 94/365 and timing to `WNS=+0.312ns`, the best margin this
   project has ever had.
 
-  **Open regression: the MEGA65 R3 is broken on the development branch.** R3
-  has no SDRAM device, `top_mega65-r3.vhd` has no SDRAM pins at all, and
-  `framework.vhd` instantiates the controller unconditionally — so since
-  `M5002` the QL's main RAM on R3 is wired to nothing. The published `V1.01`
-  release predates all of this and is unaffected, but nothing can be released
-  from the current branch, and no development build should go to the R3
-  testers, until `M5004` fixes it. See `DECISIONES.md` for the three options.
+  **MEGA65 R3 support is frozen at V1.01 (decided 2026-09-12).** R3 has no
+  SDRAM device, so it cannot have any of this. Rather than ship a cut-down
+  half-feature there, R3 stays on `V1.01` — which is also the release that
+  tuned R3's HyperRAM sampling delay, so it is the best build this core has
+  ever had for that board. `build_core_r3.tcl` now refuses to run, because the
+  R3 build still synthesises cleanly and would otherwise produce a
+  healthy-looking `.cor` that does not work. A dedicated R3 branch offering
+  what the R3 *can* do (1 MB of RAM in BRAM, plus floppy support once that
+  exists) is an idea for later, not a commitment.
 
 * **Main RAM in SDRAM — original entry (Milestone 5, started 2026-09-11).** The MEGA65 R6 has
   64 MB of SDRAM (`IS42S16320F-6BL`) that this core does not use at all -

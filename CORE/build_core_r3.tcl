@@ -1,3 +1,33 @@
+###############################################################################
+# STOP - R3 SUPPORT IS FROZEN AT V1.01. THIS SCRIPT NO LONGER PRODUCES A
+# WORKING CORE.
+#
+# Since M5002 the QL's main RAM lives in SDRAM. The MEGA65 R3 has no SDRAM
+# device, top_mega65-r3.vhd has no SDRAM pins at all, and framework.vhd
+# instantiates the controller unconditionally - so on R3 the QL's main RAM is
+# wired to nothing. The build still SYNTHESISES cleanly (every SDRAM port
+# added to framework.vhd in M5001 has a default, and the controller sources
+# are in the file list below), which is exactly why this guard exists: the
+# failure is silent, and the resulting .cor would be shipped to R3 testers
+# looking perfectly healthy.
+#
+# The last good R3 release is V1.01 - also the release that tuned R3's
+# HyperRAM RWDS sampling delay, so it is the best build this core has ever had
+# for that board. See README.md and DECISIONES.md (2026-09-12).
+#
+# If R3 is ever revived, it needs a board-conditional main RAM (BRAM on R3,
+# SDRAM on R4/R5/R6) following C64MEGA65's own
+# "sdram_gen : if G_BOARD = "MEGA65_R3" generate" pattern - not just deleting
+# this guard.
+###############################################################################
+if {![info exists QL4M65_R3_I_KNOW_IT_IS_BROKEN]} {
+   puts "ERROR: R3 support is frozen at V1.01 and this build would be broken."
+   puts "       See the comment at the top of this file."
+   puts "       To build anyway (it will not work on real R3 hardware):"
+   puts "         set QL4M65_R3_I_KNOW_IT_IS_BROKEN 1"
+   exit 1
+}
+
 # QL4M65: R3 board variant of build_core.tcl. CORE-R3.xpr was created from
 # the same M2M scaffold as CORE-R6.xpr and already shares the board-agnostic
 # CORE files (vhdl/main.vhd, mega65.vhd, config.vhd, globals.vhd,

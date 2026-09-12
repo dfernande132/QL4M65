@@ -85,6 +85,20 @@ Feature overview
 Not yet in scope: QL-SD (`QXL.WIN`), mouse, or GoldCard/SMSQ,E support -
 see `.research/PORTING-PLAN.md` section 7 for what's planned next.
 
+### MEGA65 R3 support is frozen at V1.01
+
+Development from Milestone 5 onwards targets **R4/R5/R6 only**. Those boards
+carry a 64 MB SDRAM chip (`IS42S16320F-6BL`) that the R3 does not have, and
+the QL's main RAM now lives in it - that is what makes 4 MB of QL RAM and the
+QXL.WIN hard disk possible at all. There is no way to offer the same thing on
+R3, so rather than ship a half-feature there, **R3 stays on V1.01**, which is
+the release that tuned R3's HyperRAM sampling delay and is the best build this
+core has ever had for that board.
+
+If there is appetite for it later, a dedicated R3 branch could offer what the
+R3 *can* do - up to 1 MB of RAM in BRAM, and floppy support once that exists -
+rather than a cut-down copy of the R6 core.
+
 ### Known issues
 
 - **VGA output doesn't currently work** (including the on-screen menu) -
@@ -152,9 +166,8 @@ This repository is source only - no compiled QL4M65 `.cor` file is
 committed here. (The only `.cor` files tracked in this repo are unrelated
 QNICE-FPGA demo bitstreams bundled with the M2M framework's own
 `M2M/QNICE/dist_kit/`, not the QL4M65 core itself.)
-Ready-to-use `.cor` files for MEGA65 **R6** (tested on real hardware) and
-**R3** (compiles clean, not yet tested on real R3 hardware - see the
-release notes), together with a Minerva system ROM, are published on
+Ready-to-use `.cor` files for MEGA65 **R6** and **R3**, together with a
+Minerva system ROM, are published on
 the [GitHub Releases page](https://github.com/dfernande132/QL4M65/releases)
 - see the instructions file bundled with each release for exactly where
 each file goes on the SD card. Minerva and TK2 are GPL/GNU-licensed and can
