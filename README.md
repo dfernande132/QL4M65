@@ -6,20 +6,37 @@ A port of the **Sinclair QL** to the **MEGA65**, built on top of the
 based on the [MiSTer-devel/QL_MiSTer](https://github.com/MiSTer-devel/QL_MiSTer)
 core (68008/`fx68k` CPU, `zx8301` video ULA, `zx8302` I/O ULA).
 
-**Current status: Version 1.01.** The QL boots end-to-end on real MEGA65
-R6 hardware: RAM check, boot logo, F1-F4 screen, 10-second timeout (or
-F1/F2/F5 response), and into SuperBASIC with a working keyboard - both
-Minerva and MGE tested. Selectable RAM size (128k/640k/1024k) and CPU
-speed (native/16MHz/24MHz/Full), two independent read/write microdrives
-with automatic background SD save, and manual or automatic system ROM
-loading are all in place and confirmed working on real hardware, including
-real QL software (games, a custom Lisp interpreter) loaded from microdrive,
-tested up to Full CPU speed. **V1.01** tunes R3's HyperRAM RWDS sampling
-delay to substantially improve microdrive read reliability on the R3
-units that were affected - see "Known issues" below for what this does
-and doesn't guarantee. See `.research/PORTING-PLAN.md` and `DECISIONES.md`
-(in the parent directory) for the full, detailed log of the whole
-investigation and every decision made along the way.
+**Current status: Version 1.5 — MEGA65 R4/R5/R6 only.** The QL boots
+end-to-end on real hardware: RAM check, boot logo, F1-F4 screen, and into
+SuperBASIC with a working keyboard. Selectable RAM size and CPU speed, two
+independent read/write microdrives with automatic background SD save, a
+**QXL.WIN hard disk**, and manual or automatic system ROM loading are all
+confirmed working on real hardware, including real QL software (games, a
+custom Lisp interpreter) loaded from microdrive and from hard disk, tested up
+to Full CPU speed.
+
+### What's new in V1.5
+
+- **QXL.WIN hard disk support (QL-SD).** Mount a `.win` image from the Options
+  menu and the QL sees it as `win1_` — reading *and* writing, confirmed on real
+  hardware. Needs the QL-SD driver in the Back ROM slot; see [`roms/`](roms/).
+- **Up to 4 MB of RAM.** The QL's main memory moved from the FPGA's own block
+  RAM into the MEGA65's 64 MB SDRAM chip, which is what makes the 4096k tier —
+  the largest the original MiSTer core offers — possible at all. RAM options
+  are now 128k / 640k / 1024k / 4096k.
+- **Much more headroom inside the FPGA.** Moving main RAM out freed about 160
+  block RAM tiles: the design went from 70% of the chip's block RAM to 26%, and
+  its worst-case timing margin roughly quintupled. That is not a user-visible
+  feature in itself, but it is what future features will be built in.
+
+**V1.5 requires a MEGA65 R4, R5 or R6.** The R3 has no SDRAM chip and cannot
+run this version — see "MEGA65 R3 support is frozen at V1.01" below. R3 owners
+should stay on **V1.01**, which remains available on the releases page and is
+the build with the HyperRAM timing fix made specifically for that board.
+
+See `.research/PORTING-PLAN.md` and `DECISIONES.md` (in the parent directory)
+for the full, detailed log of the whole investigation and every decision made
+along the way.
 
 Screenshots
 -----------
@@ -85,6 +102,25 @@ Feature overview
 Not yet in scope: QL-SD (`QXL.WIN`), mouse, or GoldCard/SMSQ,E support -
 see `.research/PORTING-PLAN.md` section 7 for what's planned next.
 
+### Hard disk (QXL.WIN)
+
+Mount a `.win` image with **Mount HD image** in the Options menu and the QL
+sees it as `win1_`. You need the **QL-SD driver 1.09** in the Back ROM slot —
+it is in [`roms/`](roms/), along with where it came from and who wrote it.
+Toolkit II and the QL-SD driver both occupy the Back ROM slot, so you can have
+one or the other, not both.
+
+**Keep images small — 4 to 8 MB is a good size.** Mounting copies the entire
+image into memory at roughly **6-7 seconds per megabyte**, so an 8 MB image
+takes about a minute every time you mount it, and a 32 MB one over three
+minutes. The hard ceiling is 32 MB (enforced by the core, not just documented),
+but there is nothing pleasant about waiting that long. A future version will
+stream sectors straight from the SD card and remove both the wait and the
+limit.
+
+Writes go to the in-memory copy and are flushed back to the SD card in the
+background, the same way the microdrives work.
+
 ### MEGA65 R3 support is frozen at V1.01
 
 Development from Milestone 5 onwards targets **R4/R5/R6 only**. Those boards
@@ -115,25 +151,38 @@ rather than a cut-down copy of the R6 core.
   this down further. Full investigation in `DECISIONES.md` (parent
   directory).
 
-### Why RAM is in BRAM, not HyperRAM
+### Where the QL's RAM lives, and why it moved twice
 
-An earlier build put the main, CPU-addressed RAM on the MEGA65's HyperRAM
-chip instead of FPGA BRAM, reasoning that HyperRAM would be needed anyway
-for the largest RAM size. It compiled clean and passed timing, but hung on
-real hardware during microdrive `LOAD`/`SAVE`. Investigating how two other
-M2M cores on this same MEGA65 hardware handle their own main RAM (AExp, an
-unreleased Amiga port, keeps its Chip+Slow RAM entirely in BRAM;
+It has been in three places, and the reasons are worth recording.
+
+An early build put the main, CPU-addressed RAM on the MEGA65's **HyperRAM**
+chip. It compiled clean and passed timing, but hung on real hardware during
+microdrive `LOAD`/`SAVE`. Checking how other M2M cores handle their own main
+RAM (AExp, an unreleased Amiga port, keeps its Chip+Slow RAM entirely in BRAM;
 [C64MEGA65](https://github.com/MJoergen/C64MEGA65)'s HyperRAM-backed REU is
-only ever accessed by its own DMA controller, never by the 6502 directly) -
-and the M2M framework's own
-documentation - confirmed that a CPU's directly-addressed main memory
-doesn't belong on HyperRAM in this framework: HyperRAM works well for
-DMA-style, latency-tolerant traffic (like the two microdrives above), not
-for a bus a CPU blocks on every cycle. RAM went back to BRAM, sized for
-the largest selectable tier (1024 KB - measured against this FPGA's real
-BRAM budget, not guessed; 2048 KB/4096 KB genuinely don't fit). Full
-diagnosis, including the exact real-hardware symptom that gave it away, in
-`DECISIONES.md`'s "Milestone 3" sections.
+only ever touched by its own DMA controller, never by the 6502 directly) — and
+the M2M framework's own documentation — all agreed: a CPU's directly-addressed
+main memory does not belong on HyperRAM here. HyperRAM suits DMA-style,
+latency-tolerant traffic, like the two microdrives, not a bus the CPU blocks on
+every cycle.
+
+So RAM went into the FPGA's own **block RAM**, where it stayed through V1.01.
+That worked well but capped the QL at 1024k, and block RAM is the scarcest
+thing on this chip — adding the hard disk later pushed the design to 96% of it
+and broke timing outright.
+
+V1.5 moves it to the MEGA65's **SDRAM**, the 64 MB chip on R4/R5/R6 boards that
+no core had ever used. This is not a repeat of the HyperRAM mistake: the
+original MiSTer QL core keeps all of the QL's RAM in SDRAM too, with a wait
+handshake stalling the 68008 until data arrives, and this port had simply
+dropped that handshake when it had no SDRAM controller to talk to. Restoring it
+— using Michael Jørgensen's SDRAM controller, run in the CPU's own clock domain
+so there is no clock crossing on the path — gave the 4096k tier, freed about
+160 block RAM tiles, and produced the best timing margin the project has ever
+measured. It is also why V1.5 cannot run on an R3, which has no SDRAM chip.
+
+Full diagnosis of all of it, including the real-hardware symptoms that gave
+each one away, in `DECISIONES.md`'s "Milestone 3" and "Milestone 5" sections.
 
 ### Microdrive image format: it must be a genuinely valid QLAY `.mdv`
 

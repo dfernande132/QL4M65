@@ -164,14 +164,31 @@ constant C_HMAP_QLSD_SIZE_4KW   : natural := 128;                -- 1MB exact, b
 -- 64 MB device with only two clients, so the map is deliberately coarse and
 -- generous - there is no reason to pack anything tightly here.
 --
---   word 0x0000000 .. 0x03FFFFF   (8 MB)  QL-SD mount buffer (M5001)
---   word 0x0400000 .. 0x05FFFFF   (4 MB)  QL main RAM (M5002)
+--   word 0x0000000 .. 0x0FFFFFF  (32 MB)  QL-SD mount buffer (M5001)
+--   word 0x1000000 .. 0x11FFFFF   (4 MB)  QL main RAM (M5002)
 --
 -- Main RAM is mapped WITHOUT subtracting the QL's own $020000 base, so the
 -- first 128 KB of its window is simply never addressed - see
 -- ql_sdram_ram.vhd's header for why that trade is worth it here and was not
 -- in BRAM. 4 MB covers the original core's largest tier (QL.sv's cpu_ram4k).
-constant C_SDRAM_QLRAM_BASE_WORD : natural := 16#400000#;
+--
+-- M5004 (2026-09-12): main RAM moved from word 0x400000 (byte 8 MB) up to
+-- word 0x1000000 (byte 32 MB). The mount buffer grows upward from 0 and
+-- shell.asm's LOAD_IMAGE copies the WHOLE image into it, so with main RAM at
+-- 8 MB any .win image bigger than that quietly landed on top of the QL's own
+-- RAM. Nothing bounded it: the C_HMAP_QLSD* constants that limited the
+-- buffer to 1 MB became dead when it moved out of HyperRAM in M5001, and
+-- mega65.vhd's address arithmetic is a plain resize of the QNICE device
+-- address. 32 MB of headroom, plus the hard mask in mega65.vhd, makes that
+-- unreachable rather than merely unlikely.
+constant C_SDRAM_QLRAM_BASE_WORD : natural := 16#1000000#;
+
+-- Highest word the QL-SD mount buffer may address, as a bit width: the buffer
+-- is confined to words 0 .. 2**24-1 (32 MB), which is exactly the space below
+-- C_SDRAM_QLRAM_BASE_WORD. mega65.vhd masks to this, so an oversized image
+-- wraps inside the buffer (corrupting only itself, and visibly) instead of
+-- silently eating the QL's main RAM.
+constant C_SDRAM_QLSD_ADDR_BITS  : natural := 24;
 
 -- QL4M65 Milestone 3, Fase 1 (2026-08-24): RAM-size Options menu radio
 -- group (config.vhd's OPTM_G_RAMSIZE, lines 8-9 of OPTM_ITEMS) - flat

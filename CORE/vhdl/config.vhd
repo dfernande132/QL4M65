@@ -129,7 +129,7 @@ constant SCR_WELCOME : string :=
 
    "Sinclair QL for MEGA65 (QL4M65)\n" &
    "Developed by dfsantos (2026)\n\n\n" &
-   "Status: Milestone 4 - QL-SD (WIP)\n\n" &
+   "Status: Version 1.5 (R4/R5/R6)\n\n" &
 
    "Based on MiSTer-devel/QL_MiSTer\n" &
    "Powered by MiSTer2MEGA65,\n" &
@@ -140,10 +140,11 @@ constant SCR_WELCOME : string :=
    " - CPU speed: 7.5/16/24/42 MHz\n" &
    " - RAM: 128k / 640k / 1M / 4M\n" &
    " - Keyboard\n" &
-   " - 2 microdrives (full operation)\n\n" &
+   " - 2 microdrives (full operation)\n" &
+   " - QXL.WIN hard disk (QL-SD)\n\n" &
 
-   "In development:\n" &
-   " - QL-SD (QXL.WIN hard disk)\n\n\n" &
+   "SDRAM controller by MJoergen.\n" &
+   "QL-SD driver by WL + MK.\n\n\n" &
 
    "    Press Space to continue.\n\n\n";
 
@@ -267,7 +268,7 @@ constant SEL_CORENAME      : std_logic_vector(15 downto 0) := x"0200";
 -- help system to display the name and version of your core to the end user
 -- QL4M65 Milestone 4 (M4002): kept in sync with SCR_WELCOME's own status
 -- line above.
-constant CORENAME          : string := "QL4M65 M4-WIP";
+constant CORENAME          : string := "QL4M65 V1.5";
 
 --------------------------------------------------------------------------------------------------------------------
 -- "Help" menu / Options menu  (Selectors 0x0300 .. 0x0312): DO NOT TOUCH

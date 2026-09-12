@@ -618,7 +618,15 @@ begin
    -- is completely empty and 64 MB large, so it simply starts at 0.
    ---------------------------------------------------------------------------------------------
 
-   qlsdbuf_hr_addr <= std_logic_vector(resize(unsigned(qnice_dev_addr_i(27 downto 1)), 32));
+   -- M5004: masked to C_SDRAM_QLSD_ADDR_BITS, so the buffer physically cannot
+   -- address anything at or above C_SDRAM_QLRAM_BASE_WORD. Before this it was
+   -- a plain resize of the QNICE device address, i.e. unbounded - and since
+   -- shell.asm's LOAD_IMAGE copies the whole image in, a .win larger than the
+   -- gap to main RAM overwrote the QL's own memory with no warning at all.
+   -- An oversized image now wraps within the buffer instead: still broken,
+   -- but broken visibly and only to itself.
+   qlsdbuf_hr_addr <= std_logic_vector(resize(
+                         unsigned(qnice_dev_addr_i(C_SDRAM_QLSD_ADDR_BITS downto 1)), 32));
 
    qlsdbuf_hr_byteenable <= "01" when qnice_dev_addr_i(0) = '0' else "10";
    qlsdbuf_hr_writedata  <= qnice_dev_data_i(7 downto 0) & qnice_dev_data_i(7 downto 0);
