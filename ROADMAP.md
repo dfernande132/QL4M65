@@ -71,7 +71,25 @@ V2.0 candidates
   meeting timing. 640k is the ceiling now, and it is allocated exactly
   (two banks, 2^18 + 2^16 words) rather than rounded up to a power of two.
 
-* **Main RAM in SDRAM (Milestone 5, started 2026-09-11).** The MEGA65 R6 has
+* **Main RAM in SDRAM (Milestone 5). DONE on R6, confirmed on real hardware
+  2026-09-12 — 4 MB of RAM at full CPU speed, moving files between microdrive
+  and QXL.WIN.** `M5001` brought in MJoergen's SDRAM controller and proved it
+  by serving the QL-SD mount buffer from it; `M5002` moved main RAM across,
+  restoring the `sdram_dtack` wait-state handshake the original MiSTer core
+  always had and this port had simplified away; `M5003` brought back the 1024k
+  tier deleted in `M4010` and added the original core's 4096k tier. BRAM went
+  from 254/365 to 94/365 and timing to `WNS=+0.312ns`, the best margin this
+  project has ever had.
+
+  **Open regression: the MEGA65 R3 is broken on the development branch.** R3
+  has no SDRAM device, `top_mega65-r3.vhd` has no SDRAM pins at all, and
+  `framework.vhd` instantiates the controller unconditionally — so since
+  `M5002` the QL's main RAM on R3 is wired to nothing. The published `V1.01`
+  release predates all of this and is unaffected, but nothing can be released
+  from the current branch, and no development build should go to the R3
+  testers, until `M5004` fixes it. See `DECISIONES.md` for the three options.
+
+* **Main RAM in SDRAM — original entry (Milestone 5, started 2026-09-11).** The MEGA65 R6 has
   64 MB of SDRAM (`IS42S16320F-6BL`) that this core does not use at all -
   every pin is tied off. Moving main RAM there restores the original
   MiSTer QL architecture, which keeps all of the QL's RAM in SDRAM with an
