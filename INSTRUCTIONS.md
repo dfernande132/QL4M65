@@ -1,21 +1,27 @@
 # QL4M65 (CoreQL) - Version 1.5 - Installation instructions
 
-## Read this first: V1.5 needs a MEGA65 R4, R5 or R6
+## Read this first: V1.5 is for the MEGA65 R6
 
-V1.5 keeps the QL's main memory in the MEGA65's **SDRAM** chip. The **MEGA65
-R3 does not have that chip**, so this version cannot run on it at all.
+V1.5 keeps the QL's main memory in the MEGA65's **SDRAM** chip, and this
+release ships an **R6** core.
 
 **R3 owners: stay on [V1.01](https://github.com/dfernande132/QL4M65/releases/tag/V1.01).**
-That release is still available, still supported, and includes a HyperRAM
-timing fix made specifically for the R3 - it is the best build this core has
-ever had for that board. You are not missing a bug fix by staying there; you
-are missing features your hardware cannot run.
+The R3 has no SDRAM chip at all, so this version cannot run on it. V1.01 is
+still available, still supported, and includes a HyperRAM timing fix made
+specifically for the R3 - it is the best build this core has ever had for that
+board. You are not missing a bug fix by staying there; you are missing features
+your hardware cannot run.
+
+**R4 and R5 owners**: your board has the same SDRAM chip as the R6, but each
+revision needs its own core build and nobody has yet tested one. Only an R6
+`.cor` is published here. If you have an R4 or R5 and would like to try, open
+an issue.
 
 ## What's in this release
 
 | File | What it is |
 |---|---|
-| `QL4M65-CoreQL-V1.5_r6.cor` | The compiled core for MEGA65 **R4/R5/R6** |
+| `QL4M65-CoreQL-V1.5_r6.cor` | The compiled core for MEGA65 **R6** |
 | `main.rom` | Minerva 1.98a1 system ROM |
 | `back.rom` | Toolkit II (TK2) ROM |
 | `qlsd_driver_back.rom` | QL-SD driver 1.09 - needed for QXL.WIN hard disks |

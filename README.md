@@ -6,7 +6,7 @@ A port of the **Sinclair QL** to the **MEGA65**, built on top of the
 based on the [MiSTer-devel/QL_MiSTer](https://github.com/MiSTer-devel/QL_MiSTer)
 core (68008/`fx68k` CPU, `zx8301` video ULA, `zx8302` I/O ULA).
 
-**Current status: Version 1.5 — MEGA65 R4/R5/R6 only.** The QL boots
+**Current status: Version 1.5 — MEGA65 R6 only.** The QL boots
 end-to-end on real hardware: RAM check, boot logo, F1-F4 screen, and into
 SuperBASIC with a working keyboard. Selectable RAM size and CPU speed, two
 independent read/write microdrives with automatic background SD save, a
@@ -29,7 +29,7 @@ to Full CPU speed.
   its worst-case timing margin roughly quintupled. That is not a user-visible
   feature in itself, but it is what future features will be built in.
 
-**V1.5 requires a MEGA65 R4, R5 or R6.** The R3 has no SDRAM chip and cannot
+**V1.5 requires a MEGA65 R6.** The R3 has no SDRAM chip and cannot
 run this version — see "MEGA65 R3 support is frozen at V1.01" below. R3 owners
 should stay on **V1.01**, which remains available on the releases page and is
 the build with the HyperRAM timing fix made specifically for that board.
@@ -67,9 +67,10 @@ Feature overview
   core; the CPU, `zx8302` and both microdrives all scale together, so
   turbo mode speeds up microdrive transfers too, just like it did on real
   1980s turbo-QL expansion boards.
-- **RAM**: 128 KB, 640 KB or 1024 KB, selectable from the Shell's Options
-  menu - all implemented in FPGA BRAM (not HyperRAM; see the note below on
-  why). Changing either the RAM size or the CPU speed triggers a simple,
+- **RAM**: 128 KB, 640 KB, 1024 KB or **4096 KB**, selectable from the
+  Shell's Options menu - all of it in the MEGA65's SDRAM chip since V1.5
+  (see "Where the QL's RAM lives" below for why it has moved twice).
+  Changing either the RAM size or the CPU speed triggers a simple,
   automatic core reset so the new setting takes effect immediately, no
   hard reset needed.
 - **System ROM**: **Main ROM** (48 KB - Minerva, MGE, JS...) and **Back
@@ -99,8 +100,10 @@ Feature overview
   `.research/keyboard-mapping-design.md`.
 - PAL video, over **HDMI** - see the VGA note below.
 
-Not yet in scope: QL-SD (`QXL.WIN`), mouse, or GoldCard/SMSQ,E support -
-see `.research/PORTING-PLAN.md` section 7 for what's planned next.
+- **QXL.WIN hard disk** (`win1_`) via QL-SD - new in V1.5, see below.
+
+Not yet in scope: mouse, or GoldCard/SMSQ/E support - see
+`.research/PORTING-PLAN.md` section 7 for what's planned next.
 
 ### Hard disk (QXL.WIN)
 
@@ -123,13 +126,18 @@ background, the same way the microdrives work.
 
 ### MEGA65 R3 support is frozen at V1.01
 
-Development from Milestone 5 onwards targets **R4/R5/R6 only**. Those boards
-carry a 64 MB SDRAM chip (`IS42S16320F-6BL`) that the R3 does not have, and
-the QL's main RAM now lives in it - that is what makes 4 MB of QL RAM and the
-QXL.WIN hard disk possible at all. There is no way to offer the same thing on
-R3, so rather than ship a half-feature there, **R3 stays on V1.01**, which is
-the release that tuned R3's HyperRAM sampling delay and is the best build this
-core has ever had for that board.
+Development from Milestone 5 onwards needs a board with SDRAM. The QL's main
+RAM now lives in the 64 MB `IS42S16320F-6BL` chip fitted to the R4, R5 and R6
+- that is what makes 4 MB of QL RAM and the QXL.WIN hard disk possible at all,
+and the **R3 does not have it**. There is no way to offer the same thing there,
+so rather than ship a half-feature, **R3 stays on V1.01**, which is the release
+that tuned R3's HyperRAM sampling delay and is the best build this core has
+ever had for that board.
+
+**On R4 and R5**: they have the same SDRAM chip, and M2M supports them, but
+this project only builds an **R6** core - each board revision needs its own
+Vivado project and its own `.cor` target, and nobody has yet asked for R4/R5 or
+offered to test one. If you have one and want to try, open an issue.
 
 If there is appetite for it later, a dedicated R3 branch could offer what the
 R3 *can* do - up to 1 MB of RAM in BRAM, and floppy support once that exists -
