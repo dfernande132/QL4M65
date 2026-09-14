@@ -113,6 +113,13 @@ it is in [`roms/`](roms/), along with where it came from and who wrote it.
 Toolkit II and the QL-SD driver both occupy the Back ROM slot, so you can have
 one or the other, not both.
 
+**Where to get a `.win` image**: Marcel Kilgus's QL-SD page,
+<https://www.kilgus.net/ql/ql-sd/>, has `qxl_empty.zip` — empty, ready-to-use
+QXL.WIN files in several sizes — which is the easiest way to start. The same
+page has `qlsd_win_demo.zip`, an example image with utilities, a boot file and
+some ready-to-run games, plus the QL-SD documentation and any newer driver
+version.
+
 **Keep images small — 4 to 8 MB is a good size.** Mounting copies the entire
 image into memory at roughly **6-7 seconds per megabyte**, so an 8 MB image
 takes about a minute every time you mount it, and a 32 MB one over three

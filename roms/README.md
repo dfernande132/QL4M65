@@ -25,9 +25,14 @@ the hard disk. You cannot have both at once.
 from `Minerva_1.98a1_qlsd109.rom` in
 [`MiSTer_QL_OS_qlsd109.zip`](https://www.kilgus.net/soft/MiSTer_QL_OS_qlsd109.zip),
 published by Marcel Kilgus at **<https://www.kilgus.net/ql/ql-sd/>** — which is
-also where you should go for the original file, the QL-SD hardware
-documentation, and any newer version. `main.rom` here is the Minerva half of
-that same combined image.
+also where you should go for the original file and the QL-SD hardware
+documentation. `main.rom` here is the Minerva half of that same combined image.
+
+That page is worth visiting for two more things: **`qxl_empty.zip`**, empty
+ready-to-use QXL.WIN images in several sizes (the easiest way to get a hard
+disk started), and a **newer QL-SD driver, v1.10**. This project ships 1.09
+because that is the version tested on real hardware here; 1.10 has not been
+tried yet.
 
 Marcel Kilgus is also the maintainer of
 [QL_MiSTer](https://github.com/MiSTer-devel/QL_MiSTer), the core QL4M65 is
